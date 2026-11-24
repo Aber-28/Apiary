@@ -1300,6 +1300,13 @@ let orgIds;
   const r3 = run({}, ['Lab server']); assert.equal(r3.status, 2); assert.match(r3.stderr, /not available to you/);
   const ask = spawnSync(process.execPath, [helper, "admin@lab's password: "], { env: { ...process.env, APIARY_ASKPASS_VAR: 'APIARY_SECRET_LAB_SERVER', APIARY_SECRET_LAB_SERVER: 'hunter2-pass' }, encoding: 'utf8' }); assert.equal(ask.stdout.trim(), 'hunter2-pass', 'ssh asks this same file for the password');
   const { childEnv } = await import('../src/providers.js'); assert.ok(childEnv().PATH.split(path.delimiter)[0].endsWith('bin'), 'agents find apiary-ssh');
+  { // safe mode pre-approves only the apiary-ssh helper; full access is unchanged
+    const { claudeCliArgs } = await import('../src/providers.js');
+    const safe = claudeCliArgs({ access: 'safe', system: 'x', dirs: ['/tmp/a'] });
+    assert.deepEqual(safe.slice(safe.indexOf('--permission-mode'), safe.indexOf('--permission-mode') + 4), ['--permission-mode', 'acceptEdits', '--allowedTools', 'Bash(apiary-ssh:*)']);
+    assert.ok(!claudeCliArgs({ access: 'full', system: 'x' }).includes('--allowedTools'));
+    assert.equal(claudeCliArgs({ access: 'full', system: 'x' })[claudeCliArgs({ access: 'full', system: 'x' }).indexOf('--permission-mode') + 1], 'bypassPermissions');
+  }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
 }

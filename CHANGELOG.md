@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.25.1
+
+- **Fix:** an agent in safe mode can now run the `apiary-ssh` helper after you approve its vault login. Before, the shell command was refused because nobody could answer its permission prompt, so the agent reported "needs approval". Only that one helper is pre-approved; other commands still need approval, and full-access agents are unchanged.
+
 ## 0.25.0
 
 - **Connect GitHub without a terminal.** Connections → GitHub now has a **Sign in with GitHub** button: Apiary shows a one-time code, you type it on github.com, and the page updates by itself. Apiary never sees a password.

@@ -4,7 +4,7 @@
 - **Tasks** board: To do, Back burner, In progress, Blocked, Done. You add to-do items and back-burner ideas; agents add and move tasks as they work, and team jobs and tickets show up automatically
 - **Usage**: tokens per agent per day as a chart, a table per agent, optional limits per AI, and a usage bar next to each connection in the sidebar. Apiary also notices when an AI says its limit is reached
 - **Model advice**: hires and profiles suggest the model that fits the role and how hard the work is (most capable, balanced, or fast and cheap); you can pick another when approving
-- **Repositories**: point agents at a repository (GitHub or a folder) to read information from; choose who may read it; read-only
+- **Repositories**: point agents at a repository (paste a URL, owner/name or a folder) to read information from; choose who may read it; read-only
 - **Support tickets**: describe a problem; an agent works on it and answers, asks you when it needs to, and you close it when it is fixed
 - **Plain, simple English** by default for every agent (can be turned off under Appearance)
 - Only one sidebar submenu stays open at a time; a Documentation link opens the docs in a new tab

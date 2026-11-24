@@ -19,10 +19,15 @@
     "src",
     "public",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/apiary.git"
-  }
+    "url": "git+https://github.com/Aber-28/Apiary.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Aber-28/Apiary/issues"
+  },
+  "homepage": "https://github.com/Aber-28/Apiary#readme"
 }

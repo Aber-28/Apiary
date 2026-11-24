@@ -7,7 +7,7 @@ A simple, chat-first web app for Linux that runs teams of **Claude Code** and **
 Needs Node.js 20+ and git.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/apiary/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash
 apiary
 ```
 
@@ -16,7 +16,7 @@ Open <http://127.0.0.1:7777>, go to **Connections**, and connect Claude, Codex a
 Prefer to do it by hand?
 
 ```bash
-git clone https://github.com/OWNER/apiary.git ~/.local/share/apiary
+git clone https://github.com/Aber-28/Apiary.git ~/.local/share/apiary
 ln -sf ~/.local/share/apiary/bin/apiary.js ~/.local/bin/apiary
 ```
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Apiary installer: clones the repository and links the `apiary` command.
 set -euo pipefail
-REPO="${APIARY_REPO:-https://github.com/OWNER/apiary.git}"
+REPO="${APIARY_REPO:-https://github.com/Aber-28/Apiary.git}"
 DIR="${APIARY_DIR:-$HOME/.local/share/apiary}"
 BIN="${APIARY_BIN:-$HOME/.local/bin}"
 

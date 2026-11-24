@@ -171,7 +171,7 @@ await until(() => engine.agents[lead2.id].status === 'idle' && Object.values(eng
   const [res, wri] = ['Researcher', 'Writer'].map((n) => Object.values(engine.agents).find((a) => a.parentId === l.id && a.name === n));
   assert.ok(engine.messages(wri.id).some((m) => m.from?.name === 'Researcher' && /Need your input/.test(m.text)), 'Writer received the message with its sender');
   const rr = engine.messages(res.id).filter((m) => m.role === 'agent').map((m) => m.text).join('\n');
-  assert.match(rr, /Teammate replied\. ### Writer \| ok/, 'Researcher got Writer\'s reply: ' + rr);
+  assert.match(rr, /### Writer \(T-\d+, closed\) \| ok/, 'Researcher got Writer\'s reply: ' + rr);
   // deadlock: child asks its waiting parent with wait=true -> refused, with advice
   const l2 = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, goal: 'collab-lead please' })).body;
   await until(() => engine.agents[l2.id].status === 'idle' && engine.messages(l2.id).some((m) => m.role === 'report'), 8000);
@@ -539,6 +539,29 @@ let orgIds;
   await until(() => engine.messages(ceo.id).some((m) => m.role === 'report') && engine.agents[ceo.id].status === 'idle', 10000);
   assert.ok(engine.messages(orgIds.se.id).some((m) => /Pre-check requested by Rex Router/.test(m.text || '')), 'the security engineer was consulted');
   assert.ok(engine.messages(orgIds.ne.id).some((m) => /^Task from /.test(m.text || '')));
+  {
+    // every piece of work has a unique task code; a handover opens a subtask that the other agent closes
+    const all = engine.tasks.list;
+    assert.ok(all.every((t) => /^T-\d{4,}$/.test(t.code)), 'every task has a code'); assert.equal(new Set(all.map((t) => t.code)).size, all.length, 'codes are unique'); assert.equal(new Set(all.map((t) => t.id)).size, all.length);
+    const top = all.find((t) => t.assignee?.id === ceo.id && /check the firewall/.test(t.title)); assert.ok(top, 'the CEO\'s request got a task'); assert.equal(top.source, 'chat');
+    const sub = all.find((t) => t.parent === top.id && t.assignee?.name === 'Rex Router'); assert.ok(sub, 'handing it over opened a subtask for the right agent');
+    await until(() => engine.tasks.get(top.id).status === 'done', 5000);
+    const subNow = engine.tasks.get(sub.id), topNow = engine.tasks.get(top.id);
+    assert.equal(subNow.status, 'done'); assert.equal(subNow.closure, `Closed by Rex Router. Refer to ${top.code}.`, 'closed by the right agent, referring to the main task');
+    assert.match(topNow.closure, new RegExp(`^Closed by ${ceo.name}\\. Refer to ${sub.code}\\.$`), 'the first agent closes its own task after the subtask');
+    assert.ok(topNow.log.some((l) => l.text.includes(`Opened ${sub.code}`)) && topNow.log.some((l) => l.text.includes(`${sub.code} was closed by Rex Router`)));
+    assert.ok(!all.some((t) => t.parent === top.id && /Pre-check/.test(t.title)), 'quick pre-check opinions are not tasks');
+    const view = (await call('/api/tasks')).body.tasks; const vt = view.find((t) => t.id === top.id), vs = view.find((t) => t.id === sub.id);
+    assert.equal(vs.parentCode, top.code); assert.deepEqual(vt.subtasks.map((k) => k.code), [sub.code]); assert.deepEqual(vt.waitingFor, []);
+    assert.ok(engine.messages(ceo.id).some((m) => m.role === 'report' && m.text.includes(`(${sub.code}, closed)`)), 'the report back carries the subtask code');
+    assert.ok((await call('/api/audit?kind=task')).body.items.some((e) => /closed T-/.test(e.action)));
+    assert.equal((await call('/api/search?q=' + sub.code)).body.groups.find((g) => g.type === 'task').items[0].title.startsWith(sub.code), true);
+    // codes are never reused, even after a delete; old tasks without codes are numbered, oldest first
+    const mx = engine.tasks.store.data.taskSeq; const tmpT = engine.tasks.add({ title: 'temp' }); await call('/api/tasks/' + tmpT.id, 'DELETE'); assert.equal(engine.tasks.add({ title: 'next' }).num, mx + 2);
+    const old = engine.tasks.add({ title: 'legacy' }); delete old.code; delete old.num; engine.tasks.backfill(); assert.match(old.code, /^T-\d+$/); assert.equal(new Set(engine.tasks.list.map((t) => t.code)).size, engine.tasks.list.length);
+    // a person closing a task is named too
+    const mine = (await call('/api/tasks', 'POST', { title: 'By hand' })).body; assert.equal((await call('/api/tasks/' + mine.id, 'PUT', { status: 'done' })).body.closure, 'Closed by You.');
+  }
   // a new project can use the organisation as its team: the same people
   const pr = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, team: 'org', name: 'From org' })).body;
   assert.deepEqual(engine._roster(engine.agents[pr.id]).map((m) => m.title).sort(), ['Network Engineer', 'Security Engineer']);

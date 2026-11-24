@@ -91,6 +91,8 @@ export class Engine extends EventEmitter {
     this.providerLimits = new Limits();
     this.toolInstaller = new ToolInstaller({ onDone: () => { this.connections._cache.clear(); this.emit('event', { type: 'tools' }); } });
     this.tasks = new Tasks(store);
+    this.tasks.backfill();
+    this.curTask = new Map();   // agent id -> the task it is working on right now
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
     this.userLeases = new Map(); // agentId -> Map(secret name -> username), same lifetime as leases
@@ -748,13 +750,13 @@ export class Engine extends EventEmitter {
     return agent;
   }
 
-  send(agentId, text, from = null) {
+  send(agentId, text, from = null, opts = {}) {
     const agent = this.agents[agentId];
     if (!agent) throw httpErr(404, 'No such agent');
     const rt = this.rootOf(agent);
     if (rt.kind !== 'general' && this.stageOf(rt) === 'closed') throw httpErr(409, 'This project is closed. Reopen it (Projects page) to continue. Nothing has been deleted.');
     const prev = this.chains.get(agentId) || Promise.resolve();
-    const run = prev.catch(() => {}).then(() => this._converse(agent, text, from));
+    const run = prev.catch(() => {}).then(() => this._converse(agent, text, from, opts));
     this.chains.set(agentId, run);
     return run;
   }
@@ -921,6 +923,8 @@ export class Engine extends EventEmitter {
       const known = this.infra.summary();
       s += '\nINFRASTRUCTURE MAP: the person keeps a map of their devices, servers, VMs, websites and how they connect (Infrastructure page). When they mention a device, server, VM, website or service, or you learn one while working, propose it and Apiary shows it to them as an "Is this right?" card; nothing is added until they confirm. Guess sensible details from your own knowledge (type, what it runs on, what it connects to), say why in "why", and when something important is unknown ask in "question" (for example where it is stored, its address, or which secret in the vault logs in to it). Only ask when it matters. Never put passwords in the map: name the vault secret in "notes" instead.\n```apiary-infra\n{"items":[{"name":"pve1","type":"proxmox|server|vm|container|pi|nas|router|switch|website|service|database|cloud|device|other","address":"10.0.0.5","hostedOn":"Existing item name","connectsTo":["Other item name"],"notes":"Optional","why":"Why you think so","question":"Optional question for the person"}]}\n```\n' + (known ? 'Already on the map:\n' + known + '\n' : '');
     }
+    { const ct = this.tasks.all[this.curTask.get(agent.id)];
+      if (ct) s += `\nCURRENT TASK: ${ct.code} "${ct.title}". Every piece of work has a task code. If you hand work to a teammate (apiary-assign, apiary-send or a sub-agent), Apiary opens a linked subtask for it, waits for the teammate, and the teammate closes it ("Closed by <name>. Refer to ${ct.code}"). You then get the result with its code and carry on, or close your own task by finishing. Mention task codes when you report.\n`; }
     if (agent.kind === 'general' || agent.org || !agent.parentId || agent.member) {
       const rb = this.runbooks.promptText();
       s += '\nRUNBOOKS: when you solve a problem that could come back (a fix, a setup, a recovery), save the steps so they can be followed next time. Add a block ```apiary-runbook\n{"title":"Short name","problem":"When this applies","steps":["Step one","Step two"],"tags":["server"]}\n```. Never put passwords, keys or tokens in a runbook; say which secret to use by name. It is saved as a draft that the human must read and approve before it is trusted.\n' +
@@ -1208,7 +1212,7 @@ export class Engine extends EventEmitter {
     this.send(who.id, prompt).catch(() => {});
     return { started: true, agent: who.name };
   }
-  tasksView() { return this.tasks.list.map((t) => ({ ...t, projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
+  tasksView() { return this.tasks.list.map((t) => ({ ...this.tasks.view(t), projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
 
   // A ticket goes to the chosen agent, or to the CEO (who can pass it to the right specialist).
   ticketHandler(t) {
@@ -1248,7 +1252,37 @@ export class Engine extends EventEmitter {
     } catch (e) { this._log(agent, `! commit failed: ${e.message}`); }
   }
 
-  async _converse(agent, userText, from) {
+  // Every piece of work gets a task with its own code. Work handed over by another agent becomes a subtask of
+  // the sender's task; when the receiver is done it closes the subtask ("Closed by X. Refer to T-0004") and the
+  // sender carries on with the result.
+  _openWork(agent, text, from, opts) {
+    if (opts.taskId && this.tasks.all[opts.taskId]) {
+      const t = this.tasks.all[opts.taskId]; this.curTask.set(agent.id, t.id); opts.onTask?.(t); return { task: t, own: false };
+    }
+    if (opts.noTask || (from && from.id === 'meeting')) return null;
+    const sender = from && this.agents[from.id] ? this.agents[from.id] : null, root = this.rootOf(agent);
+    const parent = opts.parent || (sender ? this.curTask.get(sender.id) : null) || null;
+    const text0 = this._redact(String(text)), line = text0.replace(/^Task from [^:\n]+:\s*/i, '').split('\n').map((x) => x.trim()).find(Boolean) || 'Request';
+    const task = this.tasks.add({ title: clipText(line, 100), notes: text0.slice(0, 4000), status: 'inprogress', assignee: { id: agent.id, name: agent.name }, project: root.kind === 'general' ? null : root.id, source: sender ? sender.name : 'chat', labels: [sender ? 'handover' : 'chat'], parent });
+    this.curTask.set(agent.id, task.id); opts.onTask?.(task);
+    this.audit.add('task', { actor: sender ? sender.name : 'You', project: this._pname(agent), action: `opened ${task.code} for ${agent.name}`, detail: clipText(line, 100) });
+    return { task, own: true };
+  }
+  _closeWork(w, agent, ok, e) {
+    if (!w) return;
+    if (this.curTask.get(agent.id) === w.task.id) this.curTask.delete(agent.id);
+    if (!w.own) return;
+    const t = this.tasks.all[w.task.id]; if (!t || t.status === 'done' || t.status === 'blocked') return;
+    const stopped = this.stopped.has(agent.id);
+    if (ok && !stopped) { this.tasks.update(t.id, { status: 'done' }, agent.name); this.audit.add('task', { actor: agent.name, project: this._pname(agent), action: `closed ${t.code}`, detail: this.tasks.all[t.id].closure }); }
+    else this.tasks.update(t.id, { status: 'blocked', reason: stopped ? 'Stopped' : clipText(e?.message || 'It did not finish', 160) }, 'Apiary');
+  }
+  async _converse(agent, userText, from, opts = {}) {
+    const w = this._openWork(agent, userText, from, opts);
+    try { const r = await this._converseRun(agent, userText, from); this._closeWork(w, agent, true); return r; }
+    catch (e) { this._closeWork(w, agent, false, e); throw e; }
+  }
+  async _converseRun(agent, userText, from) {
     this.stopped.delete(agent.id);
     this._msg(agent, { role: 'user', text: userText, from: from ? { id: from.id, name: from.name } : null });
     // A message from a teammate (not the parent handing over a task) is labelled so the agent knows who is asking.
@@ -1314,8 +1348,8 @@ export class Engine extends EventEmitter {
         for (const r of reports) if (r.child?.branch) r.text += await this._mergeChild(agent, r.child);
 
         let body = '';
-        if (reports.length) body += 'Reports from your sub-agents:\n\n' + reports.map((r) => `### ${r.name}\n${r.text}`).join('\n\n');
-        if (replies.length) body += (body ? '\n\n' : '') + 'Replies from teammates:\n\n' + replies.map((r) => `### ${r.name}\n${r.text}`).join('\n\n');
+        if (reports.length) body += 'Reports from your sub-agents:\n\n' + reports.map((r) => `### ${r.name}${this._codeNote(r.code)}\n${r.text}`).join('\n\n');
+        if (replies.length) body += (body ? '\n\n' : '') + 'Replies from teammates:\n\n' + replies.map((r) => `### ${r.name}${this._codeNote(r.code)}\n${r.text}`).join('\n\n');
         if (!body) body = 'Nothing was run this round.';
         if (notes.length) body += '\n\nNotes from Apiary:\n- ' + notes.join('\n- ');
         body += '\n\nContinue: use these to complete the task and give your final answer.';
@@ -1443,9 +1477,11 @@ export class Engine extends EventEmitter {
       return null;
     }
     this._edge(agent.id, peer.id);
-    return this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).then((text) => ({ kind: 'reply', name: peer.name, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, text: `FAILED: ${e.message}` }))
+    let code = '';
+    return this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent, { onTask: (t) => { code = t.code; } })).then((text) => ({ kind: 'reply', name: peer.name, code, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, code, text: `FAILED: ${e.message}` }))
       .finally(() => this.waitingOn.get(agent.id)?.delete(peer.id));
   }
+  _codeNote(code) { if (!code) return ''; const t = this.tasks.byCode(code); return ` (${code}${t?.status === 'done' ? ', closed' : t?.status === 'blocked' ? ', blocked' : ''})`; }
   _edge(a, b) { (this.waitingOn.get(a) || this.waitingOn.set(a, new Set()).get(a)).add(b); }
 
   _findDef(name) {
@@ -1482,8 +1518,9 @@ export class Engine extends EventEmitter {
     this._edge(parent.id, child.id);
     this._msg(parent, { role: 'system', text: `Created sub-agent ${child.name} (${child.provider})`, agentId: child.id });
     try {
-      const text = await this.send(child.id, spec.task, parent);
-      return { name: child.name, text: text || '(no output)', child };
+      let code = '';
+      try { const text = await this.send(child.id, spec.task, parent, { onTask: (t) => { code = t.code; } }); return { name: child.name, code, text: text || '(no output)', child }; }
+      catch (e) { return { name: child.name, code, text: `FAILED: ${e.message}`, child }; }
     } catch (e) {
       return { name: child.name, text: `FAILED: ${e.message}`, child };
     } finally { this.waitingOn.get(parent.id)?.delete(child.id); }
@@ -1498,12 +1535,13 @@ export class Engine extends EventEmitter {
     if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => `${m.name} (${m.title || m.role})`).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
     this._edge(lead.id, worker.id);
     this._msg(lead, { role: 'system', text: `Assigned to ${worker.name}: ${a.task.slice(0, 160)}${a.task.length > 160 ? '…' : ''}`, agentId: worker.id });
-    const task = this.tasks.add({ title: clipText(a.task, 100), notes: a.task, status: 'inprogress', assignee: { id: worker.id, name: worker.name }, project: this.rootOf(lead).id, source: 'system', labels: [worker.department || 'team'] });
+    const task = this.tasks.add({ title: clipText(a.task, 100), notes: a.task, status: 'inprogress', assignee: { id: worker.id, name: worker.name }, project: this.rootOf(lead).id, source: 'system', labels: [worker.department || 'team', 'handover'], parent: this.curTask.get(lead.id) || null });
+    this.audit.add('task', { actor: lead.name, project: this._pname(lead), action: `handed ${task.code} to ${worker.name}`, detail: clipText(a.task, 100) });
     const finish = (text) => {
       this.waitingOn.get(lead.id)?.delete(worker.id);
       const ok = !/^\W*(NOT STARTED|FAILED)/i.test(text || '');
-      try { this.tasks.update(task.id, { status: ok ? 'done' : 'blocked', reason: ok ? '' : clipText(text, 160) }, 'Apiary'); } catch { /* task removed meanwhile */ }
-      return { kind: 'report', name: worker.name, text };
+      try { this.tasks.update(task.id, { status: ok ? 'done' : 'blocked', reason: ok ? '' : clipText(text, 160) }, ok ? worker.name : 'Apiary'); if (ok) this.audit.add('task', { actor: worker.name, project: this._pname(lead), action: `closed ${task.code}`, detail: this.tasks.all[task.id]?.closure || '' }); } catch { /* task removed meanwhile */ }
+      return { kind: 'report', name: worker.name, code: task.code, text };
     };
     try {
       // 1. The assignee checks with everyone else before it starts.
@@ -1522,7 +1560,7 @@ export class Engine extends EventEmitter {
         this._edge(worker.id, adv.id);
         this._msg(worker, { role: 'system', text: `Waiting for ${adv.name} to finish prerequisites first`, agentId: adv.id });
         let r;
-        try { r = await this._onProject(adv.id, projRoot, () => this.send(adv.id, `Prerequisite for ${worker.name}'s task (do this now, before ${worker.name} starts):\n${c.prerequisites.map((p) => '- ' + p).join('\n')}\n\nThe task is:\n${a.task}\n\nWhen finished, begin your reply with DONE or FAILED.`, worker)); }
+        try { r = await this._onProject(adv.id, projRoot, () => this.send(adv.id, `Prerequisite for ${worker.name}'s task (do this now, before ${worker.name} starts):\n${c.prerequisites.map((p) => '- ' + p).join('\n')}\n\nThe task is:\n${a.task}\n\nWhen finished, begin your reply with DONE or FAILED.`, worker, { parent: task.id })); }
         catch (e) { r = `FAILED: ${e.message}`; }
         finally { this.waitingOn.get(worker.id)?.delete(adv.id); }
         if (!/^\W*DONE/i.test(r || '')) return finish(`NOT STARTED. ${adv.name} could not complete a prerequisite: ${clipText(r, 300)}\nNothing further was done. Pre-check results:\n${summary.join('\n')}`);
@@ -1536,7 +1574,7 @@ export class Engine extends EventEmitter {
         (summary.length ? `Pre-check by your teammates (already done):\n${summary.join('\n')}\n\n` : '') +
         (done.length ? `Prerequisites already completed${lead.git ? ' and merged into your branch' : ''}:\n${done.join('\n')}\n\n` : '') +
         'Now carry out the task. Respect any conditions above.';
-      const text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, prompt, lead));
+      const text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, prompt, lead, { taskId: task.id }));
       let note = '';
       if (lead.git && worker.branch) { note = await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
       return finish(`${text || '(no output)'}${note}\n\nPre-check results:\n${summary.join('\n') || '(none)'}${done.length ? '\nPrerequisites done first:\n' + done.join('\n') : ''}`);
@@ -1557,7 +1595,7 @@ export class Engine extends EventEmitter {
     this._edge(worker.id, adv.id);
     this._msg(worker, { role: 'system', text: `Asked ${adv.name} for a pre-check`, agentId: adv.id });
     try {
-      const text = await this.send(adv.id, `Pre-check requested by ${worker.name} before they start this task:\n\n${task}\n\nLook at it from your area (${adv.role || adv.name}). Do no work yet. Reply in this shape:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first, before ${worker.name} starts (one line per item, only with CONDITIONS)`, worker);
+      const text = await this.send(adv.id, `Pre-check requested by ${worker.name} before they start this task:\n\n${task}\n\nLook at it from your area (${adv.role || adv.name}). Do no work yet. Reply in this shape:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first, before ${worker.name} starts (one line per item, only with CONDITIONS)`, worker, { noTask: true });
       Object.assign(res, parseVerdict(text));
     } catch (e) { res.reason = `could not be consulted (${e.message})`; }
     finally { this.waitingOn.get(worker.id)?.delete(adv.id); }

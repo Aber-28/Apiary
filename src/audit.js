@@ -3,7 +3,7 @@
 // than the retention period (30 days) is deleted.
 import { appendFileSync, readFileSync, writeFileSync, existsSync, chmodSync, renameSync } from 'node:fs';
 
-export const KINDS = ['command', 'ssh', 'file', 'tool', 'commit', 'secret', 'approval', 'signin', 'vault', 'infra', 'backup', 'system'];
+export const KINDS = ['command', 'ssh', 'file', 'tool', 'commit', 'secret', 'approval', 'signin', 'vault', 'infra', 'backup', 'task', 'system'];
 export const RETENTION_DAYS = 30;
 const DAY = 86400000;
 const FILE_TOOLS = /^(Edit|Write|MultiEdit|NotebookEdit|apply_patch|str_replace)/i;

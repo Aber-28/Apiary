@@ -132,3 +132,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 - `GET /api/runbooks` returns `{ items, drafts }`. `POST /api/runbooks` creates a trusted runbook (`title`, `problem`, `steps`, `tags`). `PUT /api/runbooks/{id}` edits it or sets `status` to `trusted` or `draft`. `DELETE` removes it.
 - `GET /api/policy` returns `{ rules, kinds, actions }`. `POST /api/policy` with `{ action: allow|ask|deny, kind, project, secret, contains }` adds a rule. `DELETE /api/policy/{id}` removes one.
+
+## Task IDs
+
+Tasks returned by `GET /api/tasks` have `code` (for example `T-0042`), `num`, `parent` (id of the task they are a subtask of), `parentCode`, `subtasks` (`code`, `title`, `status`, `assignee`), `waitingFor` (codes of subtasks still open), and, once done, `closedBy` and `closure` (for example `Closed by Router Rex. Refer to T-0042.`).

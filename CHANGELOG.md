@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.24.0
+
+- **Task IDs.** Every task gets a unique code (T-0001, T-0002, ...) that is never reused. Existing tasks were numbered. Work asked of an agent in a chat is now a task too.
+- **Handovers open subtasks.** When an agent passes work to the proper agent, a linked subtask opens, the first task shows *Waiting for T-xxxx*, the proper agent closes the subtask, and the first agent continues with the result and closes its own task.
+- **Closing is recorded.** Closed tasks say *Closed by Agent X. Refer to T-xxxx.* Opening, handing over and closing are in the Audit log.
+
 ## 0.23.2
 
 - Fixed the Secrets vault showing `[object HTMLDivElement]` instead of the agent's name under "Who may use it". Each agent that has access is listed with its access level and a **Remove** button.

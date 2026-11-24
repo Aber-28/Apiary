@@ -1204,7 +1204,10 @@ function pageTasks() {
       h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
         h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); d.close(); load(); })(); } }, 'Save')));
   };
-  const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, t.title), t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
+  const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), t.title),
+    t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
+    t.subtasks?.length ? h('small', { class: 'hint', style: 'display:block' }, (t.waitingFor.length ? `Waiting for ${t.waitingFor.join(', ')}. ` : 'All subtasks closed. '), t.subtasks.map((k) => `${k.code} ${k.assignee} (${k.status === 'done' ? 'closed' : k.status})`).join(' · ')) : null,
+    t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
     (() => {
@@ -1537,7 +1540,7 @@ async function pageHealth() {
   await draw();
   page = { shows: () => true, update: (ev) => ev.type === 'health' && draw() };
 }
-const AUDIT_KINDS = { command: 'Command', ssh: 'SSH', file: 'File change', tool: 'Tool', commit: 'Commit', secret: 'Secret used', approval: 'Approval', signin: 'Sign-in', vault: 'Vault', infra: 'Device', backup: 'Backup', system: 'System' };
+const AUDIT_KINDS = { task: 'Task', command: 'Command', ssh: 'SSH', file: 'File change', tool: 'Tool', commit: 'Commit', secret: 'Secret used', approval: 'Approval', signin: 'Sign-in', vault: 'Vault', infra: 'Device', backup: 'Backup', system: 'System' };
 async function pageAudit() {
   crumbs('Settings', 'Audit log');
   const q = h('input', { type: 'search', placeholder: 'Search (for example: ssh, deploy, vault)', 'aria-label': 'Search the audit log', style: 'min-width:240px' });

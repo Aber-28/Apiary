@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0
+- First-run setup wizard: detects existing logins (with a real test), guides sign-in per AI (terminal or API key), lets you choose the default model per AI and the default AI, optional GitHub, and asks whether to start automatically
+- Auto-start at login: systemd user service from the wizard, Settings → Startup, or `apiary service install`
+- New default models are used by new projects and sub-agents; Settings → Setup guide re-runs the wizard
+
 ## 0.2.1
 - `apiary start --lan` and `apiary token`: reach Apiary from other devices (VMs, servers) with an automatic access token; IP addresses accepted when a token is set; friendly page when the token is missing
 

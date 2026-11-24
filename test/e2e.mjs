@@ -225,6 +225,51 @@ store.flush();
 const engine2 = new Engine(new Store(path.join(tmp, 'state.json')));
 assert.ok(engine2.agents[lead2.id]);
 
+// ---- onboarding backend: service install, model lists, defaults ----
+{
+  const fs = await import('node:fs');
+  const http = await import('node:http');
+  // fake systemctl (never touch the real one) and a private config dir
+  const bin = path.join(tmp, 'fakebin'); fs.mkdirSync(bin);
+  const logf = path.join(tmp, 'systemctl.log');
+  fs.writeFileSync(path.join(bin, 'systemctl'), `#!/bin/sh\necho "$@" >> ${logf}\ncase "$2" in\n is-enabled) [ -f ${logf}.enabled ] && echo enabled || echo disabled;;\n is-active) echo inactive;;\n enable) touch ${logf}.enabled;;\n disable) rm -f ${logf}.enabled;;\nesac\nexit 0\n`, { mode: 0o755 });
+  const oldPath = process.env.PATH;
+  process.env.PATH = `${bin}:${oldPath}`; process.env.XDG_CONFIG_HOME = path.join(tmp, 'xdg'); process.env.APIARY_NO_LINGER = '1'; process.env.APIARY_NO_EXIT = '1';
+  let st = (await call('/api/service')).body;
+  assert.equal(st.supported, true); assert.equal(st.enabled, false);
+  st = (await call('/api/service', 'POST', { enabled: true })).body;
+  assert.equal(st.enabled, true); assert.equal(st.installed, true);
+  const unit = fs.readFileSync(path.join(tmp, 'xdg/systemd/user/apiary.service'), 'utf8');
+  assert.match(unit, /ExecStart="[^"]*node[^"]*" "[^"]*bin\/apiary\.js" start\n/); assert.match(unit, /Environment="PATH=/); assert.match(unit, /WantedBy=default\.target/);
+  assert.match(fs.readFileSync(logf, 'utf8'), /--user enable apiary/);
+  st = (await call('/api/service', 'POST', { enabled: false })).body;
+  assert.equal(st.enabled, false); assert.equal(fs.existsSync(path.join(tmp, 'xdg/systemd/user/apiary.service')), false);
+  process.env.PATH = oldPath;
+  assert.equal((await call('/api/service')).status, 200, 'status answers honestly even without systemd');
+
+  // model list: from the provider when a key is saved, suggestions otherwise
+  const fake = http.createServer((req, res) => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(req.headers['x-api-key'] === 'good-key' ? { data: [{ id: 'claude-x-1', display_name: 'Claude X' }, { id: 'claude-a-2' }] } : { error: 'no' })); });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  process.env.APIARY_ANTHROPIC_URL = `http://127.0.0.1:${fake.address().port}`;
+  assert.equal((await call('/api/connections/claude/models')).body.source, 'suggestions');
+  await call('/api/connections/claude', 'PUT', { method: 'api', apiKey: 'good-key' });
+  const ml = (await call('/api/connections/claude/models')).body;
+  assert.equal(ml.source, 'provider'); assert.deepEqual(ml.models.map((m) => m.id), ['claude-a-2', 'claude-x-1']);
+  await call('/api/connections/claude', 'PUT', { apiKey: 'bad-key' });
+  assert.equal((await call('/api/connections/claude/models')).body.source, 'suggestions', 'falls back when the provider refuses');
+  assert.equal((await call('/api/connections/github/models')).status, 404);
+  await call('/api/connections/claude', 'PUT', { method: 'cli', apiKey: '', model: 'claude-opus-5-5' });
+  assert.equal(engine.defaultModel('claude'), 'claude-opus-5-5', 'new agents start with the chosen default model');
+  fake.close(); delete process.env.APIARY_ANTHROPIC_URL;
+  // chosen default model is used by new projects; defaults and first-run state persist
+  assert.equal((await call('/api/state')).body.onboardingDone, false);
+  assert.equal((await call('/api/settings', 'PUT', { defaultProvider: 'bogus' })).status, 400);
+  const s2 = (await call('/api/settings', 'PUT', { defaultProvider: 'claude', onboardingDone: true })).body;
+  assert.equal(s2.onboardingDone, true);
+  assert.equal((await call('/api/state')).body.onboardingDone, true);
+  await call('/api/connections/claude', 'PUT', { model: '' });
+}
+
 // ---- LAN mode: reachable by IP with a token, still locked down ----
 {
   const { spawn } = await import('node:child_process');

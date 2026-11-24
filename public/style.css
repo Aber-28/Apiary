@@ -127,3 +127,12 @@ dialog form{padding:24px;display:flex;flex-direction:column}
 .diffstat,.diff{background:#0a0d12;color:#d6dbe4;border-radius:10px;padding:12px;font-size:12px;line-height:1.5;overflow:auto;max-height:340px;margin:8px 0;white-space:pre}
 .diff .add{color:#6fdba5}.diff .del{color:#f58a90}.diff .hunk{color:#6ea8fe}.diff .file{color:#f5b83d;font-weight:600}
 details summary{cursor:pointer;color:var(--accent-text);font-weight:600;min-height:32px;display:flex;align-items:center}
+
+.wizard{position:fixed;inset:0;z-index:50;background:var(--bg);overflow:auto;display:flex;justify-content:center;padding:32px 16px}
+.wiz-body{width:min(720px,100%);height:max-content}
+.wiz-card{margin-bottom:16px}
+.wiz-actions{display:flex;gap:10px;align-items:center;margin-top:24px}
+.stepper{list-style:none;display:flex;gap:8px;padding:0;margin:0 0 28px;flex-wrap:wrap}
+.stepper li{flex:1;min-width:120px;padding:8px 0;border-top:3px solid var(--line);color:var(--muted);font-size:13px;font-weight:600}
+.stepper li.done{border-color:var(--ok);color:var(--ok-text)}.stepper li[aria-current=step]{border-color:var(--accent);color:var(--text)}
+.summary{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:8px}

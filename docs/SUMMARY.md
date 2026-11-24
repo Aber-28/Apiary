@@ -5,6 +5,7 @@
 ## Getting started
 
 * [Install on Linux](getting-started/install.md)
+* [The setup wizard](getting-started/setup-wizard.md)
 * [First run and connections](getting-started/first-run.md)
 * [Run it as a service](getting-started/service.md)
 * [Update and uninstall](getting-started/update.md)

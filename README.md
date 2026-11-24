@@ -11,6 +11,8 @@ curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | ba
 apiary
 ```
 
+The setup wizard opens on first run: it detects your AI logins, helps you sign in, lets you pick default models and can start Apiary automatically at login.
+
 Open <http://127.0.0.1:7777> (on a VM or server? run `apiary start --lan` and open the link it prints from your own computer), go to **Connections**, and connect Claude, Codex and GitHub through your terminal or the web.
 
 Prefer to do it by hand?

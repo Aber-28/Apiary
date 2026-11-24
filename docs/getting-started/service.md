@@ -1,6 +1,16 @@
 # Run it as a service
 
-To have Apiary start automatically when you log in, use a **systemd user service**.
+The easiest way: answer **Yes** in the [setup wizard](setup-wizard.md), turn it on under **Settings → Startup**, or run:
+
+```bash
+apiary service install          # add --lan to also allow other devices
+apiary service status
+apiary service uninstall
+```
+
+This writes `~/.config/systemd/user/apiary.service` for you, using the same `PATH` as your current session so the service finds `claude`, `codex` and `gh`, and enables it (it also asks systemd to keep it running after you log out).
+
+Prefer to do it by hand? Use a **systemd user service**:
 
 ```bash
 mkdir -p ~/.config/systemd/user

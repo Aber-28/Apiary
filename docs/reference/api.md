@@ -24,4 +24,6 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `GET /api/github/repos?q=` | Your repositories |
 | `GET /api/github/branches?repo=owner/name` | Branches of a repository |
 | `GET/POST /api/defs`, `PUT/DELETE /api/defs/:id` | Saved agents |
-| `GET/PUT /api/settings` | Delegation limits and the default for approvals |
+| `GET/PUT /api/settings` | Delegation limits, default for approvals, `defaultProvider`, `onboardingDone` |
+| `GET /api/connections/:id/models` | Models to offer as the default (from your account when a key is saved, else suggestions) |
+| `GET /api/service`, `POST /api/service` | Status of the auto-start service; body `enabled`, `startNow` |

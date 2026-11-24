@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // HTTP + SSE server. Binds to localhost by default because agents can run commands on this machine.
 import http from 'node:http';
+import { spawn } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { CONNECTION_IDS } from './connections.js';
 import { github } from './github.js';
 import { providers } from './providers.js';
+import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Store } from './store.js';
@@ -84,15 +86,16 @@ export function createServer(engine) {
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
         if (req.method === 'PUT') {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
-          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault });
+          engine.setSettings(b);
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
         }
       }
       if (req.method === 'GET' && url.pathname === '/api/approvals') return json(res, 200, engine.approvals());
@@ -107,6 +110,21 @@ export function createServer(engine) {
       if ((r = m(/^\/api\/connections\/(\w+)\/test$/)) && req.method === 'POST') {
         if (!CONNECTION_IDS.includes(r[1])) throw Object.assign(new Error('Unknown connection'), { status: 404 });
         return json(res, 200, await engine.connections.test(r[1], providers));
+      }
+      if ((r = m(/^\/api\/connections\/(\w+)\/models$/)) && req.method === 'GET') return json(res, 200, await engine.connections.models(r[1]));
+      if (url.pathname === '/api/service') {
+        if (req.method === 'GET') return json(res, 200, await service.status());
+        if (req.method === 'POST') {
+          const b = await readBody(req);
+          const lan = HOST !== '127.0.0.1' && HOST !== 'localhost';
+          const st = b.enabled ? await service.install({ lan }) : await service.uninstall();
+          json(res, 200, st);
+          if (b.enabled && b.startNow && process.env.APIARY_NO_EXIT !== '1') {
+            // hand over to the service: restart it shortly, after this process has released the port
+            setTimeout(() => { engine.store.flush(); spawn('sh', ['-c', 'sleep 1; systemctl --user restart apiary'], { detached: true, stdio: 'ignore' }).unref(); process.exit(0); }, 400);
+          }
+          return;
+        }
       }
       if (req.method === 'GET' && url.pathname === '/api/github/repos') {
         return json(res, 200, await github.listRepos(engine.connections.get('github'), url.searchParams.get('q') || ''));

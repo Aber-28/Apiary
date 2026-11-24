@@ -23,6 +23,6 @@ It was built to be easy: no accounts, no API keys required, no config files. If 
 ## Where to start
 
 1. [Install Apiary on Linux](getting-started/install.md)
-2. [Connect Claude, Codex and GitHub](getting-started/first-run.md)
+2. Follow the [setup wizard](getting-started/setup-wizard.md) to connect Claude, Codex and GitHub, or do it [by hand](getting-started/first-run.md)
 3. [Start your first project](using-apiary/projects.md)
 4. Learn how [approvals](using-apiary/approvals.md) and [agent collaboration](using-apiary/collaboration.md) work

@@ -5,11 +5,16 @@ import { which } from './providers.js';
 import { github } from './github.js';
 
 const DEFAULTS = {
-  claude: { method: 'cli', apiKey: '', model: 'claude-sonnet-5-5' },
+  claude: { method: 'cli', apiKey: '', model: '' },
   codex: { method: 'cli', apiKey: '', model: '' },
   github: { method: 'cli', token: '' },
 };
 export const CONNECTION_IDS = Object.keys(DEFAULTS);
+// Suggested choices when the provider can't be asked for its list (terminal logins have no list command).
+const PRESETS = {
+  claude: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5: balanced' }, { id: 'claude-opus-5-5', label: 'Claude Opus 5.5: most capable' }, { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5: fastest' }],
+  codex: [],
+};
 const last4 = (s) => (s ? `••••${s.slice(-4)}` : '');
 
 export class Connections {
@@ -75,9 +80,29 @@ export class Connections {
       return s.ok ? { ok: true, detail: s.account ? `Signed in as ${s.account}` : 'Signed in' } : { ok: false, error: s.reason };
     }
     try {
-      const agent = { id: 'test', name: 'test', provider: id, method: c.method, cwd: process.cwd(), access: 'safe', model: '' };
+      const agent = { id: 'test', name: 'test', provider: id, method: c.method, cwd: process.cwd(), access: 'safe', model: c.model || '' };
       const text = await providers.quickCheck(agent, c);
       return { ok: true, detail: `Replied: ${text.slice(0, 60)}` };
     } catch (e) { return { ok: false, error: e.message }; }
+  }
+
+  // Models to offer as the default. Asks the provider when an API key is saved, else falls back to suggestions.
+  async models(id) {
+    if (!DEFAULTS[id] || id === 'github') throw Object.assign(new Error('Unknown connection'), { status: 404 });
+    const c = this.get(id);
+    if (c.apiKey) {
+      try {
+        const url = id === 'claude' ? `${process.env.APIARY_ANTHROPIC_URL || 'https://api.anthropic.com'}/v1/models?limit=100` : `${process.env.APIARY_OPENAI_URL || 'https://api.openai.com'}/v1/models`;
+        const headers = id === 'claude' ? { 'x-api-key': c.apiKey, 'anthropic-version': '2023-06-01' } : { authorization: `Bearer ${c.apiKey}` };
+        const res = await fetch(url, { headers, signal: AbortSignal.timeout(10000) });
+        if (res.ok) {
+          const list = ((await res.json()).data || []).map((m) => ({ id: m.id, label: m.display_name ? `${m.display_name}` : m.id }))
+            .filter((m) => id === 'claude' || !/embed|whisper|tts|dall-e|moderation|image|audio|realtime|transcribe/i.test(m.id))
+            .sort((a, b) => a.id.localeCompare(b.id));
+          if (list.length) return { source: 'provider', models: list };
+        }
+      } catch { /* fall through to suggestions */ }
+    }
+    return { source: 'suggestions', models: PRESETS[id] };
   }
 }

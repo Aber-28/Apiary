@@ -21,6 +21,7 @@ import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Infra } from './infra.js';
 import { Audit } from './audit.js';
+import { Health } from './health.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -71,6 +72,7 @@ export class Engine extends EventEmitter {
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
+    this.health = new Health(this);
     this.audit = new Audit(path.join(path.dirname(store.file), 'audit.jsonl'), (t) => this._redact(t));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
@@ -963,7 +965,7 @@ export class Engine extends EventEmitter {
       }
       return res.text;
     } catch (e) {
-      if (e.name !== 'AbortError') { this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
+      if (e.name !== 'AbortError') { this.health.noteLoginFailure(agent.provider, e.message); this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
       throw e;
     } finally {
       this.ctls.delete(agent.id);
@@ -972,6 +974,7 @@ export class Engine extends EventEmitter {
   }
 
   _usage(agent, res, system, prompt) {
+    this.health.noteSuccess(agent.provider);
     const u = res.usage;
     if (u && (u.input || u.output)) this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: u.input, output: u.output });
     else this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: estimateTokens(system, prompt), output: estimateTokens(res.text), estimated: true });

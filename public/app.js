@@ -100,7 +100,7 @@ const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
-  { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map']] },
+  { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
@@ -114,7 +114,7 @@ function renderSide() {
     const open = S.openGroup === undefined ? has : S.openGroup === g.id;
     return h('div', { class: `nav-group${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
       h('button', { 'aria-expanded': String(open), onclick: () => { S.openGroup = open ? null : g.id; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
-      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null))));
+      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null, href === '#/health' && S.health?.count ? h('span', { class: 'badge', style: S.health.level === 'err' ? 'background:var(--err)' : '', 'aria-label': `${S.health.count} warnings` }, S.health.count) : null))));
   });
   const conn = (S.conns || []).map((c) => {
     const ok = c.id === 'github' ? c.status?.ok : c.ready;
@@ -146,6 +146,7 @@ const ROUTES = [
   [/^#\/signin$/, () => pageSignin()],
   [/^#\/backups$/, () => pageBackups()],
   [/^#\/audit$/, () => pageAudit()],
+  [/^#\/health$/, () => pageHealth()],
   [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
@@ -183,7 +184,7 @@ function refreshConns() { return api('/api/connections').then((c) => { S.conns =
 async function loadState() {
   const st = await api('/api/state');
   Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, account: st.account || { exists: false }, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
-  renderUpdateChip(); renderSignOut();
+  S.health = st.health; renderUpdateChip(); renderSignOut();
   updateBadge();
 }
 function connectEvents() {
@@ -206,6 +207,7 @@ function connectEvents() {
       updateBadge(); renderSide();
       if (ev.approval.status === 'pending' && document.hidden) try { new Notification('Apiary needs your approval', { body: ev.approval.title }); } catch { /* not allowed */ }
     } else if (ev.type === 'delta') S.stream[ev.agentId] = (S.stream[ev.agentId] || '') + ev.text;
+    else if (ev.type === 'health') { S.health = { level: ev.level, count: ev.count }; renderSide(); }
     else if (ev.type === 'activity') S.activity[ev.agentId] = ev.text;
     else if (ev.type === 'log') { (S.logs[ev.agentId] ||= []).push(ev.line); }
     if (['agent', 'removed'].includes(ev.type)) renderSide(); else if (ev.type === 'activity') updateWorking();
@@ -1309,6 +1311,22 @@ async function pollSystem() {
 setInterval(pollSystem, 5000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
 
 // ---------- backups ----------
+async function pageHealth() {
+  crumbs('Infrastructure', 'Health');
+  const draw = async (st) => {
+    if (!st) { try { st = await api('/api/health'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; } }
+    const bad = st.items.filter((i) => i.level === 'warn' || i.level === 'err'), info = st.items.filter((i) => i.level === 'info');
+    const run = guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Checking…'; try { draw(await api('/api/health/check', 'POST', {})); } finally { e.target.disabled = false; } });
+    const card = (i) => h('div', { class: 'card', style: 'max-width:760px;margin-bottom:10px;border-left:4px solid ' + (i.level === 'err' ? 'var(--err)' : i.level === 'warn' ? 'var(--accent)' : 'var(--line)') },
+      h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, i.title), h('span', { class: 'pill ' + (i.level === 'err' ? 'err' : i.level === 'warn' ? 'work' : '') }, i.level === 'err' ? 'Needs attention' : i.level === 'warn' ? 'Warning' : 'Suggestion')),
+      h('p', {}, i.problem), h('p', {}, h('b', {}, 'What to do: '), i.fix), i.link ? h('a', { class: 'btn', href: i.link }, 'Go there') : null);
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Health'), h('p', { class: 'sub-title' }, 'Warnings before things break: a full disk, a device that stopped answering, an expired login, a locked vault, failed backups. Checked every 5 minutes.')), h('button', { class: 'btn', onclick: run }, 'Check now')),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('span', { class: 'pill ' + (st.level === 'err' ? 'err' : st.level === 'warn' ? 'work' : 'ok') }, st.level === 'err' ? 'Something needs attention' : st.level === 'warn' ? 'Some warnings' : 'All good'), ' ', st.at ? `Last checked ${ago(st.at)}.` : 'Not checked yet. Press Check now.'),
+      ...bad.map(card), bad.length || !st.at ? null : h('p', { class: 'hint' }, 'Nothing is wrong right now.'), info.length ? h('h2', {}, 'Suggestions') : null, ...info.map(card));
+  };
+  await draw();
+  page = { shows: () => true, update: (ev) => ev.type === 'health' && draw() };
+}
 const AUDIT_KINDS = { command: 'Command', ssh: 'SSH', file: 'File change', tool: 'Tool', commit: 'Commit', secret: 'Secret used', approval: 'Approval', signin: 'Sign-in', vault: 'Vault', infra: 'Device', backup: 'Backup', system: 'System' };
 async function pageAudit() {
   crumbs('Settings', 'Audit log');

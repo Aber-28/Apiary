@@ -1569,5 +1569,32 @@ let orgIds;
   const { plan } = await import('../src/reset.js'); assert.ok(plan(engine, { keepAccount: true }).files.some((x) => /audit\.jsonl$/.test(x)));
 }
 
+// ---- health ----
+{
+  const { Health, LOGIN_RE } = await import('../src/health.js');
+  const h0 = (await call('/api/health/check', 'POST', {})).body; assert.ok(h0.at > 0 && Array.isArray(h0.items));
+  assert.ok(h0.items.every((i) => i.title && i.problem && i.fix), 'every warning says what is wrong and what to do');
+  assert.ok(h0.items.some((i) => i.id === 'backup-off'), 'backups off is suggested');
+  // a device that does not answer is reported, and the check itself updates the map
+  const dev = (await call('/api/infra', 'POST', { name: 'Ghost NAS', type: 'server', address: '127.0.0.1', port: 1 })).body;
+  const h1 = (await call('/api/health/check', 'POST', {})).body;
+  const w = h1.items.find((i) => i.id === 'device-' + dev.id); assert.ok(w && w.level === 'err' && /Ghost NAS/.test(w.title), 'down device warned');
+  assert.equal(engine.infra.get(dev.id).status.ok, false, 'map turned red by the scheduled check');
+  assert.ok(h1.count >= 1 && (await call('/api/state')).body.health.count === h1.count);
+  await call('/api/infra/' + dev.id, 'DELETE');
+  // locked vault
+  if (engine.vault.exists) { await call('/api/vault/lock', 'POST', {}); assert.ok(engine.health.evaluate().some((i) => i.id === 'vault')); }
+  // backup failure
+  engine.backups.st.lastError = 'disk full'; engine.backups.st.config = { ...engine.backups.config, enabled: true };
+  assert.ok(engine.health.evaluate().some((i) => i.id === 'backup-failed' && i.level === 'err'));
+  engine.backups.st.lastError = ''; engine.backups.st.config = { ...engine.backups.config, enabled: false };
+  // expired login from a failed task, cleared by a success
+  engine.health.noteLoginFailure('claude', 'Error: 401 Unauthorized, please run /login'); assert.ok(engine.health.evaluate().some((i) => i.id === 'login-claude'));
+  engine.health.noteLoginFailure('codex', 'network timeout'); assert.ok(!engine.health.evaluate().some((i) => i.id === 'login-codex'), 'other errors are not login problems');
+  engine.health.noteSuccess('claude'); assert.ok(!engine.health.evaluate().some((i) => i.id === 'login-claude'));
+  assert.ok(LOGIN_RE.test('Not logged in') && !LOGIN_RE.test('rate limited'));
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /pageHealth/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

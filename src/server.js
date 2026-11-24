@@ -160,7 +160,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), health: engine.health.summary, usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
@@ -369,6 +369,8 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ...engine.health.state, count: engine.health.count });
+      if (url.pathname === '/api/health/check' && req.method === 'POST') { await readBody(req); const st = await engine.health.run(); return json(res, 200, { ...st, count: engine.health.count }); }
       if (url.pathname === '/api/audit' && req.method === 'GET') { const q = Object.fromEntries(url.searchParams); return json(res, 200, engine.audit.search({ ...q, from: +q.from || 0, to: +q.to || 0 })); }
       if (url.pathname === '/api/backups' && req.method === 'GET') return json(res, 200, { config: engine.backups.config, status: engine.backups.status, files: engine.backups.list(), vaultExists: engine.vault.exists });
       if (url.pathname === '/api/backups' && req.method === 'PUT') { const config = engine.backups.setConfig(await readBody(req)); return json(res, 200, { config, status: engine.backups.status, files: engine.backups.list() }); }
@@ -501,6 +503,8 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setTimeout(() => engine.health.run().catch(() => {}), 15000).unref();
+  setInterval(() => engine.health.run().catch(() => {}), 5 * 60000).unref();   // the map turns red by itself
   setInterval(() => engine.audit.prune(), 3600000).unref();
   setInterval(() => engine.backups.tick().catch(() => {}), 60000).unref();
   setTimeout(() => engine.refreshLimits().catch(() => {}), 8000).unref();

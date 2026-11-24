@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.18.0
+
+- **Health page** (Infrastructure > Health): warns about a nearly full disk, a device on the map that stopped answering, an expired Claude/Codex/GitHub login, a locked vault, and failed or stopped backups. Each warning says what is wrong and what to do. It checks every 5 minutes and tests the devices, so the map turns red by itself. The menu shows a warning count.
+
 ## 0.17.0
 
 - **Audit log** (Settings > Audit log): a searchable record of commands agents ran (including over SSH), files they changed, git commits, which secrets were used (names only), approvals, sign-ins and failed sign-ins, vault unlocks, device changes and backups. Filter by type, person and time. Entries are kept 30 days and then deleted automatically. Values and command output are never recorded.

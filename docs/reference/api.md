@@ -104,3 +104,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 ## Audit log
 
 - `GET /api/audit?q=&kind=&actor=&project=&from=&to=&limit=&offset=` returns `{ total, items: [{ t, kind, actor, project, action, detail }], facets, retentionDays }`, newest first. `kind` can be a comma-separated list. Entries older than 30 days are deleted.
+
+## Health
+
+- `GET /api/health` returns `{ at, level, count, items: [{ id, level, title, problem, fix, link }] }`. `level` is `ok`, `info`, `warn` or `err`.
+- `POST /api/health/check` tests the devices and runs every check now, and returns the same shape.

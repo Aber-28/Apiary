@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.3
+
+* Fixed the installer saying Apiary was not running when it was (it could not tell, because a network-enabled Apiary asks for the access token first).
+
 ## 0.10.2
 
 * The installer now offers to install git, curl and Node.js 20+ itself on Debian/Ubuntu (it asks first). Set `APIARY_YES=1` to skip the question.

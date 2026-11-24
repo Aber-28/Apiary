@@ -82,7 +82,7 @@ fi
 # Wait until it really answers, so "installed" never means "not running".
 ready=""
 for _ in $(seq 1 40); do
-  if node -e "fetch('http://127.0.0.1:$PORT/').then(r=>r.text()).then(t=>process.exit(t.includes('Apiary')?0:1),()=>process.exit(1))" 2>/dev/null; then ready=1; break; fi
+  if node -e "fetch('http://127.0.0.1:$PORT/',{headers:{accept:'text/html'}}).then(r=>r.text()).then(t=>process.exit(t.includes('Apiary')?0:1),()=>process.exit(1))" 2>/dev/null; then ready=1; break; fi
   sleep 0.5
 done
 

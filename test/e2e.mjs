@@ -1143,5 +1143,12 @@ let orgIds;
   await until(() => engine.agents[ne.id].status === 'idle' && engine.agents[se.id].status === 'idle');
 }
 
+// ---- 0.11.2: secrets are never typed into a plain prompt ----
+{
+  const src = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(src, /askSecret\(`Replace /); assert.match(src, /type: 'password', autocomplete: 'new-password', spellcheck/);
+  assert.equal(/prompt\(`New password/.test(src), false, 'no plain prompt asks for a secret');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

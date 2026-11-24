@@ -49,6 +49,15 @@ async function api(path, method = 'GET', body) {
   return j;
 }
 const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
+// A secret is never typed into the browser's plain prompt (it shows the text). This dialog hides it.
+const askSecret = (title, label) => new Promise((resolve) => {
+  const inp = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', 'aria-label': label });
+  const show = h('input', { type: 'checkbox', onchange: () => { inp.type = show.checked ? 'text' : 'password'; } });
+  const ok = h('button', { class: 'btn primary', type: 'submit', value: 'ok' }, 'Save');
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), h('label', { class: 'f' }, label, inp), h('label', { class: 'check' }, show, ' Show what I type'), h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', type: 'submit', value: 'cancel' }, 'Cancel'), ok)));
+  dlg.addEventListener('close', () => { const v = dlg.returnValue === 'ok' ? inp.value : null; inp.value = ''; dlg.remove(); resolve(v || null); });
+  document.body.append(dlg); dlg.showModal(); inp.focus();
+});
 const copy = (text) => navigator.clipboard?.writeText(text).then(() => toast('Copied'), () => toast('Copy failed', true));
 const cmdBox = (text) => h('div', { class: 'cmd mono' }, h('code', {}, text), h('button', { type: 'button', onclick: () => copy(text) }, 'Copy'));
 const ago = (ts) => { const s = (Date.now() - ts) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
@@ -596,7 +605,7 @@ function pageSecrets() {
         h('button', { class: 'btn primary', onclick: () => { const ag = without.find((q) => q.key === who.value); if (!ag) return toast('Choose an agent first.', true); save({ ...asg, [ag.key]: { label: ag.label, grant: how.value } }); } }, 'Add'));
       const picks = [current.length ? current : h('p', { class: 'hint' }, 'No agent can use this yet.'), without.length ? add : (v.eligible.length ? h('p', { class: 'hint' }, 'Every agent already has access.') : h('p', { class: 'hint' }, 'No agents yet.'))];
       return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), x.username ? h('small', { style: 'display:block' }, `Username: ${x.username}`) : null, x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null, h('small', { class: 'hint mono', style: 'display:block' }, `Agents get it as $APIARY_SECRET_${x.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')}${x.hasUsername ? ' and …_USER' : ''}`)),
-        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name} (leave empty for none)`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username'), h('button', { class: 'btn', onclick: guard(async () => { const nv = prompt(`New password, token or key for ${x.name}`); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
+        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name} (leave empty for none)`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username'), h('button', { class: 'btn', onclick: guard(async () => { const nv = await askSecret(`Replace ${x.name}`, 'New password, token or key'); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
         h('details', { open: Object.keys(asg).length > 0 }, h('summary', {}, 'Who may use it'), picks));
     });
     view.replaceChildren(head, h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), h('div', { class: 'formrow' }, nm, usr), h('div', { class: 'formrow', style: 'margin-top:8px' }, val, note, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/vault/secrets', 'POST', { name: nm.value, value: val.value, note: note.value, username: usr.value }); draw(); }) }, 'Save to vault')), h('small', { class: 'hint' }, 'A token or key only needs the last field. A login needs a username too.')), rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));

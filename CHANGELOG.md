@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.2
+
+* Security: *Replace secret* no longer uses the browser's plain prompt, which showed the new secret as you typed it. It now opens a dialog with a hidden field (with an optional "Show what I type" tick). The typed value is cleared from the page as soon as it is saved or cancelled.
+
 ## 0.11.1
 
 * Secrets: *Who may use it* is now a drop-down. Choose an agent, choose *Ask me each time* or *Always allowed*, press **Add**. Agents with access are listed with a **Remove** button, instead of one long list of "No access" boxes.

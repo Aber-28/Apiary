@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.0
+
+* **Infrastructure.** A new **Infrastructure** menu with two pages. **Devices** lists everything you run or connect to (Proxmox, Raspberry Pi, VMs, containers, NAS, routers, websites, services). Each has **Test connection** (a quick check that the address or website answers), **Update** and **Remove**, and **Add new** creates one. **Map** draws it as a diagram: boxes inside a box run on it, arrows are connections, and the outline shows the last test. The map redraws as things change.
+* **Help me map it.** The CEO asks short questions, guesses what it can, and proposes each device, link or question as an **Is this right?** card. Nothing is added until you press *Yes, add it* (or *Edit first* or *No*).
+* An item names the vault login that gives access to it. Passwords are never stored in the map. The map is part of exports and imports.
+
 ## 0.14.0
 
 * **Vault auto-unlock.** On the Secrets page, turn on **Auto-unlock** (it asks for your passphrase once). After a restart or an update the vault then opens by itself, so agents can use their secrets straight away. The key is a private file (only your user can read it) kept in `~/.config/apiary/`, outside the Apiary folder, so exports and backups never contain it. Your passphrase still works as a backup, and you can turn auto-unlock off at any time, which deletes the key file.

@@ -27,6 +27,7 @@
 * [Choosing the right model](using-apiary/model-advice.md)
 * [Memory](using-apiary/memory.md)
 * [Team meetings](using-apiary/team-meetings.md)
+* [Infrastructure map](using-apiary/infrastructure.md)
 * [Secrets vault](using-apiary/secrets-vault.md)
 * [Sign-in from any laptop](using-apiary/sign-in.md)
 * [Teams, hiring and the organisation chart](using-apiary/teams-and-hiring.md)

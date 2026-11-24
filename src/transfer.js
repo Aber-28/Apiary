@@ -10,7 +10,7 @@ import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { Vault } from './vault.js';
 
-const DATA = ['state.json', 'memory.json', 'agents', 'org', 'meetings'];
+const DATA = ['state.json', 'memory.json', 'infra.json', 'agents', 'org', 'meetings'];
 const FILES = ['workspaces', 'repos', 'worktrees'];
 const MANIFEST = 'apiary-export.json';
 const MAX_BYTES = 8 * 1024 ** 3;
@@ -142,7 +142,7 @@ export async function importFrom(engine, input, { passphrase = '' } = {}) {
       }
       for (const d of FILES) if (existsSync(path.join(base, d))) fixPaths(path.join(base, d), man.home, base);
     }
-    for (const f of ['state.json', 'memory.json', 'vault.json', 'token']) { try { chmodSync(path.join(base, f), 0o600); } catch { /* not there */ } }
+    for (const f of ['state.json', 'memory.json', 'infra.json', 'vault.json', 'token']) { try { chmodSync(path.join(base, f), 0o600); } catch { /* not there */ } }
     return { imported: incoming, vault: hasVault, backup: path.basename(backup), from: man.createdAt, version: man.version, notIncluded: man.notIncluded || [] };
   } finally { cleanup(); }
 }

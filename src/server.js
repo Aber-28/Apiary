@@ -18,6 +18,7 @@ import { Updater } from './updater.js';
 import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
+import { TYPES } from './infra.js';
 import { EVERY } from './limits.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
@@ -341,6 +342,17 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         if (engine._roster(root).length < 1) throw Object.assign(new Error('A meeting needs at least two people on the team'), { status: 409 });
         engine.runMeeting(root.id).catch((e) => engine._log(root, `! team meeting failed: ${e.message}`));
         return json(res, 202, { started: true });
+      }
+      // ----- infrastructure map -----
+      if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
+      if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
+      if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer))?$/))) {
+        const [, id, act] = r;
+        if (req.method === 'PUT' && !act) { const it = engine.infra.update(id, await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
+        if (req.method === 'DELETE' && !act) { engine.infra.remove(id); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && act === 'test') { const it = await engine.infra.test(id); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
+        if (req.method === 'POST' && act === 'confirm') { const b = await readBody(req); engine.infra.confirm(id, b.ok !== false); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && act === 'answer') { const it = engine.infra.answer(id, (await readBody(req)).text); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
       }
       if (url.pathname === '/api/vault' && req.method === 'GET') return json(res, 200, { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto, autoProblem: engine.vault.autoProblem, secrets: engine.vault.list(), eligible: engine.eligibleAgents() });
       if (url.pathname.startsWith('/api/vault/')) {

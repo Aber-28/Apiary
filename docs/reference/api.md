@@ -86,3 +86,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 * `POST /api/login` `{username,password}` sets the session cookie. `POST /api/logout` clears it.
 * `GET /api/account` shows whether an account exists. `POST /api/account` `{username,password,current}` creates or changes it. `DELETE /api/account` `{current}` removes it.
+
+## Infrastructure
+
+* `GET /api/infra` lists items. `POST /api/infra` adds one. `PUT /api/infra/:id` updates, `DELETE` removes.
+* `POST /api/infra/:id/test` checks reachability. `POST /api/infra/:id/confirm` `{ok}` accepts or rejects a suggestion. `POST /api/infra/:id/answer` `{text}` answers a question.

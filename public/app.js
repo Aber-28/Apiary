@@ -6,6 +6,7 @@ const view = $('#view');
 let page = null; // { update?() } for the current route
 
 const ICON = {
+  infra: 'M2 4h20v6H2z M2 14h20v6H2z M6 7h.01 M6 17h.01',
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   agents: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
   link: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71 M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71',
@@ -99,6 +100,7 @@ const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
+  { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
@@ -139,6 +141,8 @@ const ROUTES = [
   [/^#\/repositories$/, () => pageRepos()],
   [/^#\/usage$/, () => pageUsage()],
   [/^#\/secrets$/, () => pageSecrets()],
+  [/^#\/infrastructure$/, () => pageInfra('devices')],
+  [/^#\/infrastructure\/map$/, () => pageInfra('map')],
   [/^#\/signin$/, () => pageSignin()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
@@ -1234,6 +1238,135 @@ function pageAppearance() {
     h('div', { class: 'card', style: 'max-width:560px' }, h('div', { class: 'seg' }, ['dark', 'light'].map((t) => h('button', { 'aria-pressed': String(document.documentElement.className === t), onclick: () => { applyTheme(t); draw(); } }, t === 'dark' ? 'Dark' : 'Light')))),
     h('div', { class: 'card', style: 'max-width:560px;margin-top:16px' }, h('h2', {}, 'Writing style'), h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: S.plainEnglish, onchange: guard(async (e) => { await api('/api/settings', 'PUT', { plainEnglish: e.target.checked }); S.plainEnglish = e.target.checked; }) }), ' Agents write in plain, simple English'), h('p', { class: 'hint' }, 'On by default: short sentences and everyday words. Turn it off if you prefer technical language.')));
   draw();
+}
+
+// ---------- infrastructure: devices and the map ----------
+const INFRA_COLORS = { ok: 'var(--ok)', bad: 'var(--err)', none: 'var(--line)' };
+async function openInfraForm(types, items, secrets, item, done) {
+  const cur = item || {};
+  const f = (label, el) => h('label', { class: 'f' }, label, el);
+  const name = h('input', { type: 'text', value: cur.name || '', maxlength: '60' });
+  const type = h('select', {}, Object.entries(types).map(([k, t]) => h('option', { value: k, selected: (cur.type || 'server') === k }, t)));
+  const address = h('input', { type: 'text', value: cur.address || '', placeholder: '10.0.0.5 or nas.local', autocapitalize: 'none', spellcheck: 'false' });
+  const port = h('input', { type: 'number', value: cur.port || '', placeholder: 'Default for its type', min: '1', max: '65535' });
+  const url = h('input', { type: 'text', value: cur.url || '', placeholder: 'https://example.com', autocapitalize: 'none', spellcheck: 'false' });
+  const others = items.filter((i) => i.id !== cur.id);
+  const parent = h('select', {}, h('option', { value: '' }, 'Nothing (it is its own thing)'), others.map((i) => h('option', { value: i.id, selected: cur.parentId === i.id }, i.name)));
+  const linked = new Map((cur.links || []).map((l) => [l.to, l.label || '']));
+  const links = others.map((i) => { const cb = h('input', { type: 'checkbox', checked: linked.has(i.id) }); const lab = h('input', { type: 'text', value: linked.get(i.id) || '', placeholder: 'how (optional)', 'aria-label': `How it connects to ${i.name}`, style: 'flex:1;min-width:0' }); return { id: i.id, cb, lab, row: h('div', { class: 'kv', style: 'gap:8px;margin:3px 0' }, h('label', { class: 'check', style: 'flex:1' }, cb, ' ', i.name), lab) }; });
+  const secret = h('select', {}, h('option', { value: '' }, 'None'), secrets.map((x) => h('option', { value: x.name, selected: cur.secret === x.name }, x.name)), cur.secret && !secrets.some((x) => x.name === cur.secret) ? h('option', { value: cur.secret, selected: true }, cur.secret) : null);
+  const os = h('input', { type: 'text', value: cur.os || '', placeholder: 'For example Debian 12' });
+  const where = h('input', { type: 'text', value: cur.location || '', placeholder: 'For example rack in the garage' });
+  const notes = h('textarea', { rows: '3', maxlength: '1000' }); notes.value = cur.notes || '';
+  const err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' });
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, item ? `Update ${cur.name}` : 'Add something new'),
+    f('Name', name), f('What is it?', type), f('Address (name or IP)', address), f('Port (optional)', port), f('Web address (for websites and web tools)', url),
+    f('Runs on', parent), others.length ? h('div', { class: 'f' }, h('b', { style: 'font-weight:600' }, 'Connects to'), links.map((l) => l.row)) : null,
+    f('Login to use (from the Secrets vault)', secret), h('p', { class: 'hint' }, 'Only the name is kept here. The password stays encrypted in the vault.'),
+    f('Operating system (optional)', os), f('Where it is (optional)', where), f('Notes (optional)', notes), err,
+    h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), h('button', { class: 'btn primary', value: 'save', onclick: (e) => { e.preventDefault(); (async () => {
+      try {
+        const body = { name: name.value, type: type.value, address: address.value, port: port.value, url: url.value, parentId: parent.value, links: links.filter((l) => l.cb.checked).map((l) => ({ to: l.id, label: l.lab.value })), secret: secret.value, os: os.value, location: where.value, notes: notes.value };
+        await (item ? api(`/api/infra/${cur.id}`, 'PUT', body) : api('/api/infra', 'POST', body));
+        dlg.close(); toast(item ? 'Updated' : 'Added'); done();
+      } catch (x) { err.textContent = x.message; }
+    })(); } }, item ? 'Save' : 'Add'))));
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal(); name.focus();
+}
+
+function infraMap(items, types, onOpen) {
+  const NS2 = 'http://www.w3.org/2000/svg', mk = (t, a = {}, ...k) => { const e = document.createElementNS(NS2, t); for (const [x, v] of Object.entries(a)) e.setAttribute(x, v); for (const c of k) if (c != null) e.append(c); return e; };
+  const byId = new Map(items.map((i) => [i.id, i])), kids = new Map(items.map((i) => [i.id, []]));
+  const roots = [];
+  for (const i of items) (i.parentId && byId.has(i.parentId) ? kids.get(i.parentId) : roots).push(i);
+  const LW = 196, LH = 62, PAD = 14, HEAD = 46, GAP = 14;
+  const box = new Map();
+  const size = (i, depth) => {
+    const ch = kids.get(i.id);
+    if (!ch.length) { box.set(i.id, { w: LW, h: LH, depth, leaf: true }); return box.get(i.id); }
+    const sizes = ch.map((c) => size(c, depth + 1)), cols = Math.min(ch.length, depth === 0 ? 3 : 2);
+    const rows = []; for (let k = 0; k < ch.length; k += cols) rows.push(ch.slice(k, k + cols));
+    const cw = Math.max(...Array.from({ length: cols }, (_, c) => Math.max(0, ...rows.map((r) => (r[c] ? box.get(r[c].id).w : 0)))));
+    const rh = rows.map((r) => Math.max(...r.map((c) => box.get(c.id).h)));
+    const w = Math.max(LW + PAD * 2, cols * cw + (cols - 1) * GAP + PAD * 2), hh = HEAD + rh.reduce((a, b) => a + b, 0) + (rows.length - 1) * GAP + PAD;
+    box.set(i.id, { w, h: hh, depth, rows, cw, rh, cols });
+    void sizes; return box.get(i.id);
+  };
+  roots.forEach((r) => size(r, 0));
+  const place = (i, x, y) => {
+    const b = box.get(i.id); b.x = x; b.y = y;
+    if (b.rows) { let yy = y + HEAD; b.rows.forEach((r, ri) => { r.forEach((c, ci) => place(c, x + PAD + ci * (b.cw + GAP), yy)); yy += b.rh[ri] + GAP; }); }
+  };
+  const MAXW = 1100; let x = 20, y = 20, rowH = 0, maxX = 0;
+  for (const r of roots) { const b = box.get(r.id); if (x + b.w > MAXW && x > 20) { x = 20; y += rowH + 50; rowH = 0; } place(r, x, y); x += b.w + 50; rowH = Math.max(rowH, b.h); maxX = Math.max(maxX, x); }
+  const W = Math.max(maxX, 400), H = y + rowH + 30;
+  const svgEl = mk('svg', { viewBox: `0 0 ${W} ${H}`, width: '100%', role: 'img', 'aria-label': 'Map of your infrastructure', style: `max-width:${W}px;height:auto` });
+  svgEl.append(mk('defs', {}, mk('marker', { id: 'arr', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' }, mk('path', { d: 'M0 0L10 5L0 10z', style: 'fill:var(--muted)' }))));
+  const stroke = (i) => (i.status ? (i.status.ok ? INFRA_COLORS.ok : INFRA_COLORS.bad) : INFRA_COLORS.none);
+  const order = [...items].sort((a, b) => (box.get(a.id).depth) - (box.get(b.id).depth));
+  const txt = (t, x2, y2, st, size2 = 13, weight = 400) => { const e = mk('text', { x: x2, y: y2, style: `fill:${st};font:${weight} ${size2}px Inter,system-ui,sans-serif` }); e.textContent = t.length > 30 ? t.slice(0, 29) + '…' : t; return e; };
+  for (const i of order) {
+    const b = box.get(i.id), g = mk('g', { tabindex: '0', role: 'button', 'aria-label': `${i.name}, ${types[i.type] || i.type}${i.state === 'proposed' ? ', waiting for your confirmation' : ''}`, style: 'cursor:pointer' });
+    g.append(mk('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 10, style: `fill:${b.leaf ? 'var(--surface)' : 'var(--surface2)'};stroke:${stroke(i)};stroke-width:${i.status ? 2 : 1.2};${i.state === 'proposed' ? 'stroke-dasharray:5 4' : ''}` }));
+    g.append(txt(i.name, b.x + 12, b.y + 22, 'var(--text)', 14, 600));
+    g.append(txt([types[i.type] || i.type, i.address].filter(Boolean).join(' · '), b.x + 12, b.y + (b.leaf ? 42 : 38), 'var(--muted)', 11.5));
+    if (i.state === 'proposed') g.append(txt('to confirm', b.x + b.w - 12 - 62, b.y + 22, 'var(--accent-text)', 11, 600));
+    g.addEventListener('click', () => onOpen(i)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(i); } });
+    svgEl.append(g);
+  }
+  // links are drawn last, from the edge of one box to the edge of the other
+  const edge = (a, c) => { const ax = a.x + a.w / 2, ay = a.y + a.h / 2, cx = c.x + c.w / 2, cy = c.y + c.h / 2, dx = cx - ax, dy = cy - ay; const t = Math.min(Math.abs(dx) > 1e-6 ? (a.w / 2) / Math.abs(dx) : Infinity, Math.abs(dy) > 1e-6 ? (a.h / 2) / Math.abs(dy) : Infinity); return [ax + dx * t, ay + dy * t]; };
+  let n = 0;
+  for (const i of items) for (const l of i.links || []) {
+    const a = box.get(i.id), c = box.get(l.to); if (!a || !c) continue; n++;
+    const [x1, y1] = edge(a, c), [x2, y2] = edge(c, a);
+    svgEl.append(mk('line', { x1, y1, x2, y2, style: 'stroke:var(--muted);stroke-width:1.6', 'marker-end': 'url(#arr)' }));
+    if (l.label) svgEl.append(txt(l.label, (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 4, 'var(--muted)', 11));
+  }
+  return { el: svgEl, links: n };
+}
+
+async function pageInfra(tab) {
+  crumbs('Infrastructure', tab === 'map' ? 'Map' : 'Devices');
+  const draw = async () => {
+    let data, secrets = [];
+    try { data = await api('/api/infra'); const v = await api('/api/vault').catch(() => null); secrets = v?.secrets || []; } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const { items, types } = data, byId = new Map(items.map((i) => [i.id, i]));
+    const edit = (it) => openInfraForm(types, items, secrets, it, draw);
+    const askCeo = guard(async () => {
+      const g = await api('/api/chat');
+      await api(`/api/agents/${g.id}/messages`, 'POST', { text: `Let's build the map of my infrastructure. Ask me one or two short questions at a time about my devices, servers, VMs, websites and how they connect. Guess what you can from what you know and from the map so far, and propose each thing with an apiary-infra block so I can confirm it.${items.length ? '' : ' The map is empty, so start by asking what I run.'}` });
+      location.hash = '#/chat';
+    });
+    const head = h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, tab === 'map' ? 'Infrastructure map' : 'Devices and connections'), h('p', { class: 'sub-title' }, 'Everything Apiary can reach or manage: servers, VMs, websites and how they connect. Passwords stay in the Secrets vault; only the name of the login is kept here.')),
+      h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
+    const tabs = h('div', { class: 'tabs', role: 'tablist' }, [['devices', 'Devices', '#/infrastructure'], ['map', 'Map', '#/infrastructure/map']].map(([k, t, href]) => h('a', { role: 'tab', 'aria-selected': String(tab === k), class: 'btn', style: 'text-decoration:none', href }, t)));
+    const proposed = items.filter((i) => i.state === 'proposed'), real = items.filter((i) => i.state !== 'proposed');
+    const cards = proposed.map((i) => {
+      const ans = h('input', { type: 'text', placeholder: 'Your answer', 'aria-label': `Answer about ${i.name}`, onkeydown: (e) => { if (e.key === 'Enter') send(); } });
+      const send = guard(async () => { await api(`/api/infra/${i.id}/answer`, 'POST', { text: ans.value }); draw(); });
+      return h('div', { class: 'card', style: 'border-style:dashed' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('b', {}, `Is this right? ${i.name}`), h('span', { class: 'pill info' }, `Suggested by ${i.by || 'an agent'}`)),
+        h('p', { style: 'margin:6px 0' }, `${types[i.type] || i.type}${i.address ? ' at ' + i.address : ''}${i.parentId && byId.get(i.parentId) ? ', running on ' + byId.get(i.parentId).name : ''}${(i.links || []).length ? ', connected to ' + i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ') : ''}`),
+        i.why ? h('p', { class: 'hint' }, i.why) : null,
+        i.question ? h('div', { class: 'formrow' }, h('span', { style: 'flex:1 1 100%;font-weight:600' }, i.question), ans, h('button', { class: 'btn', onclick: send }, 'Answer')) : null,
+        h('div', { class: 'formrow', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: guard(async () => { await api(`/api/infra/${i.id}/confirm`, 'POST', { ok: true }); draw(); }) }, 'Yes, add it'), h('button', { class: 'btn', onclick: () => edit(i) }, 'Edit first'), h('button', { class: 'btn danger', onclick: guard(async () => { await api(`/api/infra/${i.id}/confirm`, 'POST', { ok: false }); draw(); }) }, 'No')));
+    });
+    if (tab === 'map') {
+      const m = items.length ? infraMap(items, types, edit) : null;
+      view.replaceChildren(head, tabs, ...cards, items.length ? h('div', { class: 'card', style: 'overflow:auto' }, m.el, h('p', { class: 'hint', style: 'margin-top:8px' }, 'Boxes inside another box run on it. Arrows are connections. Green or red outlines show the last connection test; dashed boxes are waiting for you to confirm. Click a box to update it.')) : h('div', { class: 'card empty' }, 'Nothing here yet. Press Add new, or Help me map it and answer a few questions.'));
+      return;
+    }
+    const rows = real.map((i) => {
+      const st = i.status ? h('span', { class: 'pill ' + (i.status.ok ? 'ok' : 'err'), title: `${ago(i.status.at)}` }, i.status.ok ? 'Reachable' : 'Not reachable') : h('span', { class: 'pill' }, 'Not tested');
+      const test = h('button', { class: 'btn', onclick: guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { await api(`/api/infra/${i.id}/test`, 'POST', {}); } finally { draw(); } }) }, 'Test connection');
+      return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', {}, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
+        h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
+        i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? h('p', { style: 'white-space:pre-wrap;margin:4px 0' }, i.notes) : null,
+        h('div', { class: 'formrow', style: 'margin-top:6px' }, test, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
+    });
+    view.replaceChildren(head, tabs, ...cards, rows.length ? rows : (cards.length ? [] : h('div', { class: 'card empty' }, 'Nothing here yet. Add your Proxmox host, Raspberry Pi, VMs or websites, or press Help me map it and the CEO will ask you a few questions.')));
+  };
+  await draw(); page = { shows: () => true, update: (ev) => ev.type === 'infra' && !document.querySelector('dialog[open]') && draw() };
 }
 
 // ---------- sign-in account ----------

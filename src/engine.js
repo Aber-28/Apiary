@@ -19,6 +19,7 @@ import { git } from './git.js';
 import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
+import { Infra } from './infra.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
 import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
@@ -44,6 +45,7 @@ const TYPE_LABEL = { login: 'login', ssh: 'SSH login', token: 'API key or token'
 const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
 const PLAN_RE = /```apiary-plan\s*([\s\S]*?)```/g;
 const PROGRESS_RE = /```apiary-progress\s*([\s\S]*?)```/g;
+const INFRA_RE = /```apiary-infra\s*([\s\S]*?)```/g;
 const TASK_RE = /```apiary-task\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
@@ -65,6 +67,7 @@ export class Engine extends EventEmitter {
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
+    this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
@@ -347,6 +350,15 @@ export class Engine extends EventEmitter {
   }
 
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
+  // An agent suggests devices, links or a question about the person's infrastructure. They appear as "Is this right?" cards.
+  _infra(agent, list) {
+    const who = this._persona(agent);
+    const r = this.infra.propose(who.name, list);
+    if (r.added.length) this.emit('event', { type: 'infra' });
+    if (r.added.length) this._msg(agent, { role: 'system', text: `Added ${r.added.length} suggestion${r.added.length > 1 ? 's' : ''} to the Infrastructure page for you to confirm: ${r.added.map((i) => i.name).join(', ')}.` });
+    for (const n of r.notes) this._msg(agent, { role: 'system', text: n, error: true });
+    return r;
+  }
   async _hire(proposer, hires, notes) {
     const root = this._teamRoot(proposer);
     const roster = this._roster(root);
@@ -865,6 +877,10 @@ export class Engine extends EventEmitter {
         '```apiary-hire\n{"title":"Job title","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","complexity":"simple|normal|hard","reportsTo":"Optional existing member name or title"}\n```\n\n' +
         'Every hire automatically gets a comic-book style codename (the human can change it), so give a job title, not a name. Say how hard the work is ("complexity"): Apiary then suggests the right AI model for the role. Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
     }
+    if (agent.kind === 'general' || agent.org || (proj && who.kind === 'general') || !agent.parentId) {
+      const known = this.infra.summary();
+      s += '\nINFRASTRUCTURE MAP: the person keeps a map of their devices, servers, VMs, websites and how they connect (Infrastructure page). When they mention a device, server, VM, website or service, or you learn one while working, propose it and Apiary shows it to them as an "Is this right?" card; nothing is added until they confirm. Guess sensible details from your own knowledge (type, what it runs on, what it connects to), say why in "why", and when something important is unknown ask in "question" (for example where it is stored, its address, or which secret in the vault logs in to it). Only ask when it matters. Never put passwords in the map: name the vault secret in "notes" instead.\n```apiary-infra\n{"items":[{"name":"pve1","type":"proxmox|server|vm|container|pi|nas|router|switch|website|service|database|cloud|device|other","address":"10.0.0.5","hostedOn":"Existing item name","connectsTo":["Other item name"],"notes":"Optional","why":"Why you think so","question":"Optional question for the person"}]}\n```\n' + (known ? 'Already on the map:\n' + known + '\n' : '');
+    }
     if (this._planOwner(agent) && (!agent.parentId || agent.member)) {
       const lead = !agent.parentId;
       s += this._planContext(agent);
@@ -1196,10 +1212,11 @@ export class Engine extends EventEmitter {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, errors } = parseSpawns(mem.clean);
+        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
         if (tasks.length) this._agentTasks(agent, tasks);
+        if (infra.length) this._infra(agent, infra);
         const planNotes = [];
         if (plans.length) await this._plan(agent, plans.at(-1), planNotes);
         if (progress.length) this._progress(agent, progress, planNotes);
@@ -1536,7 +1553,7 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], infra = [], errors = [];
   reply = reply.replace(PLAN_RE, (_, body) => {
     try {
       const o = JSON.parse(body.trim()), ph = [].concat(o.phases || []).filter((p) => p && String(p.title || '').trim());
@@ -1548,6 +1565,11 @@ export function parseSpawns(reply) {
   reply = reply.replace(PROGRESS_RE, (_, body) => {
     try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || x.phase == null) { errors.push('An apiary-progress block needs a "phase".'); continue; } progress.push({ phase: x.phase, step: x.step, status: x.status, note: String(x.note || '').slice(0, 300) }); } }
     catch (err) { errors.push(`An apiary-progress block was not valid JSON (${err.message}).`); }
+    return '';
+  });
+  reply = reply.replace(INFRA_RE, (_, body) => {
+    try { const o = JSON.parse(body.trim()); for (const x of [].concat(Array.isArray(o) ? o : o.items || o)) infra.push(x); }
+    catch (err) { errors.push(`An apiary-infra block was not valid JSON (${err.message}).`); }
     return '';
   });
   reply = reply.replace(TASK_RE, (_, body) => {
@@ -1606,7 +1628,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };

@@ -1405,5 +1405,48 @@ let orgIds;
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Turn on auto-unlock/);
 }
 
+// ---- infrastructure map ----
+{
+  const net = await import('node:net');
+  const probe = net.createServer((c) => c.end()); await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+  const port = probe.address().port;
+  assert.equal((await call('/api/infra', 'POST', { name: '', type: 'server' })).status, 400);
+  assert.equal((await call('/api/infra', 'POST', { name: 'bad', address: 'http://x' })).status, 400, 'a web link is not an address');
+  assert.equal((await call('/api/infra', 'POST', { name: 'bad', url: 'ftp://x' })).status, 400);
+  const pve = (await call('/api/infra', 'POST', { name: 'Proxmox', type: 'proxmox', address: '127.0.0.1', port })).body;
+  const vm = (await call('/api/infra', 'POST', { name: 'Web VM', type: 'vm', parentId: pve.id, secret: 'NPM admin' })).body;
+  assert.equal((await call('/api/infra', 'POST', { name: 'proxmox' })).status, 409, 'names are unique');
+  assert.equal((await call(`/api/infra/${pve.id}`, 'PUT', { parentId: vm.id })).status, 400, 'no loops');
+  assert.equal((await call(`/api/infra/${vm.id}`, 'PUT', { links: [{ to: pve.id, label: 'storage' }, { to: 'nope' }] })).body.links.length, 1);
+  // test connection: open port, closed port, no address
+  assert.equal((await call(`/api/infra/${pve.id}/test`, 'POST', {})).body.status.ok, true);
+  probe.close(); await new Promise((r) => setTimeout(r, 50));
+  assert.equal((await call(`/api/infra/${pve.id}/test`, 'POST', {})).body.status.ok, false);
+  assert.equal((await call(`/api/infra/${vm.id}/test`, 'POST', {})).body.status.ok, false);
+  // an agent proposes things: they wait for the person
+  const r = await import('../src/engine.js');
+  const pr = r.parseSpawns('Sounds good.\n```apiary-infra\n{"items":[{"name":"Pi-hole","type":"pi","address":"10.0.0.2","hostedOn":"Proxmox","connectsTo":["Web VM"],"why":"You said DNS runs on a Pi","question":"Where is its config stored?"},{"nope":1}]}\n```');
+  assert.equal(pr.infra.length, 2); assert.equal(pr.clean, 'Sounds good.');
+  const got = engine._infra(engine.agents[orgIds.ceo.id], pr.infra);
+  assert.equal(got.added.length, 1); assert.equal(got.notes.length, 1);
+  let list = (await call('/api/infra')).body.items; const ph = list.find((i) => i.name === 'Pi-hole');
+  assert.equal(ph.state, 'proposed'); assert.equal(ph.parentId, pve.id); assert.equal(ph.links.length, 1);
+  assert.ok(!engine.infra.summary().includes('Pi-hole'), 'unconfirmed items are not treated as fact');
+  assert.equal((await call(`/api/infra/${ph.id}/answer`, 'POST', { text: '' })).status, 400);
+  assert.equal((await call(`/api/infra/${ph.id}/answer`, 'POST', { text: 'On the SD card' })).status, 200);
+  assert.match((await call('/api/infra')).body.items.find((i) => i.id === ph.id).notes, /On the SD card/);
+  await call(`/api/infra/${ph.id}/confirm`, 'POST', { ok: true });
+  assert.equal((await call('/api/infra')).body.items.find((i) => i.id === ph.id).state, 'confirmed');
+  assert.match(engine._system(engine.agents[orgIds.ceo.id]), /INFRASTRUCTURE MAP[\s\S]*Pi-hole/);
+  // rejecting removes it, and removing something frees what ran on it
+  engine.infra.propose('x', [{ name: 'Ghost', type: 'nas' }]); const gh = engine.infra.byName('Ghost');
+  await call(`/api/infra/${gh.id}/confirm`, 'POST', { ok: false }); assert.equal(engine.infra.byName('Ghost'), undefined);
+  await call(`/api/infra/${pve.id}`, 'DELETE'); list = (await call('/api/infra')).body.items;
+  assert.equal(list.find((i) => i.id === vm.id).parentId, ''); assert.ok(list.every((i) => (i.links || []).every((l) => l.to !== pve.id)));
+  assert.equal(fsStat(path.join(tmp, 'infra.json')).mode & 0o777, 0o600);
+  assert.ok(!fsRead(path.join(tmp, 'infra.json'), 'utf8').includes('S3cr3t'), 'no secret values in the map');
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageInfra/); assert.match(app, /Is this right\?/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

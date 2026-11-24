@@ -97,8 +97,10 @@ export class Backups {
         catch (e) { st.lastCopyError = `The copy to ${c.dir2} failed: ${e.message}`; }
       }
       this.engine.store.save(); this.engine.emit('event', { type: 'backup' });
+      this.engine.audit?.add('backup', { actor: reason === 'manual' ? 'You' : 'Schedule', action: 'backup made', detail: name });
       return { name, size: st.lastSize, reason, copyError: st.lastCopyError };
     } catch (e) {
+      this.engine.audit?.add('backup', { actor: reason === 'manual' ? 'You' : 'Schedule', action: 'backup failed', detail: e.message });
       st.lastError = e.message; this.engine.store.save(); this.engine.emit('event', { type: 'backup' });
       try { unlinkSync(path.join(c.dir, '.tmp')); } catch { /* none */ }
       throw e;

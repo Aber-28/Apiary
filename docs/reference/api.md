@@ -100,3 +100,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 * `GET /api/backups` shows settings, status and saved backups. `PUT /api/backups` changes settings. `POST /api/backups/run` makes one now. `GET /api/backups/<file>` downloads one.
 * `GET /api/system` returns CPU, memory and disk figures for the local machine.
+
+## Audit log
+
+- `GET /api/audit?q=&kind=&actor=&project=&from=&to=&limit=&offset=` returns `{ total, items: [{ t, kind, actor, project, action, detail }], facets, retentionDays }`, newest first. `kind` can be a comma-separated list. Entries older than 30 days are deleted.

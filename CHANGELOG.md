@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.17.0
+
+- **Audit log** (Settings > Audit log): a searchable record of commands agents ran (including over SSH), files they changed, git commits, which secrets were used (names only), approvals, sign-ins and failed sign-ins, vault unlocks, device changes and backups. Filter by type, person and time. Entries are kept 30 days and then deleted automatically. Values and command output are never recorded.
+
 ## 0.16.0
 
 * **Automatic backups** (Settings > Backups). Choose daily or weekly and a time, and Apiary makes the same export you can make by hand, saves it in a folder, and keeps the newest few (7 by default). Each file is opened and checked right after it is written, so a broken backup is reported at once. Choose whether to include the Secrets vault (it stays encrypted) and project folders. A second folder, such as a network share, gets a copy, because a backup on the same disk does not survive the disk. There is **Back up now**, and each backup can be downloaded. Restore one with Export and import.

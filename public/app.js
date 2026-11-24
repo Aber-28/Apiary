@@ -102,7 +102,7 @@ const NAV = [
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -145,6 +145,7 @@ const ROUTES = [
   [/^#\/infrastructure\/map$/, () => pageInfra('map')],
   [/^#\/signin$/, () => pageSignin()],
   [/^#\/backups$/, () => pageBackups()],
+  [/^#\/audit$/, () => pageAudit()],
   [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
@@ -1308,6 +1309,36 @@ async function pollSystem() {
 setInterval(pollSystem, 5000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
 
 // ---------- backups ----------
+const AUDIT_KINDS = { command: 'Command', ssh: 'SSH', file: 'File change', tool: 'Tool', commit: 'Commit', secret: 'Secret used', approval: 'Approval', signin: 'Sign-in', vault: 'Vault', infra: 'Device', backup: 'Backup', system: 'System' };
+async function pageAudit() {
+  crumbs('Settings', 'Audit log');
+  const q = h('input', { type: 'search', placeholder: 'Search (for example: ssh, deploy, vault)', 'aria-label': 'Search the audit log', style: 'min-width:240px' });
+  const kind = h('select', { 'aria-label': 'What happened' }), actor = h('select', { 'aria-label': 'Who' }), range = h('select', { 'aria-label': 'When' }, [['0', 'Last 30 days'], ['1', 'Last 24 hours'], ['7', 'Last 7 days']].map(([v, t]) => h('option', { value: v }, t)));
+  const list = h('div', { class: 'card', style: 'padding:0;overflow:auto' }), count = h('p', { class: 'hint' });
+  let facetsDone = false, limit = 100;
+  const load = async () => {
+    const days = Number(range.value), p = new URLSearchParams({ q: q.value, kind: kind.value, actor: actor.value, limit });
+    if (days) p.set('from', Date.now() - days * 86400000);
+    let d; try { d = await api('/api/audit?' + p); } catch (e) { list.replaceChildren(h('div', { class: 'empty' }, e.message)); return; }
+    if (!facetsDone) {
+      facetsDone = true;
+      kind.replaceChildren(h('option', { value: '' }, 'Everything'), ...Object.entries(d.facets.kinds).map(([k, n]) => h('option', { value: k }, `${AUDIT_KINDS[k] || k} (${n})`)));
+      actor.replaceChildren(h('option', { value: '' }, 'Everyone'), ...Object.keys(d.facets.actors).sort().map((a) => h('option', { value: a }, a)));
+    }
+    count.textContent = `${d.total} entr${d.total === 1 ? 'y' : 'ies'}${d.total > d.items.length ? `, showing the newest ${d.items.length}` : ''}. Entries are kept for ${d.retentionDays} days. Secret values and command output are never recorded.`;
+    list.replaceChildren(d.items.length ? h('table', { class: 'tbl', style: 'width:100%' }, h('thead', {}, h('tr', {}, ['When', 'Who', 'What', 'Details'].map((t) => h('th', {}, t)))),
+      h('tbody', {}, d.items.map((e) => h('tr', {}, h('td', { style: 'white-space:nowrap', title: new Date(e.t).toLocaleString() }, new Date(e.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })),
+        h('td', {}, e.actor, e.project ? h('div', { class: 'hint' }, e.project) : null), h('td', {}, h('span', { class: 'pill' }, AUDIT_KINDS[e.kind] || e.kind)),
+        h('td', { style: 'word-break:break-word' }, h('code', {}, e.action), e.detail ? h('div', { class: 'hint' }, e.detail) : null))))) : h('div', { class: 'empty' }, 'Nothing matches.'),
+      d.total > d.items.length ? h('div', { style: 'padding:10px' }, h('button', { class: 'btn', onclick: () => { limit += 200; load(); } }, 'Show more')) : null);
+  };
+  const go = debounce(load, 250);
+  q.oninput = go; kind.onchange = actor.onchange = range.onchange = load;
+  view.replaceChildren(h('h1', {}, 'Audit log'), h('p', { class: 'sub-title' }, 'Who did what: commands the agents ran, files they changed, secrets they used (by name only), approvals, sign-ins and more.'),
+    h('div', { class: 'formrow', style: 'margin-bottom:10px;flex-wrap:wrap' }, q, kind, actor, range, h('button', { class: 'btn', onclick: load }, 'Refresh')), count, list);
+  await load();
+  page = { shows: () => false, update: () => {} };
+}
 async function pageBackups() {
   crumbs('Settings', 'Backups');
   const draw = async () => {

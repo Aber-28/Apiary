@@ -124,11 +124,14 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (req.method === 'POST' && url.pathname === '/api/login') {
         if (!auth.exists) return json(res, 400, { error: 'No account has been created yet.' });
         const b = await readBody(req);
-        const value = await auth.login(b.username, b.password, ipOf(req));
+        let value;
+        try { value = await auth.login(b.username, b.password, ipOf(req)); } catch (e) { engine.audit.add('signin', { actor: String(b.username || '?').slice(0, 40), action: 'failed sign-in', detail: ipOf(req) }); throw e; }
+        engine.audit.add('signin', { actor: auth.username, action: 'signed in', detail: ipOf(req) });
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `${COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure(req) ? '; Secure' : ''}` });
         return res.end(JSON.stringify({ ok: true }));
       }
       if (req.method === 'POST' && url.pathname === '/api/logout') {
+        engine.audit.add('signin', { actor: auth.username || 'You', action: 'signed out', detail: ipOf(req) });
         res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure(req) ? '; Secure' : ''}` });
         return res.end(JSON.stringify({ ok: true }));
       }
@@ -366,6 +369,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/audit' && req.method === 'GET') { const q = Object.fromEntries(url.searchParams); return json(res, 200, engine.audit.search({ ...q, from: +q.from || 0, to: +q.to || 0 })); }
       if (url.pathname === '/api/backups' && req.method === 'GET') return json(res, 200, { config: engine.backups.config, status: engine.backups.status, files: engine.backups.list(), vaultExists: engine.vault.exists });
       if (url.pathname === '/api/backups' && req.method === 'PUT') { const config = engine.backups.setConfig(await readBody(req)); return json(res, 200, { config, status: engine.backups.status, files: engine.backups.list() }); }
       if (url.pathname === '/api/backups/run' && req.method === 'POST') { await readBody(req); const r = await engine.backups.run('manual'); return json(res, 200, { ...r, files: engine.backups.list(), status: engine.backups.status }); }
@@ -376,12 +380,12 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       }
       // ----- infrastructure map -----
       if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
-      if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
+      if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.audit.add('infra', { actor: 'You', action: 'added a device', detail: it.name || it.id }); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
       if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer))?$/))) {
         const [, id, act] = r;
         if (req.method === 'PUT' && !act) { const it = engine.infra.update(id, await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
-        if (req.method === 'DELETE' && !act) { engine.infra.remove(id); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
-        if (req.method === 'POST' && act === 'test') { const it = await engine.infra.test(id); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
+        if (req.method === 'DELETE' && !act) { engine.audit.add('infra', { actor: 'You', action: 'removed a device', detail: id }); engine.infra.remove(id); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && act === 'test') { const it = await engine.infra.test(id); engine.audit.add('infra', { actor: 'You', action: 'tested a connection', detail: `${it.name || id}: ${it.status || ''}` }); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
         if (req.method === 'POST' && act === 'confirm') { const b = await readBody(req); engine.infra.confirm(id, b.ok !== false); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && act === 'answer') { const it = engine.infra.answer(id, (await readBody(req)).text); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
       }
@@ -389,13 +393,14 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (url.pathname.startsWith('/api/vault/')) {
         const vb = req.method === 'GET' ? {} : await readBody(req), v = engine.vault;
         if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
-        if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); engine.audit.add('vault', { actor: 'You', action: 'unlocked the vault' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/auto') {
           // turning it on needs the passphrase again, so a borrowed open window cannot do it
           if (vb.enable) v.enableAuto(vb.passphrase); else v.disableAuto();
+          engine.audit.add('vault', { actor: 'You', action: vb.enable ? 'turned on auto-unlock' : 'turned off auto-unlock' });
           return json(res, 200, { auto: v.auto });
         }
-        if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); engine.audit.add('vault', { actor: 'You', action: 'locked the vault' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note, vb.username, { type: vb.type, host: vb.host, port: vb.port, auth: vb.auth }); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
         if ((r = m(/^\/api\/vault\/secrets\/([\w-]+)$/))) {
           if (req.method === 'PUT') return json(res, 200, v.update(r[1], vb));
@@ -496,6 +501,7 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setInterval(() => engine.audit.prune(), 3600000).unref();
   setInterval(() => engine.backups.tick().catch(() => {}), 60000).unref();
   setTimeout(() => engine.refreshLimits().catch(() => {}), 8000).unref();
   setInterval(() => engine.refreshLimits().catch(() => {}), EVERY).unref();   // once an hour

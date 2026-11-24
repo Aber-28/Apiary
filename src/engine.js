@@ -20,6 +20,7 @@ import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Infra } from './infra.js';
+import { Audit } from './audit.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -70,6 +71,7 @@ export class Engine extends EventEmitter {
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
+    this.audit = new Audit(path.join(path.dirname(store.file), 'audit.jsonl'), (t) => this._redact(t));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
@@ -130,6 +132,7 @@ export class Engine extends EventEmitter {
     const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
     for (const r of decided.slice(500)) delete this.store.data.approvals[r.id];
     this.emit('event', { type: 'approval', approval: rec });
+    this.audit.add('approval', { actor: agent.name, project: this._pname(agent), action: `asked: ${rec.title}`, detail: rec.kind || '' });
     this._log(agent, `? waiting for your approval: ${rec.title}`);
     this.store.save();
     return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
@@ -154,6 +157,7 @@ export class Engine extends EventEmitter {
     }
     rec.decidedAt = Date.now();
     const p = this.pending.get(id); this.pending.delete(id);
+    this.audit.add('approval', { actor: 'You', project: this.agents[rec.agentId] ? this._pname(this.agents[rec.agentId]) : '', action: `${rec.status}: ${rec.title}`, detail: `${rec.agentName || ''}${rec.mode === 'always' ? ' (always)' : ''}`.trim() });
     this.emit('event', { type: 'approval', approval: rec });
     this.store.save();
     p.resolve({ decision, note: rec.note, only: rec.only, names: rec.names, mode: rec.mode, models: rec.models });
@@ -202,6 +206,7 @@ export class Engine extends EventEmitter {
   // Whose team is it: for a project led by the CEO, the CEO's team of specialists.
   _teamRoot(a) { const r = this.rootOf(a); if (!this._isProject(r)) return r; const p = this._persona(r); return p.kind === 'general' ? p : r; }
   _mkey(a) { const p = this._persona(a); return p.memKey || slug(p.name); }
+  _pname(a) { const r = this.rootOf(a); return r.kind === 'general' ? '' : r.name; }
   _pkey(a) { const r = this.rootOf(a); return r.git?.repo || r.cwd || r.id; }
   // Remember one finished task for this agent, its project, and (through the project) its teammates.
   _record(agent, userText, from, final) {
@@ -580,7 +585,7 @@ export class Engine extends EventEmitter {
         this._setStatus(agent, 'waiting');
         this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval to use a secret' });
         const d = await this._ask(agent, { kind: 'secret', title: `${agent.name} wants to use the secret "${it.name}"`, detail: r.why ? `Reason given: ${r.why}` : 'No reason was given.', secret: it.name });
-        if (d.decision === 'deny') { notes.push(`The human did not allow use of "${it.name}"${d.note ? ': ' + d.note : ''}.`); continue; }
+        if (d.decision === 'deny') { this.audit.add('secret', { actor: agent.name, project: this._pname(agent), action: `denied secret "${it.name}"` }); notes.push(`The human did not allow use of "${it.name}"${d.note ? ': ' + d.note : ''}.`); continue; }
         allowed = true;
         if (d.mode === 'always') this.vault.setGrant(it.id, key, 'always');
       }
@@ -589,6 +594,7 @@ export class Engine extends EventEmitter {
       (this.leases.get(agent.id) || this.leases.set(agent.id, new Map()).get(agent.id)).set(it.name, val);
       const uname = this.vault.user(it.id);
       if (uname) (this.userLeases.get(agent.id) || this.userLeases.set(agent.id, new Map()).get(agent.id)).set(it.name, uname);
+      this.audit.add('secret', { actor: agent.name, project: this._pname(agent), action: `used secret "${it.name}"`, detail: asgd.grant === 'always' ? 'always allowed' : 'approved' });
       this._log(agent, `🔑 using secret "${it.name}"${asgd.grant === 'always' ? ' (always allowed)' : ''}`);
       const type = typeOf(it), EV = envName(it.name), meta = this.vault.list().find((x) => x.id === it.id) || {};
       if (type === 'ssh') { const mm = this.metaLeases.get(agent.id) || this.metaLeases.set(agent.id, {}).get(agent.id); Object.assign(mm, { [`${EV}_HOST`]: meta.host, [`${EV}_PORT`]: String(meta.port || 22), [`${EV}_AUTH`]: meta.auth || 'password' }); }
@@ -839,6 +845,7 @@ export class Engine extends EventEmitter {
   }
   _log(agent, line) {
     line = this._redact(line);
+    try { this.audit.fromLog(agent.name, this._pname(agent), line); } catch {}
     const l = this.logs(agent.id);
     l.push(line);
     if (l.length > MAX_LOG) l.splice(0, l.length - MAX_LOG);

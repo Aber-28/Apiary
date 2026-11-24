@@ -1536,5 +1536,38 @@ let orgIds;
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(appjs, /Back up now/); assert.match(appjs, /pollSystem/);
 }
 
+// ---- audit log ----
+{
+  const { Audit } = await import('../src/audit.js');
+  const fsx = await import('node:fs');
+  const a0 = (await call('/api/audit')).body; assert.ok(a0.total >= 1, 'earlier activity (backups) was recorded');
+  assert.ok(a0.items.some((e) => e.kind === 'backup'), 'backups are in the log');
+  // agent log lines become entries; secrets never are
+  const ag = Object.values(engine.agents)[0];
+  engine._log(ag, '$ ls -la /srv'); engine._log(ag, '$ apiary-ssh "pve" -- uptime'); engine._log(ag, '> Edit: src/app.js'); engine._log(ag, '> Read: README.md'); engine._log(ag, '✔ committed changes on feature-x');
+  let r = (await call('/api/audit?kind=command')).body; assert.ok(r.items.some((e) => e.action === 'ls -la /srv' && e.actor === ag.name));
+  r = (await call('/api/audit?kind=ssh')).body; assert.ok(r.items.some((e) => /apiary-ssh/.test(e.action)));
+  r = (await call('/api/audit?kind=file')).body; assert.ok(r.items.some((e) => e.action === 'Edit' && e.detail === 'src/app.js'));
+  assert.ok(!(await call('/api/audit?kind=file')).body.items.some((e) => e.action === 'Read'), 'reads are tools, not file changes');
+  assert.ok((await call('/api/audit?kind=commit')).body.items.some((e) => e.detail === 'feature-x'));
+  // search is word based and case-insensitive; filters combine
+  assert.equal((await call('/api/audit?q=LS%20srv')).body.total, 1);
+  assert.equal((await call('/api/audit?q=nonexistentword')).body.total, 0);
+  assert.ok((await call('/api/audit?actor=' + encodeURIComponent(ag.name) + '&kind=command')).body.items.every((e) => e.actor === ag.name));
+  assert.ok((await call('/api/audit')).body.facets.kinds.command >= 1);
+  // vault and sign-in events
+  await call('/api/vault/lock', 'POST', {}); assert.ok((await call('/api/audit?kind=vault')).body.items.some((e) => /locked the vault/.test(e.action)));
+  // redaction: a known secret value is masked before it is written
+  const raw = fsx.readFileSync(engine.audit.file, 'utf8'); assert.ok(!/sup3rs3cret/.test(raw));
+  // retention: old entries are deleted, new ones kept; file is private
+  const f = path.join(tmp, 'audit-retention.jsonl'); const au = new Audit(f);
+  fsx.writeFileSync(f, JSON.stringify({ t: Date.now() - 31 * 86400000, kind: 'command', actor: 'x', project: '', action: 'old', detail: '' }) + '\n' + JSON.stringify({ t: Date.now() - 29 * 86400000, kind: 'command', actor: 'x', project: '', action: 'recent', detail: '' }) + '\n');
+  assert.equal(au.prune(), 1); assert.deepEqual(au.search().items.map((e) => e.action), ['recent']);
+  assert.equal(fsx.statSync(engine.audit.file).mode & 0o777, 0o600);
+  const page = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(page, /pageAudit/);
+  // factory reset removes the log
+  const { plan } = await import('../src/reset.js'); assert.ok(plan(engine, { keepAccount: true }).files.some((x) => /audit\.jsonl$/.test(x)));
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

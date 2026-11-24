@@ -11,7 +11,7 @@ import path from 'node:path';
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const EXPIRES = 5 * 60 * 1000;
-const OURS = ['state.json', 'memory.json', 'infra.json', 'vault.json', 'known_hosts', 'agents', 'org', 'meetings', 'workspaces', 'repos', 'worktrees'];
+const OURS = ['state.json', 'memory.json', 'infra.json', 'audit.jsonl', 'vault.json', 'known_hosts', 'agents', 'org', 'meetings', 'workspaces', 'repos', 'worktrees'];
 
 export class ResetGate {
   constructor() { this.run = null; }

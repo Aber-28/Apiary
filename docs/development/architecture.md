@@ -10,6 +10,7 @@ src/providers.js   claude/codex CLI runners, API runners, mock
 src/connections.js connection settings and tests
 src/github.js      gh CLI and REST access
 src/git.js         worktree, commit, merge, push helpers
+src/service.js     systemd user service (auto-start at login)
 src/store.js       JSON state file (mode 0600)
 bin/apiary.js      the apiary command
 test/e2e.mjs       end-to-end tests with a mock AI

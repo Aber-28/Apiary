@@ -71,7 +71,7 @@ gh repo clone Aber-28/Apiary ~/.local/share/apiary
 apiary
 ```
 
-Then open **http://127.0.0.1:7777** in your browser.
+Then open **http://127.0.0.1:7777** in your browser. The [setup wizard](setup-wizard.md) starts automatically: it connects your AI, lets you choose default models, and asks whether Apiary should start automatically.
 
 **Installed on a VM or server and want to open it from another computer?** Start it with `apiary start --lan` instead. See [Run it as a service](service.md#using-it-from-another-device-vm-server-phone).
 

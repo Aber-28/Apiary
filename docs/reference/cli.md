@@ -2,6 +2,8 @@
 
 ```text
 apiary [start] [--lan] [--port N]  Start Apiary. --lan: reachable from other devices, with a token
+apiary service <install|uninstall|status> [--lan]
+                                   Start Apiary automatically at login (systemd user service)
 apiary token                       Print the access link used with --lan
 apiary status                      Show connections, projects and agents
 apiary connect <claude|codex|github> [--method cli|api|token] [--model NAME]
@@ -48,3 +50,13 @@ apiary start --lan
 ```
 
 Listens on all network addresses and protects Apiary with an access token (created once, stored in `~/.apiary/token`, readable only by you). It prints a ready-to-open link for each address of the machine. `apiary token` prints the link again. See [Run it as a service](../getting-started/service.md#using-it-from-another-device-vm-server-phone).
+
+## service
+
+```bash
+apiary service install [--lan]   # start automatically at login
+apiary service status
+apiary service uninstall
+```
+
+Installs, shows or removes a systemd **user** service (no root needed). `--lan` makes the service use [LAN mode](../getting-started/service.md#using-it-from-another-device-vm-server-phone). Uninstalling does not stop a copy that is already running. Start the service now with `systemctl --user start apiary`.

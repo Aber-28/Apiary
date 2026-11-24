@@ -8,6 +8,8 @@ const HELP = `Apiary — chat-first orchestrator for Claude Code and Codex agent
 Usage:
   apiary [start] [--lan] [--port N]  Start Apiary (http://127.0.0.1:7777). --lan makes it reachable from
                                      other devices on your network, protected by an access token
+  apiary service <install|uninstall|status> [--lan]
+                                     Start Apiary automatically at login (systemd user service)
   apiary token                       Print the access link for --lan (and create the token if needed)
   apiary status                      Show what is connected and which agents exist
   apiary connect <claude|codex|github> [--method cli|api|token] [--model NAME]
@@ -60,6 +62,13 @@ try {
     if (f('--host')) process.env.APIARY_HOST = f('--host');
     if (a.includes('--lan')) { process.env.APIARY_HOST ||= '0.0.0.0'; process.env.APIARY_TOKEN ||= lanToken(); }
     const { main } = await import('../src/server.js'); main(lanLinks());
+  } else if (cmd === 'service') {
+    const svc = await import('../src/service.js');
+    const sub = args[0];
+    if (sub === 'install') { const s = await svc.install({ lan: args.includes('--lan') }); console.log(`✔ Installed. Apiary will start automatically at login${s.active ? ' (running now)' : ''}.\n  Start it now: systemctl --user start apiary`); }
+    else if (sub === 'uninstall') { await svc.uninstall(); console.log('✔ Removed. Apiary will no longer start automatically.'); }
+    else if (sub === 'status') { const s = await svc.status(); console.log(s.supported ? `installed: ${s.installed}  enabled: ${s.enabled}  running: ${s.active}` : s.reason); }
+    else throw new Error('Usage: apiary service <install|uninstall|status> [--lan]');
   } else if (cmd === 'token') {
     const t = process.env.APIARY_TOKEN || lanToken();
     console.log(`Access token: ${t}`);

@@ -1,6 +1,8 @@
 # First run and connections
 
-Open Apiary at <http://127.0.0.1:7777>. The sidebar on the left shows the three connections and whether each is ready (green) or not (red).
+Open Apiary at <http://127.0.0.1:7777>. On first run the [setup wizard](setup-wizard.md) guides you through everything below; this page is the manual version.
+
+The sidebar on the left shows the three connections and whether each is ready (green) or not (red).
 
 ## 1. Connect your AI
 

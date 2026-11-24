@@ -1,6 +1,6 @@
 // Apiary web UI: vanilla JS, no build step. All text is inserted with textContent (never innerHTML),
 // so agent output can never inject markup.
-const S = { agents: [], providers: [], limits: {}, defs: [], approvals: [], approvalsDefault: true, conns: null, msgs: {}, logs: {}, stream: {}, activity: {}, sel: null, tab: 'chat', open: {}, version: '' };
+const S = { agents: [], providers: [], limits: {}, defs: [], approvals: [], approvalsDefault: true, onboardingDone: true, defaultProvider: '', conns: null, msgs: {}, logs: {}, stream: {}, activity: {}, sel: null, tab: 'chat', open: {}, version: '' };
 const $ = (s) => document.querySelector(s);
 const view = $('#view');
 let page = null; // { update?() } for the current route
@@ -14,6 +14,9 @@ const ICON = {
   moon: 'M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z',
   plus: 'M12 5v14 M5 12h14', chev: 'M6 9l6 6 6-6',
 };
+// replaceChildren would print "null" for empty slots (conditional pieces); drop them instead.
+const _replaceChildren = Element.prototype.replaceChildren;
+Element.prototype.replaceChildren = function (...kids) { return _replaceChildren.apply(this, kids.flat().filter((k) => k != null && k !== false)); };
 const NS = 'http://www.w3.org/2000/svg';
 function svg(d, size = 20, sw = 1.8) {
   const s = document.createElementNS(NS, 'svg');
@@ -76,7 +79,7 @@ const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/projects', 'Projects'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/access', 'Access and safety'], ['#/folders', 'Folders']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/projects';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -116,6 +119,8 @@ const ROUTES = [
   [/^#\/connections$/, () => pageConnections()],
   [/^#\/connections\/(claude|codex|github)$/, (m) => pageConnection(m[1])],
   [/^#\/appearance$/, () => pageAppearance()],
+  [/^#\/startup$/, () => pageStartup()],
+  [/^#\/setup$/, () => { pageProjects(); openSetup(); }],
   [/^#\/access$/, () => pageAccess()],
   [/^#\/folders$/, () => pageFolders()],
 ];
@@ -133,7 +138,7 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, version: st.version });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version });
   updateBadge();
 }
 function connectEvents() {
@@ -340,7 +345,7 @@ function openPrDialog(lead) {
 // ---------- new project dialog ----------
 async function openNewProject() {
   if (!S.conns) await refreshConns();
-  const st = { approvals: S.approvalsDefault, src: 'empty', ai: S.providers.find((p) => p.id !== 'mock')?.id || S.providers[0]?.id || '', access: 'safe', repo: '', branches: [], base: '' };
+  const st = { approvals: S.approvalsDefault, src: 'empty', ai: S.providers.find((p) => p.id === S.defaultProvider)?.id || S.providers.find((p) => p.id !== 'mock')?.id || S.providers[0]?.id || '', access: 'safe', repo: '', branches: [], base: '' };
   const goal = h('textarea', { rows: '4', placeholder: 'e.g. Add dark mode to the settings page and write tests', 'aria-label': 'Goal' });
   const name = h('input', { type: 'text', placeholder: 'Optional — defaults to your goal' });
   const sourceBox = h('div'), aiBox = h('div'), accBox = h('div'), err = h('p', { class: 'hint', style: 'color:var(--err);min-height:20px', role: 'alert' });
@@ -506,8 +511,174 @@ function pageFolders() {
       h('p', { class: 'hint', style: 'margin-top:12px' }, 'Set APIARY_HOME to move all of this.')));
 }
 
+// ---------- first-run setup wizard ----------
+const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+async function openSetup() {
+  document.querySelector('.wizard')?.remove();
+  await refreshConns();
+  const W = { step: 0, tests: {}, models: {}, pick: {}, other: {}, defAI: S.defaultProvider, svc: null, svcWant: true, startNow: false, github: null };
+  const root = h('div', { class: 'wizard', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Set up Apiary' });
+  document.body.append(root);
+  const NAMES = ['Welcome', 'Connect your AI', 'Default models', 'GitHub', 'Startup', 'All set'];
+  const conn = (id) => S.conns.find((c) => c.id === id);
+  const okAI = () => ['claude', 'codex'].filter((id) => W.tests[id]?.ok);
+  const finish = guard(async () => {
+    await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) });
+    S.onboardingDone = true; if (W.defAI) S.defaultProvider = W.defAI;
+    root.remove(); await loadState(); await refreshConns(); location.hash = '#/projects'; route();
+  });
+  // One panel per service: shows if it works; if not, how to sign in (terminal) or paste a key (web).
+  function connPanel(id, onChange) {
+    const box = h('div', { class: 'card wiz-card' });
+    const isGh = id === 'github', webM = isGh ? 'token' : 'api', info = CINFO[id];
+    const test = async () => {
+      W.tests[id] = { state: 'checking' }; draw();
+      try { const r = await api(`/api/connections/${id}/test`, 'POST', {}); W.tests[id] = r.ok ? { ok: true, detail: r.detail } : { ok: false, error: r.error }; }
+      catch (e) { W.tests[id] = { ok: false, error: e.message }; }
+      await refreshConns(); draw(); onChange?.();
+    };
+    const setMethod = async (m) => { await api('/api/connections/' + id, 'PUT', { method: m }); await refreshConns(); W.tests[id] = { ok: false, error: '' }; draw(); };
+    function draw() {
+      const c = conn(id), t = W.tests[id] || { ok: false, error: '' };
+      const head = h('div', { class: 'kv', style: 'justify-content:space-between;margin-bottom:10px' }, h('h2', { style: 'margin:0' }, info.title),
+        t.state === 'checking' ? h('span', { class: 'pill info' }, 'Checking…') : h('span', { class: 'pill ' + (t.ok ? 'ok' : 'err') }, t.ok ? 'Connected' : 'Not connected'));
+      if (t.state === 'checking') { box.replaceChildren(head, h('p', { class: 'hint' }, 'Making a tiny test request to confirm you are signed in…')); return; }
+      if (t.ok) { box.replaceChildren(head, h('p', {}, `✔ ${t.detail || 'Works'}`, h('span', { class: 'hint' }, ` · via ${c.method === 'cli' ? 'terminal' : 'web'}`)), h('button', { class: 'btn', onclick: () => { W.tests[id] = { ok: false, error: '' }; draw(); } }, 'Change how it connects')); return; }
+      const key = h('input', { type: 'password', autocomplete: 'off', placeholder: isGh ? 'ghp_… or github_pat_…' : 'Paste your key', 'aria-label': info.key });
+      const terminal = h('div', {}, c.cli.found ? null : h('div', {}, h('p', { class: 'hint' }, `${info.title.replace(' Code', '')} is not installed. Install it:`), cmdBox(info.install)),
+        h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal:' : 'Sign in once in a terminal (Apiary then reuses that login):'), cmdBox(info.login),
+        h('div', { class: 'kv', style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: guard(test) }, 'I have signed in. Check again')));
+      const web = h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? 'Needs “repo” access. Stored only on this machine in a private file.' : 'Stored only on this machine in a private file. Web agents can chat but cannot edit files.')),
+        h('button', { class: 'btn primary', onclick: guard(async () => { if (!key.value.trim()) { toast('Paste the key first', true); return; } await api('/api/connections/' + id, 'PUT', { method: webM, [isGh ? 'token' : 'apiKey']: key.value }); await refreshConns(); await test(); }) }, 'Save and check'));
+      box.replaceChildren(head,
+        t.error ? h('p', { class: 'hint', style: 'color:var(--err)' }, t.error) : null,
+        h('div', { class: 'seg', role: 'group', 'aria-label': 'Connection method', style: 'margin-bottom:14px' },
+          h('button', { 'aria-pressed': String(c.method === 'cli'), onclick: guard(() => setMethod('cli')) }, 'Terminal'),
+          h('button', { 'aria-pressed': String(c.method === webM), onclick: guard(() => setMethod(webM)) }, isGh ? 'Web · token' : 'Web · API key')),
+        c.method === 'cli' ? terminal : web);
+    }
+    draw();
+    box.recheck = test;
+    return box;
+  }
+
+  const steps = [
+    // 0 Welcome
+    () => h('div', {}, h('h1', {}, 'Welcome to Apiary'), h('p', { class: 'sub-title' }, 'A quick setup (about two minutes): connect your AI, choose default models, optionally connect GitHub, and decide whether Apiary starts automatically.'),
+      h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: guard(async () => { await api('/api/settings', 'PUT', { onboardingDone: true }); S.onboardingDone = true; root.remove(); toast('You can run setup again from Settings → Setup guide'); if (cur() === '#/setup') location.hash = '#/projects'; }) }, 'Skip for now'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(1) }, 'Start setup'))),
+    // 1 Connect AI
+    () => {
+      const panels = ['claude', 'codex'].map((id) => connPanel(id, () => { cont.disabled = !okAI().length; }));
+      const cont = h('button', { class: 'btn primary big', disabled: !okAI().length, onclick: () => go(2) }, 'Continue');
+      // Detect what is already set up: anything that looks configured gets a real test right away.
+      for (const [i, id] of ['claude', 'codex'].entries()) { const c = conn(id); if (!W.tests[id] && c.ready) panels[i].recheck(); else if (!W.tests[id]) W.tests[id] = { ok: false, error: '' }; }
+      return h('div', {}, h('h1', {}, 'Connect your AI'), h('p', { class: 'sub-title' }, 'Connect at least one. Apiary checks what you already have set up; anything not signed in is explained below.'), ...panels,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(0) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', onclick: () => go(3) }, 'Skip'), cont));
+    },
+    // 2 Default models
+    () => {
+      const ids = okAI();
+      const box = h('div', {});
+      const load = async () => {
+        box.replaceChildren(h('p', { class: 'hint' }, 'Looking up available models…'));
+        const parts = [];
+        for (const id of ids) {
+          if (!W.models[id]) W.models[id] = await api(`/api/connections/${id}/models`).catch(() => ({ source: 'suggestions', models: [] }));
+          const m = W.models[id], cur = W.pick[id] ?? conn(id).api.model ?? '';
+          const known = m.models.some((x) => x.id === cur);
+          const other = h('input', { type: 'text', placeholder: 'Model name', value: known ? '' : cur, 'aria-label': `${CINFO[id].title} model name`, style: known || !cur ? 'display:none;margin-top:8px' : 'margin-top:8px' });
+          const sel = h('select', { 'aria-label': `Default model for ${CINFO[id].title}`, onchange: (e) => { W.pick[id] = e.target.value === '__other' ? other.value : e.target.value; other.style.display = e.target.value === '__other' ? '' : 'none'; if (e.target.value === '__other') other.focus(); } },
+            h('option', { value: '', selected: !cur }, 'Default (let it choose)'), m.models.map((x) => h('option', { value: x.id, selected: x.id === cur }, x.label)), h('option', { value: '__other', selected: !!cur && !known }, 'Other…'));
+          other.oninput = () => { W.pick[id] = other.value.trim(); };
+          W.pick[id] = cur;
+          parts.push(h('div', { class: 'card wiz-card' }, h('h2', {}, CINFO[id].title), h('label', { class: 'f' }, 'Default model', sel, other, h('small', {}, m.source === 'provider' ? 'Listed by your account.' : id === 'codex' ? 'Leave on Default to use whatever Codex is set to, or type a model name.' : 'Suggestions. Choose Other to type any model name your plan allows.'))));
+        }
+        if (ids.length > 1) {
+          W.defAI ||= ids[0];
+          const dd = () => ddBox.replaceChildren(h('h2', {}, 'Which AI should lead new projects?'), h('div', { class: 'choice' }, ids.map((id) => h('button', { type: 'button', 'aria-pressed': String(W.defAI === id), onclick: () => { W.defAI = id; dd(); } }, h('b', {}, CINFO[id].title), h('small', {}, 'You can change it per project')))));
+          const ddBox = h('div', { class: 'card wiz-card' }); dd(); parts.push(ddBox);
+        } else if (ids.length === 1) W.defAI = ids[0];
+        box.replaceChildren(...(parts.length ? parts : [h('p', { class: 'hint' }, 'No AI connected yet. Go back and connect one, or continue and do it later in Connections.')]));
+      };
+      load();
+      return h('div', {}, h('h1', {}, 'Choose default models'), h('p', { class: 'sub-title' }, 'The model each AI uses unless a project says otherwise.'), box,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(1) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
+          for (const id of ids) await api('/api/connections/' + id, 'PUT', { model: W.pick[id] || '' });
+          await api('/api/settings', 'PUT', { defaultProvider: W.defAI || '' }); S.defaultProvider = W.defAI || ''; await refreshConns(); go(3);
+        }) }, 'Continue')));
+    },
+    // 3 GitHub
+    () => {
+      const p = connPanel('github'); if (!W.tests.github) { const c = conn('github'); if (c.status?.ok || c.cli.found) p.recheck(); }
+      return h('div', {}, h('h1', {}, 'Connect GitHub (optional)'), h('p', { class: 'sub-title' }, 'Lets agents work on your repositories and open pull requests. You can do this later.'), p,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(2) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(4) }, W.tests.github?.ok ? 'Continue' : 'Skip for now')));
+    },
+    // 4 Startup
+    () => {
+      const box = h('div', {});
+      const draw = () => {
+        const sv = W.svc;
+        if (!sv) { box.replaceChildren(h('p', { class: 'hint' }, 'Checking this machine…')); return; }
+        if (!sv.supported) { box.replaceChildren(h('div', { class: 'card wiz-card' }, h('p', {}, sv.reason), h('p', { class: 'hint' }, 'You can start Apiary yourself with the command: apiary')));
+          return; }
+        box.replaceChildren(h('div', { class: 'choice' },
+          h('button', { type: 'button', 'aria-pressed': String(W.svcWant), onclick: () => { W.svcWant = true; draw(); } }, h('b', {}, 'Yes, start it automatically'), h('small', {}, 'Runs in the background when you log in')),
+          h('button', { type: 'button', 'aria-pressed': String(!W.svcWant), onclick: () => { W.svcWant = false; draw(); } }, h('b', {}, 'No, I will start it myself'), h('small', {}, 'Run “apiary” whenever you need it'))),
+          sv.enabled ? h('p', { class: 'hint' }, '✔ It is already set to start automatically.') : null,
+          W.svcWant && !sv.enabled ? h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: W.startNow, onchange: (e) => (W.startNow = e.target.checked), 'aria-label': 'Switch to the background service now' }), h('span', {}, h('b', {}, 'Switch to the background service now'), h('small', { class: 'hint', style: 'display:block' }, 'Apiary restarts in a few seconds; this page reloads on its own.'))) : null);
+      };
+      api('/api/service').then((s) => { W.svc = s; W.svcWant = s.supported ? (s.enabled || W.svcWant) : false; draw(); }).catch((e) => { W.svc = { supported: false, reason: e.message }; draw(); });
+      draw();
+      return h('div', {}, h('h1', {}, 'Run Apiary automatically?'), h('p', { class: 'sub-title' }, 'Apiary can start by itself whenever you log in, so it is always ready at its address.'), box,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(3) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
+          const sv = W.svc;
+          if (sv?.supported) {
+            if (W.svcWant && !sv.enabled) {
+              if (W.startNow) { await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) }); }
+              await api('/api/service', 'POST', { enabled: true, startNow: W.startNow });
+              if (W.startNow) { root.replaceChildren(h('div', { class: 'wiz-body' }, h('h1', {}, 'Restarting as a service…'), h('p', { class: 'sub-title' }, 'This page will reload in a few seconds.'))); await settle(3500); for (let i = 0; i < 20; i++) { try { await api('/api/state'); break; } catch { await settle(1000); } } location.hash = '#/projects'; location.reload(); return; }
+              W.svc = await api('/api/service');
+            } else if (!W.svcWant && sv.enabled) W.svc = await api('/api/service', 'POST', { enabled: false });
+          }
+          go(5);
+        }) }, 'Continue')));
+    },
+    // 5 Done
+    () => {
+      const rows = [];
+      for (const id of ['claude', 'codex']) { const c = conn(id); rows.push(h('li', {}, h('b', {}, CINFO[id].title), W.tests[id]?.ok ? ` connected (${c.method === 'cli' ? 'terminal' : 'web'}), model: ${c.api.model || 'default'}${W.defAI === id ? ', leads new projects' : ''}` : ' not connected yet')); }
+      rows.push(h('li', {}, h('b', {}, 'GitHub'), W.tests.github?.ok ? ` connected${W.tests.github.detail ? ': ' + W.tests.github.detail : ''}` : ' not connected (optional)'));
+      rows.push(h('li', {}, h('b', {}, 'Startup'), W.svc?.enabled ? ' starts automatically at login' : ' you start it yourself'));
+      return h('div', {}, h('h1', {}, 'You are all set'), h('p', { class: 'sub-title' }, 'You can change any of this later under Connections and Settings.'), h('div', { class: 'card wiz-card' }, h('ul', { class: 'summary' }, rows)),
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(4) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: finish }, 'Open Apiary')));
+    },
+  ];
+  function go(n) { W.step = n; draw(); }
+  function draw() {
+    root.replaceChildren(h('div', { class: 'wiz-body' },
+      W.step > 0 && W.step < 5 ? h('ol', { class: 'stepper', 'aria-label': 'Progress' }, NAMES.slice(1, 5).map((n, i) => h('li', { 'aria-current': W.step === i + 1 ? 'step' : null, class: W.step > i + 1 ? 'done' : '' }, n))) : null,
+      steps[W.step]()));
+    root.scrollTop = 0;
+  }
+  draw();
+}
+
+function pageStartup() {
+  crumbs('Settings', 'Startup');
+  const box = h('div', { class: 'card', style: 'max-width:640px' }, h('p', { class: 'hint' }, 'Checking…'));
+  view.replaceChildren(h('h1', {}, 'Startup'), h('p', { class: 'sub-title' }, 'Start Apiary automatically when you log in.'), box);
+  const draw = (s) => {
+    if (!s.supported) { box.replaceChildren(h('p', {}, s.reason), h('p', { class: 'hint' }, 'Start it yourself with: apiary')); return; }
+    box.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', {}, 'Run automatically at login'), h('p', { class: 'hint', style: 'margin:2px 0 0' }, s.enabled ? `On${s.active ? ' (running as a service now)' : ''}` : 'Off')),
+      h('button', { class: s.enabled ? 'btn' : 'btn primary', onclick: guard(async () => { draw(await api('/api/service', 'POST', { enabled: !s.enabled })); toast(s.enabled ? 'Turned off' : 'Turned on. It starts at your next login'); }) }, s.enabled ? 'Turn off' : 'Turn on')),
+      h('p', { class: 'hint', style: 'margin-top:14px' }, 'Uses a systemd user service. Turning it on does not interrupt this running copy.'));
+  };
+  api('/api/service').then(draw).catch((e) => box.replaceChildren(h('p', {}, e.message)));
+}
+
 // ---------- boot ----------
 (async () => {
   try { await loadState(); } catch (e) { toast(e.message, true); }
   connectEvents(); route(); refreshConns();
+  if (!S.onboardingDone && cur() !== '#/setup') openSetup();
 })();

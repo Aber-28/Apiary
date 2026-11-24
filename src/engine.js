@@ -109,6 +109,16 @@ export class Engine extends EventEmitter {
     return rec;
   }
 
+  get defaultProvider() { const p = this.store.data.settings.defaultProvider; return this.available.some((x) => x.id === p) ? p : ''; }
+  get onboardingDone() { return !!this.store.data.settings.onboardingDone; }
+  setSettings({ defaultProvider, onboardingDone }) {
+    const st = this.store.data.settings;
+    if (defaultProvider !== undefined) { if (defaultProvider && !['claude', 'codex'].includes(defaultProvider)) throw httpErr(400, 'Unknown provider'); st.defaultProvider = defaultProvider; }
+    if (onboardingDone !== undefined) st.onboardingDone = !!onboardingDone;
+    this.store.save();
+  }
+  defaultModel(provider) { return provider === 'mock' ? '' : this.connections.get(provider).model || ''; }
+
   // ---------- providers ----------
   // Which way each AI is reached right now: its chosen method, falling back to the other if that one is unusable.
   resolveMethod(provider) {
@@ -156,7 +166,7 @@ export class Engine extends EventEmitter {
     const id = id8();
     const title = (name || goal || 'New project').trim().split('\n')[0].slice(0, 48);
     const pslug = slug(title);
-    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || '', access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
+    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
 
     // Where does the work happen?
     let repo = null;
@@ -527,7 +537,7 @@ export class Engine extends EventEmitter {
     const method = this.resolveMethod(provider);
     const fields = {
       id: id8(), name: def?.name || spec.name, role: def?.role || spec.role, instructions: def?.instructions || '',
-      provider, method, model: def?.model || (provider === parent.provider ? parent.model : ''),
+      provider, method, model: def?.model || (provider === parent.provider ? parent.model : this.defaultModel(provider)),
       cwd: parent.cwd, access: parent.access, parentId: parent.id, depth: parent.depth + 1,
     };
     // Each CLI agent in a git project gets its own checkout, branched from its parent.

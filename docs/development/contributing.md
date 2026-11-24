@@ -7,7 +7,7 @@ npm test                         # end-to-end tests with the mock AI
 APIARY_MOCK=1 npm start          # run the UI with a fake AI, no accounts needed
 ```
 
-The tests start a real server and exercise: the delegation and message parsers, approvals (approve, partial, deny, stop, merge review), agent-to-agent messaging (including deadlock refusal), security checks, delegation and parallel sub-agents, stop and delete, persistence, saved agents, settings and connections (including that secrets are never returned), and a full git project with worktrees, merges, a push and cleanup.
+The tests start a real server and exercise: the delegation and message parsers, approvals (approve, partial, deny, stop, merge review), agent-to-agent messaging (including deadlock refusal), security checks, delegation and parallel sub-agents, stop and delete, persistence, saved agents, settings and connections (including that secrets are never returned), onboarding (service install with a fake systemctl, model lists, defaults), LAN mode, and a full git project with worktrees, merges, a push and cleanup.
 
 ## Guidelines
 

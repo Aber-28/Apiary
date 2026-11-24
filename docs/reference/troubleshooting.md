@@ -12,6 +12,15 @@ See [Install on Linux](../getting-started/install.md) for installing a current N
 * **Web:** make sure a key is saved. Codex also needs a model name.
 * Press **Test connection** to see the real error message.
 
+## The setup wizard says the systemd user session is not reachable
+Apiary can only install the service from a normal login session (SSH or desktop), not inside a container or after `su`/`sudo`. Log in as the user who will run Apiary and retry, or start it yourself with `apiary`.
+
+## The wizard says I am not signed in, but I am
+Press **Check again** after signing in. The check makes a real request, so it also fails if the account has no access or no credit. The message shown is the CLI's own.
+
+## I want to see the setup wizard again
+**Settings → Setup guide**.
+
 ## “Port 7777 is already in use”
 `APIARY_PORT=7790 apiary`, or stop the other process.
 

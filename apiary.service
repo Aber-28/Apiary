@@ -1,0 +1,11 @@
+[Unit]
+Description=Apiary
+After=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/apiary
+Restart=on-failure
+Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Apiary</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23f5b83d' stroke-width='1.8' stroke-linejoin='round'%3E%3Cpath d='M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z'/%3E%3Cpath d='M12 8.2l3.6 2.1v4.2L12 16.6l-3.6-2.1v-4.2z' fill='%23f5b83d' stroke='none'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<script>try{var t=localStorage.getItem('apiary-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.className=t}catch(e){document.documentElement.className='dark'}</script>
+</head>
+<body>
+<div id="app" class="shell">
+  <aside id="side" class="side" aria-label="Sidebar"></aside>
+  <div class="main">
+    <header class="top">
+      <button id="menu" class="icon-btn only-small" aria-label="Open menu">☰</button>
+      <nav id="crumbs" class="crumbs" aria-label="Breadcrumb"></nav>
+      <span class="live"><span class="dot ok"></span>Running on this machine</span>
+      <button id="theme" class="icon-btn" aria-label="Switch theme"></button>
+    </header>
+    <main id="view" class="view"></main>
+  </div>
+</div>
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

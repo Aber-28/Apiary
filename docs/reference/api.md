@@ -52,6 +52,9 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | PUT/DELETE | `/api/vault/secrets/:id` | Edit (value, optional username, note), assign, delete |
 | GET | `/api/update` | Update status |
 | POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install (install answers 202 and runs in the background; `GET /api/update` then returns `progress` with `pct`, `steps`, `log`, `failed`) |
+| PUT | `/api/projects/:id/stage` | Set `{stage: building\|maintenance\|closed, note}` |
+| GET | `/api/export?vault=0\|1&files=0\|1` | Download everything as a .tar.gz (`&info=1` shows what is included) |
+| POST | `/api/import` | Upload an export (`content-type: application/gzip`, header `x-apiary-import: 1`, header `x-vault-passphrase` URL-encoded); Apiary then restarts |
 | GET/PUT/DELETE | `/api/projects/:id/plan` | Read, edit or clear a project's phased plan |
 | POST | `/api/projects/:id/plan/ask` | Ask the lead to draft a plan |
 

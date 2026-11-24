@@ -53,6 +53,9 @@ const copy = (text) => navigator.clipboard?.writeText(text).then(() => toast('Co
 const cmdBox = (text) => h('div', { class: 'cmd mono' }, h('code', {}, text), h('button', { type: 'button', onclick: () => copy(text) }, 'Copy'));
 const ago = (ts) => { const s = (Date.now() - ts) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
 const STATUS = { idle: ['ok', 'Idle'], working: ['work', 'Working'], waiting: ['info', 'Waiting for team'], error: ['err', 'Error'] };
+const STAGES = { building: ['Building', 'Being made for the first time', 'work'], maintenance: ['Maintenance', 'Finished. Fixes, security updates and small changes', 'ok'], closed: ['Closed', 'Finished for good. Kept, but not worked on', ''] };
+const stageOf = (a) => a.stage || 'building';
+const stagePill = (a) => h('span', { class: 'pill ' + STAGES[stageOf(a)][2], title: STAGES[stageOf(a)][1] }, STAGES[stageOf(a)][0]);
 const pill = (status) => { const [c, t] = STATUS[status] || ['', status]; return h('span', { class: 'pill ' + c }, t); };
 const PNAME = { claude: 'Claude', codex: 'Codex', mock: 'Mock' };
 const pending = () => S.approvals.filter((a) => a.status === 'pending');
@@ -80,7 +83,7 @@ const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -120,6 +123,7 @@ const ROUTES = [
   [/^#\/usage$/, () => pageUsage()],
   [/^#\/secrets$/, () => pageSecrets()],
   [/^#\/updates$/, () => pageUpdates()],
+  [/^#\/transfer$/, () => pageTransfer()],
   [/^#\/teams$/, () => pageTeams()],
   [/^#\/memory$/, () => pageMemory()],
   [/^#\/projects$/, () => pageProjects()],
@@ -239,6 +243,15 @@ async function openReview(agent) {
 }
 
 // ---------- projects ----------
+function stagePicker(a) {
+  const sel = h('select', { 'aria-label': 'Project stage', class: 'model-pick', onchange: guard(async (e) => {
+    const to = e.target.value;
+    if (to === 'closed' && !confirm(`Close "${a.name}"? Running work stops. Nothing is deleted and you can reopen it at any time.`)) { e.target.value = stageOf(a); return; }
+    await api(`/api/projects/${a.id}/stage`, 'PUT', { stage: to });
+    toast(`Moved to ${STAGES[to][0]}`);
+  }) }, Object.entries(STAGES).map(([k, [label]]) => h('option', { value: k, selected: stageOf(a) === k }, label)));
+  return h('label', { class: 'model-box' }, h('small', {}, 'Stage'), sel);
+}
 function pageProjects() {
   crumbs('Workspace', 'Projects');
   const draw = () => {
@@ -246,12 +259,15 @@ function pageProjects() {
     view.replaceChildren(
       h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Projects'), h('p', { class: 'sub-title' }, 'Each project has a lead agent that can create sub-agents.')),
         h('button', { class: 'btn primary big', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project')),
-      ls.length ? h('div', { class: 'grid' }, ls.map((a) => h('a', { class: 'card', href: `#/project/${a.id}`, style: 'display:block' },
-        h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, a.name), pill(a.status)),
+      ls.length ? Object.keys(STAGES).map((k) => { const g = ls.filter((a) => stageOf(a) === k); if (!g.length) return null;
+        const grid = h('div', { class: 'grid' }, g.map((a) => h('a', { class: 'card', href: `#/project/${a.id}`, style: 'display:block' },
+        h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, a.name), h('span', { class: 'kv' }, stagePill(a), pill(a.status))),
         h('p', { class: 'hint', style: 'margin:8px 0' }, `${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'} · ${kidsOf(a.id).length} sub-agents`),
         a.git ? h('div', { class: 'mono hint' }, a.git.branch) : h('div', { class: 'hint' }, 'Plain folder'),
         a.plan ? (() => { const st = planStats(a.plan); return h('div', { style: 'margin-top:10px' }, bar(st.pct, `${a.name} progress`), h('small', { class: 'hint' }, `${st.pct}% · ${st.current ? `Phase ${st.index} of ${st.phases}: ${st.current.title}` : 'All phases done'}`)); })() : null,
-        h('div', { class: 'hint', style: 'margin-top:6px' }, `Started ${ago(a.createdAt)}`))))
+        h('div', { class: 'hint', style: 'margin-top:6px' }, `Started ${ago(a.createdAt)}`))));
+        const head = h('h2', { style: 'margin:22px 0 4px' }, `${STAGES[k][0]} `, h('small', { class: 'hint' }, `(${g.length})`)), hint = h('p', { class: 'hint', style: 'margin:0 0 10px' }, STAGES[k][1]);
+        return k === 'closed' ? h('details', { class: 'stage-closed' }, h('summary', {}, head), hint, grid) : h('section', { 'aria-label': STAGES[k][0] }, head, hint, grid); })
         : h('div', { class: 'card empty' }, h('p', {}, 'No projects yet. Describe a goal and let a lead agent get started.'), h('button', { class: 'btn primary big', onclick: () => openNewProject() }, 'Start your first project')));
   };
   draw(); page = { update: (ev) => ['agent', 'removed'].includes(ev.type) && draw() };
@@ -308,13 +324,14 @@ function pageProject(leadId, general = false) {
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
       modelPicker(a),
+      !a.parentId && !a.kind ? stagePicker(a) : null,
       pill(a.status),
       a.kind === 'general' || a.title || a.mdFile ? h('button', { class: 'btn', onclick: () => openProfile(a) }, 'Edit profile') : null,
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
       a.git ? h('button', { class: 'btn', onclick: () => openReview(a) }, 'Review changes') : null,
       a.method !== 'api' ? h('button', { class: 'btn', onclick: guard(() => takeOver(a)) }, 'Take over') : null,
       l.git && a.id === l.id ? (l.git.prUrl ? h('a', { class: 'btn', href: l.git.prUrl, target: '_blank', rel: 'noopener' }, 'View pull request') : h('button', { class: 'btn', onclick: () => openPrDialog(l) }, 'Open pull request')) : null,
-      a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents? Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
+      a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents for good? To keep everything, set the stage to Closed instead. Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
   };
   const TABS = { chat: 'Chat', plan: 'Plan', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
   const drawTabs = () => el.tabs.replaceChildren(...(general ? (S.orgDone ? ['chat', 'org'] : ['chat']) : Object.keys(TABS)).map((t) => h('button', { role: 'tab', 'aria-selected': String(S.tab === t), onclick: () => { S.tab = t; drawTabs(); drawBody(); } }, TABS[t])));
@@ -465,7 +482,7 @@ async function pageChat() {
   try {
     const a = await api('/api/chat');
     if (!S.agents.some((x) => x.id === a.id)) S.agents.push(a);
-    if (cur() !== '#/chat') return;
+    if (cur() !== '#/chat' && cur() !== '#/organisation') return;
     await ensureMsgs(a.id);
     S.sel = a.id;
     pageProject(a.id, true);
@@ -550,6 +567,45 @@ function renderUpdateChip() {
 async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
 // A full-screen view of the installation, so nobody thinks it has frozen.
+// ---------- export and import: move everything to another computer ----------
+function pageTransfer() {
+  crumbs('Settings', 'Export and import');
+  const vault = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Include the secrets vault' }), files = h('input', { type: 'checkbox', checked: true, 'aria-label': 'Include project files and repositories' });
+  const info = h('p', { class: 'hint', role: 'status' }, 'Checking what will be included…');
+  const refresh = () => api(`/api/export?info=1&vault=${vault.checked ? 1 : 0}&files=${files.checked ? 1 : 0}`).then((i) => {
+    const mb = (i.bytes / 1048576).toFixed(i.bytes > 1e8 ? 0 : 1);
+    info.replaceChildren(`About ${mb} MB. `, i.hasVault ? (vault.checked ? 'The vault is included and stays encrypted.' : 'The vault is left out.') : 'You have no vault yet.', i.external.length ? h('div', { style: 'margin-top:6px' }, 'These folders are outside Apiary and cannot travel in the file. Copy them yourself and keep the same path, or point the agents at the new place: ', h('span', { class: 'mono' }, i.external.join(', '))) : '');
+  }).catch(() => {});
+  vault.onchange = files.onchange = refresh; refresh();
+  const exportBtn = h('a', { class: 'btn primary big', href: '#', onclick: (e) => { e.preventDefault(); const a = h('a', { href: `/api/export?vault=${vault.checked ? 1 : 0}&files=${files.checked ? 1 : 0}`, download: '' }); document.body.append(a); a.click(); a.remove(); toast('Your download is starting. A large export can take a minute to begin.'); } }, 'Download export');
+  const file = h('input', { type: 'file', accept: '.gz,.tgz,application/gzip', 'aria-label': 'Export file' }), pass = h('input', { type: 'password', autocomplete: 'off', placeholder: 'Vault passphrase', 'aria-label': 'Vault passphrase' });
+  const prog = h('div', { class: 'ubar big', style: 'display:none', role: 'progressbar', 'aria-label': 'Upload progress', 'aria-valuemin': '0', 'aria-valuemax': '100' }, h('span', { style: 'width:0%' })), msg = h('p', { class: 'hint', role: 'status' });
+  const importBtn = h('button', { class: 'btn primary big', onclick: () => {
+    const f = file.files[0];
+    if (!f) return toast('Choose the export file first', true);
+    if (!confirm('Import this file? Everything in this Apiary is replaced by what is in the file. What is here now is not deleted: it is moved to a backup folder inside ~/.apiary. Apiary restarts afterwards.')) return;
+    importBtn.disabled = true; prog.style.display = ''; msg.textContent = 'Uploading…';
+    const x = new XMLHttpRequest(); x.open('POST', '/api/import');
+    x.setRequestHeader('content-type', 'application/gzip'); x.setRequestHeader('x-apiary-import', '1'); x.setRequestHeader('x-vault-passphrase', encodeURIComponent(pass.value));
+    x.upload.onprogress = (e) => { if (e.lengthComputable) { const pc = Math.round((e.loaded / e.total) * 100); prog.firstChild.style.width = pc + '%'; prog.setAttribute('aria-valuenow', pc); msg.textContent = pc < 100 ? `Uploading… ${pc}%` : 'Checking and importing… this can take a moment.'; } };
+    x.onerror = () => { importBtn.disabled = false; msg.textContent = 'The upload failed. Check the connection and try again.'; };
+    x.onload = () => {
+      let r = {}; try { r = JSON.parse(x.responseText); } catch { /* not JSON */ }
+      if (x.status !== 200) { importBtn.disabled = false; prog.style.display = 'none'; msg.replaceChildren(h('span', { style: 'color:var(--err)', role: 'alert' }, r.error || `Import failed (${x.status}).`)); if (r.needsPassphrase) pass.focus(); return; }
+      msg.textContent = 'Imported. Restarting Apiary…'; prog.firstChild.style.width = '100%';
+      const t0 = Date.now(), wait = async () => { try { await fetch('/api/state', { cache: 'no-store' }).then((q) => q.json()); if (Date.now() - t0 > 2500) { location.hash = '#/chat'; location.reload(); return; } } catch { /* still restarting */ } setTimeout(wait, 1000); };
+      setTimeout(wait, 2000);
+    };
+    x.send(f);
+  } }, 'Import');
+  view.replaceChildren(h('div', {}, h('h1', {}, 'Export and import'), h('p', { class: 'sub-title' }, 'Move everything to another computer: your projects, agents, chats, memory, tasks, tickets, settings and project files in one file.'),
+    h('div', { class: 'card', style: 'max-width:640px' }, h('h2', {}, 'Export'),
+      h('label', { class: 'check' }, files, ' Include project files and repositories'), h('label', { class: 'check' }, vault, ' Include the secrets vault (stays encrypted)'), info,
+      h('p', { class: 'hint' }, 'The file also holds your connection keys and tokens, so keep it private and delete it after the move.'), exportBtn),
+    h('div', { class: 'card', style: 'max-width:640px;margin-top:16px' }, h('h2', {}, 'Import'),
+      h('p', { class: 'hint' }, 'Do this on the new computer, after installing Apiary. If the file has a vault, its passphrase is required and is checked before anything changes.'),
+      h('label', { class: 'f' }, 'Export file', file), h('label', { class: 'f' }, 'Vault passphrase (only if the file has a vault)', pass), prog, msg, importBtn)));
+}
 function updateOverlay(from) {
   if (document.getElementById('upd-overlay')) return;
   const bar2 = h('span', { style: 'width:0%' }), log = h('pre', { class: 'term upd-log', tabindex: '0', 'aria-label': 'Update log' }), list = h('ol', { class: 'upd-steps' }), title = h('h2', {}, 'Updating Apiary'), sub = h('p', { class: 'hint', role: 'status' }, 'Please keep this page open. It refreshes by itself when the update is done.');
@@ -845,13 +901,14 @@ const dlgOpen = (title, ...body) => { const d = h('dialog', {}, h('form', { meth
 async function loadUsage() { try { S.usage = await api('/api/usage?days=14'); renderSide(); } catch { /* not ready */ } }
 setInterval(() => { if (!document.hidden) loadUsage(); }, 60000);
 function usageLine(id) {
-  const p = S.usage?.providers.find((x) => x.id === id);
-  if (!p) return null;
+  if (!S.usage) return null;
+  const p = S.usage.providers.find((x) => x.id === id) || { id, today: 0, week: 0 };
   const pct = p.pctDay ?? p.pctWeek, lim = p.pctDay != null ? p.daily : p.weekly, used = p.pctDay != null ? p.today : p.week;
   const tone = p.hitAt || (pct != null && pct >= 1) ? 'err' : pct != null && pct >= 0.8 ? 'warn' : 'ok';
   return h('div', { class: 'ulines' },
-    pct != null ? h('div', { class: 'ubar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.min(100, Math.round(pct * 100))), 'aria-label': `${PNAME[id] || id} usage` }, h('span', { class: tone, style: `width:${Math.min(100, Math.round(pct * 100))}%` })) : null,
-    h('small', { class: tone === 'ok' ? '' : tone }, p.hitAt ? 'Limit reached. Wait a while.' : pct != null ? `${fmtTok(used)} of ${fmtTok(lim)} ${p.pctDay != null ? 'today' : 'this week'}${pct >= 0.8 ? ' · nearly full' : ''}` : `${fmtTok(p.today)} today${p.estimated ? ' (estimated)' : ''}`));
+    h('div', { class: 'ubar' + (pct == null ? ' nolimit' : ''), role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct == null ? 0 : Math.min(100, Math.round(pct * 100))), 'aria-label': `${PNAME[id] || id} usage, 0 to 100 percent` }, h('span', { class: tone, style: `width:${pct == null ? 0 : Math.min(100, Math.round(pct * 100))}%` })),
+    h('div', { class: 'uscale', 'aria-hidden': 'true' }, h('span', {}, '0%'), h('span', {}, pct == null ? '' : `${Math.min(100, Math.round(pct * 100))}%`), h('span', {}, '100%')),
+    h('small', { class: tone === 'ok' ? '' : tone }, p.hitAt ? 'Limit reached. Wait a while.' : pct != null ? `${fmtTok(used)} of ${fmtTok(lim)} ${p.pctDay != null ? 'today' : 'this week'}${pct >= 0.8 ? ' · nearly full' : ''}` : `${fmtTok(p.today)} today${p.estimated ? ' (estimated)' : ''}. ` , h('a', { href: '#/usage', style: 'text-decoration:underline' }, 'Set a limit to see the %')));
 }
 
 // ---------- usage page: tokens per agent ----------
@@ -1112,12 +1169,18 @@ async function openSetup(startAt = 0) {
       };
       const answer = (text) => { text = String(text || '').trim(); if (!text) return; iv.answers.push({ q: iv.cur.question, a: text }); iv.cur = null; next(); };
       function draw2() {
-        const free = h('input', { type: 'text', placeholder: 'Or type your own answer', 'aria-label': 'Your answer', onkeydown: (e) => { if (e.key === 'Enter') answer(free.value); } });
+        const picked = new Set(), free = h('textarea', { rows: '2', placeholder: 'Add your own answer or tell more (optional)', 'aria-label': 'Your own answer or more detail' });
+        const send = h('button', { class: 'btn primary', disabled: true, onclick: () => submit() }, 'Send answer');
+        const sync = () => { send.disabled = !picked.size && !free.value.trim(); };
+        free.oninput = sync;
+        const submit = () => { const t = [...picked, free.value.trim()].filter(Boolean).join('; '); if (t) answer(t); };
         box.replaceChildren(
           ...iv.answers.map((a) => h('div', { class: 'card wiz-card', style: 'padding:12px 16px' }, h('b', {}, a.q), h('p', { style: 'margin:4px 0 0' }, a.a))),
           iv.busy ? h('p', { class: 'hint', role: 'status' }, iv.answers.length ? 'Thinking about your answer…' : 'Preparing the first question…')
-            : iv.cur ? h('div', { class: 'card wiz-card' }, h('small', { class: 'hint' }, `Question ${iv.cur.asked} of up to ${iv.cur.max}`), h('h2', { style: 'margin:4px 0 12px' }, iv.cur.question),
-              h('div', { class: 'choice' }, iv.cur.choices.map((c) => h('button', { type: 'button', onclick: () => answer(c) }, h('b', {}, c)))), h('div', { class: 'kv', style: 'margin-top:12px' }, free, h('button', { class: 'btn primary', onclick: () => answer(free.value) }, 'Answer')))
+            : iv.cur ? h('div', { class: 'card wiz-card' }, h('small', { class: 'hint' }, `Question ${iv.cur.asked} of up to ${iv.cur.max}`), h('h2', { style: 'margin:4px 0 4px' }, iv.cur.question),
+              h('p', { class: 'hint', style: 'margin:0 0 10px' }, 'Pick as many as fit, and add your own words below.'),
+              h('div', { class: 'choice', role: 'group', 'aria-label': 'Suggested answers' }, iv.cur.choices.map((c) => { const btn = h('button', { type: 'button', 'aria-pressed': 'false', onclick: () => { if (picked.has(c)) picked.delete(c); else picked.add(c); btn.setAttribute('aria-pressed', String(picked.has(c))); btn.classList.toggle('on', picked.has(c)); sync(); } }, h('b', {}, c)); return btn; })),
+              h('div', { style: 'margin-top:12px' }, free), h('div', { class: 'kv', style: 'margin-top:8px;justify-content:flex-end' }, send))
             : null,
           iv.err ? h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' }, iv.err) : null);
       }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.0
+- **Export and import**: move everything to another computer in one file (vault optional, stays encrypted and needs its passphrase on import; the old data is kept in a backup folder)
+- **Project stages**: Building, Maintenance and Closed. Finished plans move to Maintenance by themselves. Closing keeps everything
+- **CEO interview**: pick several answers and add your own words
+- Fixed: Organisation no longer stays on "Opening chat…"
+- Fixed: time fields are dark in the dark theme
+- The usage bar (0% to 100%) always shows under each AI in the sidebar
+
 ## 0.7.0
 - Fixed: after an in-app update the service now restarts by itself (it used to stay stopped until restarted by hand)
 - **Update progress screen**: progress bar, steps, live log and timer while updating, automatic rollback if it fails, page refreshes when done

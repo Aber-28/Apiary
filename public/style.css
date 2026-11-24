@@ -84,7 +84,7 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent)}
 .msg.system.error{color:var(--err)}
 .msg .who{font-size:12px;font-weight:600;color:var(--muted);margin-bottom:2px}
 .live-line{color:var(--muted);font-size:13px;display:flex;gap:8px;align-items:center;padding:0 24px 8px;min-height:26px}
-.composer{display:flex;gap:10px;padding:14px 24px 20px;border-top:1px solid var(--line);align-items:flex-end}
+.composer{display:flex;gap:10px;padding:14px 24px 20px;border-top:1px solid var(--line);align-items:flex-end;position:relative}
 .composer textarea{min-height:46px;max-height:200px}
 .term{flex:1;overflow:auto;margin:0;padding:16px 24px;background:#0a0d12;color:#d6dbe4;font-size:12.5px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}
 .term .c{color:#f5b83d}.term .e{color:#f58a90}.term .o{color:#6fdba5}
@@ -208,3 +208,7 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .uscale{width:100%}
 
 .start-card{border-color:var(--accent);background:var(--accent-soft);margin-bottom:16px}
+.mention-pop{position:absolute;left:24px;bottom:calc(100% - 8px);min-width:260px;max-width:min(420px,calc(100% - 48px));background:var(--panel,var(--bg));border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.25);padding:4px;z-index:20}
+.mention-pop[hidden]{display:none}
+.mention-opt{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;padding:8px 10px;border-radius:7px;cursor:pointer}
+.mention-opt[aria-selected="true"],.mention-opt:hover{background:var(--hover,rgba(245,184,61,.16))}

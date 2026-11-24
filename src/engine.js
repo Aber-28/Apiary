@@ -1176,6 +1176,61 @@ export class Engine extends EventEmitter {
     }
   }
 
+  // ----- @mentions: the person tags an agent in a chat to call it -----
+  // Who can be tagged from this chat: its own team, the CEO and the lead of every open project.
+  mentionables(agentId) {
+    const me = this.agents[agentId];
+    if (!me) throw httpErr(404, 'No such agent');
+    const root = this.rootOf(me), out = new Map();
+    const add = (a) => { if (a && a.id !== me.id && !out.has(a.id)) out.set(a.id, { id: a.id, name: a.name, title: a.title || (a.kind === 'general' ? 'CEO' : a.role || '') }); };
+    for (const id of this.tree(root.id)) add(this.agents[id]);
+    for (const a of Object.values(this.agents)) if (!a.parentId && (a.kind === 'general' || this.stageOf(a) !== 'closed')) add(a);
+    if (root.kind !== 'general') for (const a of Object.values(this.agents)) if (a.kind === 'general') add(a);
+    return [...out.values()].filter((c) => { const r = this.rootOf(this.agents[c.id]); return r.kind === 'general' || this.stageOf(r) !== 'closed' || r.id === root.id; });
+  }
+
+  // Finds "@Name" (names may have spaces, so the longest match wins). Titles work too (@CTO).
+  findMentions(text, cands) {
+    const found = [], problems = [], re = /(^|[\s(,;:])@/g;
+    const keys = cands.flatMap((c) => [[c.name, c], ...(c.title ? [[c.title, c]] : [])]).filter(([k]) => k).sort((a, b) => b[0].length - a[0].length);
+    let m, clean = '', rest = '', last = 0;
+    while ((m = re.exec(text))) {
+      const start = m.index + m[1].length + 1, low = text.slice(start).toLowerCase();
+      const hit = keys.find(([k]) => low.startsWith(k.toLowerCase()) && !/[\w]/.test(text[start + k.length] || ' '));
+      if (!hit) continue;
+      const same = cands.filter((c) => c.name.toLowerCase() === hit[0].toLowerCase() || (c.title || '').toLowerCase() === hit[0].toLowerCase());
+      if (same.length > 1) { problems.push(`More than one agent is called "${hit[0]}". Use a more specific name.`); continue; }
+      if (!found.some((f) => f.id === hit[1].id)) found.push(hit[1]);
+      const gap = text.slice(last, m.index + m[1].length); clean += gap + hit[0]; rest += gap; last = start + hit[0].length;
+    }
+    return { found, problems, clean: clean + text.slice(last), rest: rest + text.slice(last) };
+  }
+
+  // The person's message in a chat. With no @tag it goes to this chat's agent as usual.
+  // With tags, the tagged agents get it (in their own chats) and each answer is also shown here.
+  tag(agentId, text) {
+    const me = this.agents[agentId];
+    if (!me) throw httpErr(404, 'No such agent');
+    const { found, problems, clean, rest } = this.findMentions(String(text), this.mentionables(agentId));
+    if (problems.length) throw httpErr(400, problems[0]);
+    if (!found.length) { this.send(agentId, text).catch(() => {}); return { tagged: [] }; }
+    if (!rest.replace(/[\s,;:.!?-]/g, '')) throw httpErr(400, `Say what ${found.map((f) => f.name).join(' and ')} should do, for example "@${found[0].name} please look at this".`);
+    for (const t of found) {
+      const peer = this.agents[t.id], rt = this.rootOf(peer);
+      if (rt.kind !== 'general' && this.stageOf(rt) === 'closed') throw httpErr(409, `${peer.name}'s project is closed. Reopen it (Projects page) first.`);
+    }
+    this._msg(me, { role: 'user', text: String(text) });
+    const also = found.length > 1 ? `\n\n(The same message was sent to: ${found.map((f) => f.name).join(', ')}.)` : '';
+    for (const t of found) {
+      this._msg(me, { role: 'system', text: `Sent to ${t.name}`, agentId: t.id });
+      this.send(t.id, clean + also).then(
+        (reply) => this._msg(me, { role: 'agent', text: reply || '(no reply)', by: { id: t.id, name: t.name } }),
+        (e) => this._msg(me, { role: 'system', text: `${t.name} could not finish: ${e.message}`, error: true }),
+      );
+    }
+    return { tagged: found.map((f) => f.name) };
+  }
+
   // ----- agent-to-agent messages -----
   async _findPeer(agent, to) {
     const root = this.rootOf(agent);

@@ -340,6 +340,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         }
         return json(res, 201, await engine.createLead(b));
       }
+      if (req.method === 'GET' && (r = m(/^\/api\/agents\/([\w-]+)\/mentionables$/))) return json(res, 200, engine.mentionables(r[1]));
       if ((r = m(/^\/api\/agents\/([\w-]+)\/messages$/))) {
         const id = r[1];
         if (!engine.agents[id]) throw Object.assign(new Error('No such agent'), { status: 404 });
@@ -347,8 +348,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (req.method === 'POST') {
           const b = await readBody(req);
           if (!b.text?.trim()) throw Object.assign(new Error('Empty message'), { status: 400 });
-          engine.send(id, b.text).catch(() => {});
-          return json(res, 202, { ok: true });
+          return json(res, 202, { ok: true, ...engine.tag(id, b.text) });
         }
       }
       if ((r = m(/^\/api\/agents\/([\w-]+)\/(logs|resume|takeover|pr|diff)$/))) {

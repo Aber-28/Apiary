@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.0
+
+* **Call an agent with @.** Type @ in any chat to pick a teammate, the CEO or a project lead. They receive your message in their own chat, and their answer is shown in the chat you are in. See "Call an agent with @" in the docs.
+
 ## 0.10.4
 
 * Fixed the dashboard asking you to set up your CEO after you already had. The page never picked up that the CEO existed, so the banner always showed and the Organisation tab stayed hidden.

@@ -8,7 +8,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `GET /api/events` | Live updates (Server-Sent Events, including `approval` events) |
 | `POST /api/agents` | Create a project. Body: `provider`, `goal`, `name`, `access`, `source`, `base`, `approvals` |
 | `GET /api/agents/:id/messages` | Chat history |
-| `POST /api/agents/:id/messages` | Send a message. Body: `text` |
+| `POST /api/agents/:id/messages` | Send a message. Body: `text`. With `@Name` tags, the tagged agents get it and `tagged` lists them |
+| `GET /api/agents/:id/mentionables` | Who can be tagged from this chat |
 | `GET /api/agents/:id/logs` | Terminal log lines |
 | `POST /api/agents/:id/stop` | Stop an agent and its team |
 | `GET /api/agents/:id/resume` | Command to resume the session in a terminal |

@@ -1111,5 +1111,36 @@ let orgIds;
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /orgDone: !!st\.orgDone/, 'the page copies orgDone from the server state');
 }
 
+// ---- 0.11.0: @mentions ----
+{
+  const { ceo, ne, se } = orgIds;
+  const cands = (await call(`/api/agents/${ceo.id}/mentionables`)).body;
+  assert.ok(cands.some((c) => c.id === ne.id) && cands.some((c) => c.id === se.id) && !cands.some((c) => c.id === ceo.id));
+  // names with spaces, any case, titles, and no false hits on e-mail addresses
+  const f = (t) => engine.findMentions(t, [{ id: 'a', name: 'Captain Atlas', title: 'CTO' }, { id: 'b', name: 'Maya', title: 'Designer' }]);
+  assert.deepEqual(f('hey @captain atlas, do it').found.map((x) => x.id), ['a']);
+  assert.deepEqual(f('@CTO and @Maya please').found.map((x) => x.id), ['a', 'b']);
+  assert.equal(f('mail me at bob@maya.com').found.length, 0); assert.equal(f('@Mayahem no').found.length, 0);
+  assert.equal(f('@Maya check this').clean, 'Maya check this'); assert.equal(f('@Maya').rest.trim(), '');
+  // empty request, ambiguous names, unknown tags
+  assert.equal((await call(`/api/agents/${ceo.id}/messages`, 'POST', { text: `@${ne.name}` })).status, 400);
+  assert.equal((await call(`/api/agents/${ceo.id}/messages`, 'POST', { text: '@Nobody do it' })).body.tagged.length, 0, 'unknown tag is just text for this chat');
+  // the tagged agent gets the message in its own chat and its answer is shown in this one
+  await until(() => engine.agents[ceo.id].status === 'idle');
+  const before = engine.messages(ceo.id).length;
+  const r = await call(`/api/agents/${ceo.id}/messages`, 'POST', { text: `Please @${ne.name} check the router` });
+  assert.equal(r.status, 202); assert.deepEqual(r.body.tagged, [ne.name]);
+  await until(() => engine.messages(ceo.id).some((m) => m.by?.id === ne.id));
+  const mine = engine.messages(ceo.id).slice(before);
+  assert.ok(mine.some((m) => m.role === 'user' && m.text.includes('@')) && mine.some((m) => m.role === 'system' && m.agentId === ne.id && /Sent to/.test(m.text)));
+  assert.ok(engine.messages(ne.id).some((m) => m.role === 'user' && /check the router/.test(m.text) && !m.text.includes('@')), 'the tagged agent received it without the @');
+  assert.ok(!mine.some((m) => m.role === 'agent' && !m.by), 'the chat agent itself was not asked');
+  // two at once
+  await call(`/api/agents/${ceo.id}/messages`, 'POST', { text: `@${ne.name} and @${se.name} introduce yourselves` });
+  await until(() => engine.messages(ceo.id).filter((m) => m.by).length >= 3);
+  assert.ok(engine.messages(se.id).some((m) => /same message was sent to/.test(m.text)));
+  await until(() => engine.agents[ne.id].status === 'idle' && engine.agents[se.id].status === 'idle');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

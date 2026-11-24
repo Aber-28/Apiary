@@ -18,6 +18,7 @@
 * [Your CEO and the setup interview](using-apiary/ceo-and-setup-interview.md)
 * [Project plans and progress](using-apiary/project-plans.md)
 * [Project stages](using-apiary/project-stages.md)
+* [Call an agent with @](using-apiary/mentions.md)
 * [Export and import](using-apiary/export-import.md)
 * [Tasks](using-apiary/tasks.md)
 * [Support tickets](using-apiary/support-tickets.md)

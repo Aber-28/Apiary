@@ -356,7 +356,7 @@ function pageProject(leadId, general = false) {
     const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
     const list = (S.msgs[a.id] || []).map((m) => {
       if (m.role === 'system') return h('div', { class: 'msg system' + (m.error ? ' error' : '') }, m.text);
-      const who = m.role === 'user' ? (m.from ? `From ${m.from.name}` : 'You') : m.role === 'report' ? 'Reports from sub-agents' : a.name;
+      const who = m.role === 'user' ? (m.from ? `From ${m.from.name}` : 'You') : m.role === 'report' ? 'Reports from sub-agents' : m.by ? m.by.name : a.name;
       return h('div', { class: 'msg ' + m.role }, h('div', { class: 'who' }, who), m.text);
     });
     if (S.stream[a.id]) list.push(h('div', { class: 'msg agent' }, h('div', { class: 'who' }, a.name), S.stream[a.id]));
@@ -457,12 +457,41 @@ function pageProject(leadId, general = false) {
     termEl = null;
     msgsEl = h('div', { class: 'msgs', 'aria-live': 'polite' });
     liveEl = h('div', { class: 'live-line' });
-    input = h('textarea', { rows: '2', placeholder: a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : 'Tell the lead agent what you need…', 'aria-label': 'Message', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } } });
+    // Typing @ offers the people who can be called from this chat.
+    let cands = null, shown = [], hi = 0, atStart = -1;
+    const pop = h('div', { class: 'mention-pop', role: 'listbox', 'aria-label': 'Who do you want to call?', hidden: true });
+    const loadCands = () => cands ||= api(`/api/agents/${sel().id}/mentionables`).catch(() => []);
+    const closePop = () => { pop.hidden = true; shown = []; atStart = -1; };
+    const choose = (c) => {
+      const v = input.value, caret = input.selectionStart;
+      input.value = v.slice(0, atStart) + '@' + c.name + ' ' + v.slice(caret);
+      const pos = atStart + c.name.length + 2; input.setSelectionRange(pos, pos); closePop(); input.focus();
+    };
+    const drawPop = () => pop.replaceChildren(...shown.map((c, i) => h('button', { type: 'button', role: 'option', class: 'mention-opt', 'aria-selected': String(i === hi), onmousedown: (e) => { e.preventDefault(); choose(c); } }, h('b', {}, c.name), c.title ? h('span', { class: 'hint' }, ` ${c.title}`) : null)));
+    const onType = async () => {
+      const before = input.value.slice(0, input.selectionStart), m = /(^|[\s(,;:])@([^@\n]{0,40})$/.exec(before);
+      if (!m) return closePop();
+      const q = m[2].toLowerCase(), list = await loadCands();
+      const hits = list.filter((c) => !q || c.name.toLowerCase().includes(q) || (c.title || '').toLowerCase().includes(q))
+        .sort((x, y) => Number(y.name.toLowerCase().startsWith(q)) - Number(x.name.toLowerCase().startsWith(q))).slice(0, 6);
+      if (!hits.length) return closePop();
+      shown = hits; hi = 0; atStart = before.length - m[2].length - 1; pop.hidden = false; drawPop();
+    };
+    input = h('textarea', { rows: '2', placeholder: (a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : 'Tell the lead agent what you need…') + ' Type @ to call a teammate.', 'aria-label': 'Message', oninput: onType, onblur: () => setTimeout(closePop, 120), onkeydown: (e) => {
+      if (!pop.hidden && shown.length) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hi = (hi + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; drawPop(); return; }
+        if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(shown[hi]); return; }
+        if (e.key === 'Escape') { e.preventDefault(); closePop(); return; }
+      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    } });
     const send = guard(async () => {
       const text = input.value.trim(); if (!text) return;
-      input.value = ''; await api(`/api/agents/${sel().id}/messages`, 'POST', { text });
+      const r = await api(`/api/agents/${sel().id}/messages`, 'POST', { text });
+      input.value = ''; closePop();
+      if (r.tagged?.length) toast(`Sent to ${r.tagged.join(' and ')}. The answer will appear here.`);
     });
-    el.body.replaceChildren(msgsEl, liveEl, h('div', { class: 'composer' }, input, h('button', { class: 'btn primary big', onclick: send }, 'Send')));
+    el.body.replaceChildren(msgsEl, liveEl, h('div', { class: 'composer' }, pop, input, h('button', { class: 'btn primary big', onclick: send }, 'Send')));
     drawMsgs();
   };
   const drawAll = () => { drawHead(); drawTabs(); drawTeam(); drawBody(); };

@@ -1871,6 +1871,23 @@ function pageAccess() {
     h('div', { class: 'card', style: 'max-width:720px' }, h('h2', {}, 'Who can open Apiary'), h('p', {}, 'By default it only listens on this computer (127.0.0.1). To use it from another device, run ', h('code', {}, 'apiary start --lan'), ' and then turn on a username and password under ', h('a', { href: '#/signin' }, 'Sign-in'), '.'),
       h('h2', { style: 'margin-top:20px' }, 'Safe and Full access'), h('p', {}, 'Safe lets an agent edit files in its own folder. Full access lets it run any command without asking. Choose per project when you create it.'),
       h('h2', { style: 'margin-top:20px' }, 'Git projects'), h('p', {}, 'In a git repository every agent works on its own branch and checkout, so your own working copy is never touched. Nothing is pushed until you open a pull request.')));
+  view.append(trustCard());
+}
+// The six slider positions. Keep in step with TRUST_LEVELS in src/command-rules.js.
+const TRUST_LABELS = ['Ask me for every command', 'Read-only commands run; everything else asks', 'Simple commands run; chains, scripts and changes ask', 'Chains and scripts run too; changes and destructive commands ask', 'Everything runs except deleting, rebooting and destroying', 'Everything runs without asking'];
+function trustCard() {
+  const card = h('div', { class: 'card', style: 'max-width:720px;margin-top:16px' }, h('h2', { style: 'margin-top:0' }, 'How much may each agent do without asking?'),
+    h('p', { class: 'hint' }, 'Move the slider all the way left and every command asks you. Move it all the way right and everything runs. Deny rules on Approval rules always win. An agent on Full access runs everything, whatever its slider says.'));
+  for (const a of S.agents) {
+    const level = Math.trunc(Number(a.trust)) || 0;
+    const label = h('small', { class: 'hint', 'aria-live': 'polite' }, `${level}: ${TRUST_LABELS[level]}`);
+    const slider = h('input', { type: 'range', min: '0', max: '5', step: '1', value: String(level), 'aria-label': `How much ${a.name} may do without asking`, style: 'width:100%',
+      oninput: (e) => { label.textContent = `${e.target.value}: ${TRUST_LABELS[Number(e.target.value)]}`; },
+      onchange: guard(async (e) => { const r = await api(`/api/agents/${a.id}/trust`, 'POST', { level: Number(e.target.value) }); a.trust = r.trust; toast(`${a.name}: ${r.text}`); }) });
+    card.append(h('div', { style: 'margin:14px 0' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, a.name), a.title ? h('small', { class: 'hint' }, a.title) : null,
+      a.access === 'full' ? h('span', { class: 'pill work' }, 'Full access') : null), slider, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('small', { class: 'hint' }, 'Ask me'), h('small', { class: 'hint' }, 'Run everything')), label));
+  }
+  return card;
 }
 function pageFolders() {
   crumbs('Settings', 'Folders');

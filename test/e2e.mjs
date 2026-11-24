@@ -1368,6 +1368,38 @@ let orgIds;
     assert.deepEqual(await ask(other, 'rm -rf /tmp/apiary-not-real-3'), { asked: true, allowed: false }, 'other agents are still asked');
     assert.throws(() => engine.policy.add({ kind: 'command', action: 'allow', scope: 'program', command: 'curl; rm', agent: ag.id }), /program name/);
   }
+  { // the trust slider: 0 asks for everything, 5 runs everything, the levels in between allow more as they go up; a Deny rule still wins
+    const { riskOf } = await import('../src/command-rules.js');
+    const ag = engine._add({ id: 'trust1', name: 'Trust tester', role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: 'trust1' });
+    assert.throws(() => engine.setTrust(ag.id, { level: 6 }), /0 to 5/);
+    assert.throws(() => engine.setTrust(ag.id, { level: 'high' }), /0 to 5/);
+    assert.equal(engine.setTrust(ag.id, { level: 3 }).trust, 3);
+    assert.equal(ag.trust, 3);
+    const tick = () => new Promise((r) => setImmediate(r));
+    const run = async (level, command) => {
+      engine.setTrust(ag.id, { level });
+      const bridge = engine.beginApprovalBridge(ag, new AbortController().signal);
+      const p = engine.requestCommandApproval(bridge.token, { tool_name: 'Bash', input: { command } });
+      await tick();
+      const pend = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'command' && r.agentId === ag.id);
+      if (pend) engine.decide(pend.id, { decision: 'deny', note: 'test' });
+      const out = await p; engine.endApprovalBridge(bridge);
+      return { asked: !!pend, allowed: out.behavior === 'allow' };
+    };
+    assert.deepEqual(await run(0, 'ls -la'), { asked: true, allowed: false }, 'level 0 asks even for a read-only command');
+    assert.deepEqual(await run(1, 'ls -la'), { asked: false, allowed: true }, 'level 1 runs read-only commands');
+    assert.deepEqual(await run(1, 'ls | grep x'), { asked: true, allowed: false }, 'level 1 asks about a chain');
+    assert.deepEqual(await run(2, 'ls | grep x'), { asked: true, allowed: false }, 'level 2 asks about a chain');
+    assert.deepEqual(await run(2, 'ls -la'), { asked: false, allowed: true }, 'level 2 runs simple commands');
+    assert.deepEqual(await run(3, 'ls | grep x'), { asked: false, allowed: true }, 'level 3 runs chains');
+    assert.deepEqual(await run(3, 'systemctl restart ssh'), { asked: true, allowed: false }, 'level 3 asks about changes');
+    assert.deepEqual(await run(4, 'systemctl restart ssh'), { asked: false, allowed: true }, 'level 4 runs changes');
+    assert.deepEqual(await run(4, 'rm -rf /tmp/apiary-not-real'), { asked: true, allowed: false }, 'level 4 still asks about deleting');
+    assert.deepEqual(await run(5, 'rm -rf /tmp/apiary-not-real'), { asked: false, allowed: true }, 'level 5 runs everything');
+    engine.policy.add({ kind: 'command', action: 'deny', scope: 'program', command: 'git', agent: ag.id });
+    assert.deepEqual(await run(5, 'git status'), { asked: false, allowed: false }, 'a Deny rule beats level 5');
+    for (const [c, r] of [['ls -la', 0], ['ls | grep x', 1], ['systemctl restart ssh', 2], ['rm -rf /tmp/x', 3]]) assert.equal(riskOf(c), r, c);
+  }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
 }

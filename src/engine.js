@@ -28,7 +28,7 @@ import { Templates } from './templates.js';
 import { Reports } from './report.js';
 import { Runbooks } from './runbooks.js';
 import { Policy } from './policy.js';
-import { parseCommand, isDangerous } from './command-rules.js';
+import { parseCommand, isDangerous, levelAllows, TRUST_LEVELS } from './command-rules.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -996,6 +996,18 @@ export class Engine extends EventEmitter {
     return { url: `${this.baseUrl}/api/approval-bridge`, token, bridge: fileURLToPath(new URL('./approval-bridge.js', import.meta.url)) };
   }
   endApprovalBridge(approval) { if (approval) this.approvalRuns.delete(approval.token); }
+  // The trust slider for one agent: 0 asks for every command, 5 runs everything without asking.
+  setTrust(id, b = {}) {
+    const agent = this.agents[id];
+    if (!agent) throw httpErr(404, 'No such agent');
+    const level = Number(b.level);
+    if (!Number.isInteger(level) || level < 0 || level > 5) throw httpErr(400, 'The level must be a whole number from 0 to 5');
+    agent.trust = level;
+    this.store.save();
+    this.audit.add('system', { actor: 'You', project: this._pname(agent), action: `set how much ${agent.name} may do without asking`, detail: TRUST_LEVELS[level] });
+    this.emit('event', { type: 'agent', agent });
+    return { id, trust: level, text: TRUST_LEVELS[level] };
+  }
   async requestCommandApproval(token, body = {}) {
     const run = this.approvalRuns.get(token);
     if (!run) return { behavior: 'deny', message: 'This run is no longer active.' };
@@ -1013,6 +1025,14 @@ export class Engine extends EventEmitter {
     const cancel = () => { for (const r of Object.values(this.store.data.approvals)) if (r.status === 'pending' && r.kind === 'command' && r.agentId === agent.id) this.decide(r.id, { decision: 'deny', note: 'The run was stopped.' }); };
     signal?.addEventListener('abort', cancel, { once: true });
     try {
+      // The trust slider allows a command before anyone is asked, unless a Deny rule blocks it.
+      const denied = this.policy.match({ kind: 'command', title, project: this.rootOf(agent).id, agent: agent.id, command: isShell ? command : '' })?.action === 'deny';
+      const level = Math.trunc(Number(agent.trust)) || 0;
+      if (!denied && (isShell ? levelAllows(level, command) : level >= 5)) {
+        this._log(agent, `✔ allowed by the trust setting: ${shown}`);
+        this.audit.add('approval', { actor: 'Trust setting', project: this._pname(agent), action: `allowed automatically: ${title}`, detail: `${TRUST_LEVELS[level]}` });
+        return { behavior: 'allow', updatedInput: input };
+      }
       const fields = { kind: 'command', title, detail: shown, tool, canExact, program: parsed?.program || '' };
       const ans = await this._ask(agent, fields, { command: isShell ? command : '' });
       if (ans.decision !== 'approve') return { behavior: 'deny', message: ans.note || 'The person did not allow this command.' };

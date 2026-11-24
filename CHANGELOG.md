@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.29.0
+
+- **How much each agent may do without asking.** The Access and safety page has a slider under each agent. All the way left, every command asks you. All the way right, everything runs. The positions between allow more as you move right: read-only commands; simple commands; chains and scripts too; everything except deleting, rebooting and destroying. A Deny rule on Approval rules still wins, and an agent on Full access runs everything.
+
 ## 0.27.0
 
 - **Choose how much an agent may do without asking.** When an agent wants to run a shell command, the Approvals page now offers: Allow once, Always allow this exact command, Always allow any command that runs the same program, Always allow read-only commands, Allow everything for this agent (asks you to confirm), and Deny.

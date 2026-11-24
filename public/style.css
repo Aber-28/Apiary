@@ -114,3 +114,16 @@ dialog form{padding:24px;display:flex;flex-direction:column}
  .team{display:none}.top{padding:10px 14px}.view{padding:16px}
  .chat-head,.msgs,.composer,.tabs,.live-line,.term{padding-left:14px;padding-right:14px}
 }
+
+.badge{min-width:20px;height:20px;padding:0 6px;border-radius:99px;background:var(--accent);color:var(--on-accent);font-size:12px;font-weight:700;display:inline-flex;align-items:center;justify-content:center}
+.approval{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:780px;margin-bottom:12px;white-space:normal}
+.approval.pending{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.approval .items{display:flex;flex-direction:column;gap:8px;margin:6px 0}
+.approval .item{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;background:var(--bg);border-radius:10px;font-weight:400}
+.approval .item input{margin-top:4px;width:18px;height:18px;accent-color:var(--accent)}
+.approval .task{display:block;color:var(--muted);font-size:13px;margin-top:2px;overflow-wrap:anywhere}
+.approval input[type=text]{flex:1;min-width:180px}
+.check{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;font-weight:400}.check input{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex:none}
+.diffstat,.diff{background:#0a0d12;color:#d6dbe4;border-radius:10px;padding:12px;font-size:12px;line-height:1.5;overflow:auto;max-height:340px;margin:8px 0;white-space:pre}
+.diff .add{color:#6fdba5}.diff .del{color:#f58a90}.diff .hunk{color:#6ea8fe}.diff .file{color:#f5b83d;font-weight:600}
+details summary{cursor:pointer;color:var(--accent-text);font-weight:600;min-height:32px;display:flex;align-items:center}

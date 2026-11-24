@@ -17,12 +17,12 @@ your repo (untouched)
 1. **Start:** creates the lead's branch from the branch you chose.
 2. **Delegate:** commits the lead's work, then branches each sub-agent from it.
 3. **After each turn:** commits the agent's changes automatically.
-4. **Report back:** merges each sub-agent's branch into its parent. If there is a conflict, the merge is **aborted and reported** to the parent agent. Nothing is left half-merged and the branch is kept.
+4. **Report back:** shows you what the sub-agent changed and, once you approve, merges its branch into its parent (with approvals off it merges directly). If you deny, the branch is kept and the parent is told. If there is a conflict, the merge is **aborted and reported** to the parent agent. Nothing is left half-merged and the branch is kept.
 5. **Delete project:** removes the checkouts. **Branches are kept**, so no work is lost.
 
 ## Open a pull request
 
-When the lead is idle, press **Open pull request** in the project header. Apiary pushes the lead branch and opens a PR into the base branch using your GitHub connection. A **View pull request** button replaces it afterwards.
+Press **Review changes** to read exactly what will go into the pull request. When the lead is idle, press **Open pull request** in the project header. Apiary pushes the lead branch and opens a PR into the base branch using your GitHub connection. A **View pull request** button replaces it afterwards.
 
 Nothing is pushed anywhere until you do this.
 

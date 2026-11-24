@@ -23,6 +23,14 @@ A provider turns "run this prompt for this agent" into either a **CLI subprocess
 
 Agents delegate by writing fenced `apiary-spawn` JSON blocks. The engine parses them, creates children, runs them in parallel, merges their branches, and returns the reports as the parent's next message. This is provider-agnostic because it needs only text.
 
+## Approvals
+
+`engine._ask()` records a request, emits an `approval` event and returns a promise that `decide()` resolves. `stop()` cancels open requests. Requests gate sub-agent creation and merges. See [Approvals and review](../using-apiary/approvals.md).
+
+## Agent-to-agent messages
+
+`apiary-send` blocks are routed by `_peerJob()`: the target is resolved by name inside the same project, a `waitingOn` graph rejects waits that would form a cycle, and a per-project counter enforces the message limit. The recipient handles the message as a normal turn in its own queue.
+
 ## Git model
 
 One worktree and branch per agent; children branch from their parent; auto-commit after every turn; conflicts abort and are reported; branches survive deletion. See [Branches, worktrees and pull requests](../github/workflow.md).

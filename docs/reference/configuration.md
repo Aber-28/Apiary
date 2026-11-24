@@ -11,7 +11,7 @@ Apiary needs no config file. Everything is set in the interface or with environm
 | `APIARY_TOKEN` | none | Secret needed to use the app |
 | `APIARY_ALLOWED_HOSTS` | none | Extra host names accepted (comma separated) |
 | `APIARY_HOME` | `~/.apiary` | Where Apiary stores everything |
-| `APIARY_MAX_DEPTH` / `_AGENTS` / `_ROUNDS` | 2 / 12 / 4 | Default [delegation limits](../using-apiary/rules.md) |
+| `APIARY_MAX_DEPTH` / `_AGENTS` / `_ROUNDS` / `_PEER_MESSAGES` | 2 / 12 / 4 / 30 | Default [delegation limits](../using-apiary/rules.md) |
 | `APIARY_MOCK` | off | `1` enables a fake test AI (for development) |
 
 ## Files

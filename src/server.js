@@ -78,12 +78,19 @@ export function createServer(engine) {
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits });
-        if (req.method === 'PUT') return json(res, 200, { limits: engine.setLimits((await readBody(req)).limits || {}) });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault });
+        if (req.method === 'PUT') {
+          const b = await readBody(req);
+          const limits = engine.setLimits(b.limits || {});
+          if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault });
+        }
       }
+      if (req.method === 'GET' && url.pathname === '/api/approvals') return json(res, 200, engine.approvals());
+      if ((r = m(/^\/api\/approvals\/([\w-]+)\/decide$/)) && req.method === 'POST') return json(res, 200, engine.decide(r[1], await readBody(req)));
       if (req.method === 'GET' && url.pathname === '/api/connections') {
         return json(res, 200, await Promise.all(CONNECTION_IDS.map((id) => engine.connections.view(id))));
       }
@@ -135,9 +142,10 @@ export function createServer(engine) {
           return json(res, 202, { ok: true });
         }
       }
-      if ((r = m(/^\/api\/agents\/([\w-]+)\/(logs|resume|takeover|pr)$/))) {
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/(logs|resume|takeover|pr|diff)$/))) {
         const [, id, what] = r;
         if (!engine.agents[id]) throw Object.assign(new Error('No such agent'), { status: 404 });
+        if (what === 'diff' && req.method === 'GET') return json(res, 200, await engine.diff(id));
         if (what === 'logs' && req.method === 'GET') return json(res, 200, engine.logs(id));
         if (what === 'resume' && req.method === 'GET') return json(res, 200, { command: engine.resumeCommand(id) });
         if (what === 'takeover' && req.method === 'POST') return json(res, 200, engine.takeover(id));

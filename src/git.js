@@ -42,6 +42,12 @@ export const git = {
     await G(dir, ['merge', '--abort']);
     return { ok: false, conflicts, message: (r.stderr || r.stdout).trim().slice(-300) };
   },
+  // What `to` adds on top of `from` (three-dot), for review screens. Output is capped.
+  async diff(dir, from, to, cap = 60000) {
+    const stat = await ok(dir, ['diff', '--no-color', '--stat', `${from}...${to}`]);
+    const patch = await ok(dir, ['diff', '--no-color', `${from}...${to}`], { timeout: 60000 });
+    return { stat, patch: patch.slice(0, cap), truncated: patch.length > cap };
+  },
   async clone(url, dest, extra = []) {
     const r = await G(process.cwd(), [...extra, 'clone', '--', url, dest], { timeout: 600000 });
     if (r.code !== 0) throw new Error(`Could not clone: ${(r.stderr || r.stdout).trim().slice(-500)}`);

@@ -212,13 +212,22 @@ const mock = {
     const say = async (s) => { for (const w of s.split(/(?<= )/)) { onText(w); await sleep(delay); } };
     let out;
     onLog(`$ mock ${agent.name}`);
-    if (prompt.startsWith('Reports from your sub-agents')) {
+    if (prompt.startsWith('Replies from teammates') || (agent.parentId && /Replies from teammates|Notes from Apiary:/.test(prompt))) {
+      onActivity('Reading replies');
+      out = `Teammate replied. ${prompt.split('\n').filter((l) => l.startsWith('### ')).join(' ')} | ${prompt.includes('Not sent') ? 'blocked' : 'ok'}`;
+    } else if (agent.parentId && /ask-(writer|lead|nobody)/.test(prompt) && !prompt.startsWith('Message from')) {
+      const to = /ask-lead/.test(prompt) ? 'parent' : /ask-nobody/.test(prompt) ? 'Ghost' : 'Writer';
+      out = 'Let me check with a teammate.\n\n```apiary-send\n{"to":"' + to + '","text":"Need your input on: ' + prompt.slice(0, 20).replace(/["\\\n]/g, ' ') + '"}\n```';
+    } else if (prompt.startsWith('Reports from your sub-agents')) {
       onActivity('Summarising reports');
       if (agent.cwd) writeFileSync(path.join(agent.cwd, 'lead.txt'), 'summary\n');
       out = `All done. Here is the combined result:\n${prompt.split('\n').filter((l) => l.startsWith('### ')).join('\n')}`;
     } else if (!agent.parentId && /saved agent/i.test(prompt)) {
       out = 'Using a saved agent.\n\n```apiary-spawn\n{"agent":"Reviewer","task":"Review the work"}\n```';
-    } else if (!agent.parentId && /delegate|team|sub-?agent/i.test(prompt)) {
+    } else if (!agent.parentId && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && /collab/i.test(prompt)) {
+      const t = /collab-lead/.test(prompt) ? 'ask-lead' : /collab-ghost/.test(prompt) ? 'ask-nobody' : 'ask-writer';
+      out = 'Splitting up.\n\n```apiary-spawn\n[{"name":"Researcher","role":"Finds facts","task":"' + t + ': research"},{"name":"Writer","role":"Writes","task":"Draft the summary"}]\n```';
+    } else if (!agent.parentId && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && /delegate|team|sub-?agent/i.test(prompt)) {
       out = 'I will split this up.\n\n' +
         '```apiary-spawn\n{"name":"Researcher","role":"Finds facts","task":"Research the topic"}\n```\n\n' +
         '```apiary-spawn\n{"name":"Writer","role":"Writes clearly","task":"Draft the summary","provider":"mock"}\n```';

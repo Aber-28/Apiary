@@ -13,6 +13,8 @@
 
 * [Projects and chat](using-apiary/projects.md)
 * [Agents and sub-agents](using-apiary/agents.md)
+* [Agents talking to each other](using-apiary/collaboration.md)
+* [Approvals and review](using-apiary/approvals.md)
 * [Saved agents](using-apiary/saved-agents.md)
 * [Terminal sessions and take over](using-apiary/terminal.md)
 * [Delegation rules](using-apiary/rules.md)

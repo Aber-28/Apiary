@@ -22,9 +22,11 @@ const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
   maxAgents: Number(process.env.APIARY_MAX_AGENTS || 12),  // per whole tree
   maxRounds: Number(process.env.APIARY_MAX_ROUNDS || 4),   // delegate/report cycles per turn
+  maxPeerMessages: Number(process.env.APIARY_MAX_PEER_MESSAGES || 30), // agent-to-agent messages per project
 };
-const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10] };
+const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], maxPeerMessages: [0, 200] };
 const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
+const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
 const id8 = () => randomUUID().slice(0, 8);
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'agent';
@@ -39,7 +41,11 @@ export class Engine extends EventEmitter {
     this.chains = new Map();   // agentId -> promise chain (one turn at a time per agent)
     this.stopped = new Set();  // agents asked to stop mid-delegation
     this.locks = new Map();    // repo dir -> promise chain (git worktree operations are serialised)
+    this.pending = new Map();  // approvalId -> { resolve, reject }
+    this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
+    this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
+    for (const r of Object.values(store.data.approvals)) if (r.status === 'pending') r.status = 'expired'; // nobody is waiting any more
   }
 
   get agents() { return this.store.data.agents; }
@@ -67,6 +73,40 @@ export class Engine extends EventEmitter {
     this.store.data.settings.limits = cur;
     this.store.save();
     return this.limits;
+  }
+
+  get approvalsDefault() { return this.store.data.settings.approvalsDefault !== false; }
+  setApprovalsDefault(v) { this.store.data.settings.approvalsDefault = !!v; this.store.save(); return this.approvalsDefault; }
+
+  // ---------- approvals ----------
+  approvals() { return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt); }
+  _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }
+  _ask(agent, fields) {
+    const id = id8();
+    const rec = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields };
+    this.store.data.approvals[id] = rec;
+    const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
+    for (const r of decided.slice(100)) delete this.store.data.approvals[r.id];
+    this.emit('event', { type: 'approval', approval: rec });
+    this._log(agent, `? waiting for your approval: ${rec.title}`);
+    this.store.save();
+    return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
+  }
+  decide(id, { decision, note, only } = {}) {
+    const rec = this.store.data.approvals[id];
+    if (!rec) throw httpErr(404, 'No such approval');
+    if (rec.status !== 'pending' || !this.pending.has(id)) throw httpErr(409, 'This request was already answered or has expired');
+    if (!['approve', 'deny'].includes(decision)) throw httpErr(400, 'decision must be approve or deny');
+    if (only !== undefined && (!Array.isArray(only) || only.some((i) => !Number.isInteger(i) || i < 0 || i >= (rec.items?.length || 0)))) throw httpErr(400, 'Bad selection');
+    rec.status = decision === 'approve' ? 'approved' : 'denied';
+    rec.note = String(note || '').slice(0, 1000);
+    if (decision === 'approve' && only) rec.only = only;
+    rec.decidedAt = Date.now();
+    const p = this.pending.get(id); this.pending.delete(id);
+    this.emit('event', { type: 'approval', approval: rec });
+    this.store.save();
+    p.resolve({ decision, note: rec.note, only: rec.only });
+    return rec;
   }
 
   // ---------- providers ----------
@@ -110,13 +150,13 @@ export class Engine extends EventEmitter {
   }
 
   // ---------- public API ----------
-  async createLead({ name, provider, model, cwd, access, goal, source, base }) {
+  async createLead({ name, provider, model, cwd, access, goal, source, base, approvals }) {
     if (!this.available.some((p) => p.id === provider)) throw httpErr(400, `Provider "${provider}" is not available. Connect it first.`);
     const method = this.resolveMethod(provider);
     const id = id8();
     const title = (name || goal || 'New project').trim().split('\n')[0].slice(0, 48);
     const pslug = slug(title);
-    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || '', access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0 };
+    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || '', access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
 
     // Where does the work happen?
     let repo = null;
@@ -164,10 +204,30 @@ export class Engine extends EventEmitter {
   }
 
   stop(agentId) {
-    for (const id of this.tree(agentId)) {
+    const ids = new Set(this.tree(agentId));
+    for (const id of ids) {
       this.stopped.add(id);
       this.ctls.get(id)?.abort();
     }
+    for (const r of Object.values(this.store.data.approvals)) {
+      const p = this.pending.get(r.id);
+      if (r.status === 'pending' && p && ids.has(r.agentId)) {
+        r.status = 'cancelled'; this.pending.delete(r.id);
+        this.emit('event', { type: 'approval', approval: r });
+        p.reject(Object.assign(new Error('stopped'), { name: 'AbortError' }));
+      }
+    }
+  }
+
+  // Review screen data: what this agent's branch adds on top of its parent's (or the base branch).
+  async diff(agentId) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    const g = a.git;
+    if (!g) throw httpErr(409, 'This agent is not working in a git repository');
+    const parent = a.parentId ? this.agents[a.parentId] : null;
+    const from = parent?.git ? parent.git.branch : await git.startRef(g.repo, g.base);
+    return { from, to: g.branch, ...(await git.diff(g.repo, from, g.branch)) };
   }
 
   // The command that continues this agent's own CLI session in a real terminal.
@@ -268,6 +328,15 @@ export class Engine extends EventEmitter {
     s += agent.parentId
       ? 'Your reply goes back to the agent that gave you this task, not to a human. Be concrete and concise: say what you did, what you found, and where any files are.\n'
       : 'Your replies go to the human you are working for. Be clear and concise.\n';
+    s += 'If a message is marked "Message from teammate", your reply goes back to that teammate.\n';
+    const mates = this.tree(this.rootOf(agent).id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id);
+    if (mates.length && this.limits.maxPeerMessages > 0) {
+      s += '\nYou can talk to or hand work to any teammate by name. Put a block like this in your reply:\n\n' +
+        '```apiary-send\n{"to":"Teammate name","text":"Your question or the task, written so it stands alone","wait":true}\n```\n\n' +
+        '"to" can also be "parent" or "lead". With "wait":true (default) you get the teammate\'s reply as your next message; with "wait":false the message is delivered and you carry on. ' +
+        'You cannot wait on someone who is waiting on you. Keep it purposeful: do not chat for the sake of it.\nTeammates:\n' +
+        mates.map((a) => `- ${a.name}${a.role ? ': ' + a.role : ''}`).join('\n') + '\n';
+    }
     if (agent.depth < this.limits.maxDepth) {
       s += `\nYou can delegate to sub-agents. To create one, put a block like this in your reply:\n\n` +
         '```apiary-spawn\n{"name":"Short name","role":"What this agent is good at","task":"Complete, self-contained instructions","provider":"claude"}\n```\n\n' +
@@ -324,30 +393,58 @@ export class Engine extends EventEmitter {
   async _converse(agent, userText, from) {
     this.stopped.delete(agent.id);
     this._msg(agent, { role: 'user', text: userText, from: from ? { id: from.id, name: from.name } : null });
-    let prompt = userText, final = '';
+    // A message from a teammate (not the parent handing over a task) is labelled so the agent knows who is asking.
+    let prompt = from && from.id !== agent.parentId ? `Message from teammate ${from.name}:\n\n${userText}` : userText, final = '';
     try {
       for (let round = 0; round <= this.limits.maxRounds; round++) {
         const reply = await this._exec(agent, prompt);
-        const { clean, spawns, errors } = parseSpawns(reply);
+        const { clean, spawns, sends, errors } = parseSpawns(reply);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
-        if ((!spawns.length && !errors.length) || round === this.limits.maxRounds) break;
+        if ((!spawns.length && !sends.length && !errors.length) || round === this.limits.maxRounds) break;
 
         const notes = [...errors];
-        const runnable = [];
+        let runnable = [];
         for (const s of spawns) {
           const label = s.agent || s.name;
           if (s.agent && !this._findDef(s.agent)) { notes.push(`No saved agent called "${s.agent}".`); continue; }
           if (!this._canSpawn(agent)) { notes.push(`Could not create "${label}": team size or depth limit reached. Do it yourself.`); continue; }
           runnable.push(s);
         }
+        // Human approval before new agents appear.
+        if (runnable.length && this._needsApproval(agent)) {
+          this._setStatus(agent, 'waiting');
+          this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval' });
+          const r = await this._ask(agent, {
+            kind: 'spawn', title: `${agent.name} wants to create ${runnable.length} sub-agent${runnable.length > 1 ? 's' : ''}`,
+            items: runnable.map((s) => { const def = s.agent ? this._findDef(s.agent) : null; const p = [s.provider, def?.provider].find((x) => this.available.some((v) => v.id === x)) || agent.provider; return { name: def?.name || s.name, role: def?.role || s.role, provider: p, task: s.task }; }),
+          });
+          if (r.decision === 'deny') { notes.push(`The human declined to create these sub-agents${r.note ? ': ' + r.note : ''}. Continue without them.`); runnable = []; }
+          else {
+            if (r.only) { const skipped = runnable.length - r.only.length; runnable = runnable.filter((_, i) => r.only.includes(i)); if (skipped) notes.push(`The human approved only some sub-agents; ${skipped} were not created.`); }
+            if (r.note) notes.push(`Human note: ${r.note}`);
+          }
+        }
         if (agent.git) await this._commit(agent, 'work before delegating');
         this._setStatus(agent, 'waiting');
-        const reports = await Promise.all(runnable.map((s) => this._runChild(agent, s)));
+
+        // Messages to teammates run alongside the sub-agents.
+        const jobs = runnable.map((s) => this._runChild(agent, s).then((r) => ({ kind: 'report', ...r })));
+        for (const m of sends) {
+          const job = await this._peerJob(agent, m, notes);
+          if (job) jobs.push(job);
+        }
+        const results = await Promise.all(jobs);
+        this.waitingOn.delete(agent.id);
         if (this.stopped.has(agent.id)) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
+
+        const reports = results.filter((r) => r.kind === 'report'), replies = results.filter((r) => r.kind === 'reply');
         for (const r of reports) if (r.child?.branch) r.text += await this._mergeChild(agent, r.child);
 
-        let body = 'Reports from your sub-agents:\n\n' + reports.map((r) => `### ${r.name}\n${r.text}`).join('\n\n');
+        let body = '';
+        if (reports.length) body += 'Reports from your sub-agents:\n\n' + reports.map((r) => `### ${r.name}\n${r.text}`).join('\n\n');
+        if (replies.length) body += (body ? '\n\n' : '') + 'Replies from teammates:\n\n' + replies.map((r) => `### ${r.name}\n${r.text}`).join('\n\n');
+        if (!body) body = 'Nothing was run this round.';
         if (notes.length) body += '\n\nNotes from Apiary:\n- ' + notes.join('\n- ');
         body += '\n\nContinue: use these to complete the task and give your final answer.';
         this._msg(agent, { role: 'report', text: body });
@@ -357,6 +454,7 @@ export class Engine extends EventEmitter {
       this._setStatus(agent, 'idle');
       return final;
     } catch (e) {
+      this.waitingOn.delete(agent.id);
       if (e.name === 'AbortError') {
         await this._commit(agent, 'stopped');
         this._msg(agent, { role: 'system', text: 'Stopped.' });
@@ -368,6 +466,55 @@ export class Engine extends EventEmitter {
       throw e;
     }
   }
+
+  // ----- agent-to-agent messages -----
+  async _findPeer(agent, to) {
+    const root = this.rootOf(agent);
+    const t = String(to || '').trim().toLowerCase();
+    for (let tries = 0; tries < 10; tries++) {   // a just-spawned teammate may not exist yet
+      if (t === 'parent' && agent.parentId) return { peer: this.agents[agent.parentId] };
+      if (t === 'lead') return { peer: root };
+      const hits = this.tree(root.id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t));
+      if (hits.length === 1) return { peer: hits[0] };
+      if (hits.length > 1) return { error: `More than one teammate is called "${to}". Use a more specific name.` };
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    return { error: `No teammate called "${to}" in this project.` };
+  }
+  // Would `from` waiting on `to` close a circle of agents waiting on each other?
+  _wouldDeadlock(from, to) {
+    const seen = new Set(), stack = [to];
+    while (stack.length) {
+      const x = stack.pop();
+      if (x === from) return true;
+      if (seen.has(x)) continue;
+      seen.add(x);
+      for (const y of this.waitingOn.get(x) || []) stack.push(y);
+    }
+    return false;
+  }
+  async _peerJob(agent, m, notes) {
+    const root = this.rootOf(agent).id;
+    if ((this.peerCounts.get(root) || 0) >= this.limits.maxPeerMessages) { notes.push(`Message to "${m.to}" not sent: this project reached its limit of ${this.limits.maxPeerMessages} agent-to-agent messages.`); return null; }
+    const { peer, error } = await this._findPeer(agent, m.to);
+    if (error) { notes.push(error); return null; }
+    if (peer.id === agent.id) { notes.push('You cannot message yourself.'); return null; }
+    if (m.wait && this._wouldDeadlock(agent.id, peer.id)) {
+      notes.push(`Not sent to ${peer.name} with wait: ${peer.name} is already waiting for you, so you would both wait forever. Send it with "wait":false and carry on.`);
+      return null;
+    }
+    this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
+    this._msg(agent, { role: 'system', text: `${m.wait ? 'Asked' : 'Told'} ${peer.name}: ${m.text.slice(0, 160)}${m.text.length > 160 ? '…' : ''}`, agentId: peer.id });
+    if (!m.wait) {
+      this.send(peer.id, m.text, agent).catch(() => {});
+      notes.push(`Message delivered to ${peer.name} (no reply awaited).`);
+      return null;
+    }
+    this._edge(agent.id, peer.id);
+    return this.send(peer.id, m.text, agent).then((text) => ({ kind: 'reply', name: peer.name, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, text: `FAILED: ${e.message}` }))
+      .finally(() => this.waitingOn.get(agent.id)?.delete(peer.id));
+  }
+  _edge(a, b) { (this.waitingOn.get(a) || this.waitingOn.set(a, new Set()).get(a)).add(b); }
 
   _findDef(name) {
     return Object.values(this.defs).find((d) => d.name.toLowerCase() === String(name).toLowerCase());
@@ -394,33 +541,55 @@ export class Engine extends EventEmitter {
       } catch (e) { this._log(parent, `! could not create a checkout for ${fields.name}: ${e.message}`); }
     }
     const child = this._add(fields);
+    this._edge(parent.id, child.id);
     this._msg(parent, { role: 'system', text: `Created sub-agent ${child.name} (${provider})`, agentId: child.id });
     try {
       const text = await this.send(child.id, spec.task, parent);
       return { name: child.name, text: text || '(no output)', child };
     } catch (e) {
       return { name: child.name, text: `FAILED: ${e.message}`, child };
-    }
+    } finally { this.waitingOn.get(parent.id)?.delete(child.id); }
   }
 
   // Bring a child's branch into its parent's. A conflict is aborted and reported, never left half-done.
   async _mergeChild(parent, child) {
     const parentBranch = parent.git.branch;
-    const res = await git.merge(parent.cwd, child.branch);
-    let note;
-    if (res.ok) note = `\n\n(Apiary merged ${child.name}'s changes into your branch.)`;
-    else {
-      note = `\n\n(Apiary could NOT merge ${child.name}'s branch ${child.branch} into yours${res.conflicts.length ? `: conflicts in ${res.conflicts.join(', ')}` : ''}. ` +
-        'Nothing was merged; the branch is kept. Resolve this yourself or ask the human.)';
+    let note, merge = true;
+    if (this._needsApproval(parent)) {
+      let d = { stat: '', patch: '', truncated: false };
+      try { d = await git.diff(parent.cwd, parentBranch, child.branch); } catch (e) { d.stat = `(could not read the changes: ${e.message})`; }
+      if (d.stat.trim()) {
+        this.emit('event', { type: 'activity', agentId: parent.id, text: 'Waiting for your review' });
+        const r = await this._ask(parent, { kind: 'merge', title: `Merge ${child.name}'s changes into ${parentBranch}?`, detail: `${child.name} worked on branch ${child.branch}.`, diff: d, childId: child.id });
+        if (r.decision === 'deny') {
+          merge = false;
+          note = `\n\n(The human did NOT approve merging ${child.name}'s changes${r.note ? ': ' + r.note : ''}. The branch ${child.branch} is kept. Revise the plan or ask the human.)`;
+        } else if (r.note) note = `\n\n(Human note about ${child.name}'s changes: ${r.note})`;
+      }
     }
-    this._log(parent, res.ok ? `✔ merged ${child.branch} into ${parentBranch}` : `! merge conflict with ${child.branch}`);
+    if (merge) {
+      const res = await git.merge(parent.cwd, child.branch);
+      if (res.ok) note = (note || '') + `\n\n(Apiary merged ${child.name}'s changes into your branch.)`;
+      else note = (note || '') + `\n\n(Apiary could NOT merge ${child.name}'s branch ${child.branch} into yours${res.conflicts.length ? `: conflicts in ${res.conflicts.join(', ')}` : ''}. Nothing was merged; the branch is kept. Resolve this yourself or ask the human.)`;
+      this._log(parent, res.ok ? `✔ merged ${child.branch} into ${parentBranch}` : `! merge conflict with ${child.branch}`);
+    } else this._log(parent, `✘ merge of ${child.branch} declined`);
     await this._lock(parent.git.repo, () => git.worktreeRemove(parent.git.repo, child.cwd)).catch(() => {});
     return note;
   }
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], errors = [];
+  const spawns = [], sends = [], errors = [];
+  reply = reply.replace(SEND_RE, (_, body) => {
+    try {
+      for (const s of [].concat(JSON.parse(body.trim()))) {
+        const text = s && (s.text ?? s.message ?? s.task);
+        if (!s || !s.to || typeof text !== 'string' || !text.trim()) { errors.push('An apiary-send block needs "to" and "text".'); continue; }
+        sends.push({ to: String(s.to), text, wait: s.wait !== false });
+      }
+    } catch (err) { errors.push(`An apiary-send block was not valid JSON (${err.message}).`); }
+    return '';
+  });
   const clean = reply.replace(SPAWN_RE, (_, body) => {
     try {
       const parsed = JSON.parse(body.trim());
@@ -439,7 +608,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, errors };
+  return { clean, spawns, sends, errors };
 }
 
 export function httpErr(status, message) { return Object.assign(new Error(message), { status }); }

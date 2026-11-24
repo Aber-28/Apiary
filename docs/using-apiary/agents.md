@@ -20,9 +20,17 @@ Apiary removes the block from the chat, creates the sub-agent, runs it, and give
 | `provider` | Optional: `claude` or `codex`. Default is the parent's |
 | `agent` | Optional: the name of a [saved agent](saved-agents.md) to reuse |
 
+## Approval first
+
+By default Apiary shows you the proposed sub-agents (names, roles, tasks) and waits for your **Approve** or **Deny** before creating them. See [Approvals and review](approvals.md).
+
+## Talking to teammates
+
+Agents can also message each other and hand tasks across the team. See [Agents talking to each other](collaboration.md).
+
 ## Limits
 
-To keep teams small and costs predictable, Apiary enforces limits you can change under [Delegation rules](rules.md): team depth, agents per project, and delegation rounds per message. An agent that hits a limit is told so and must do the work itself.
+To keep teams small and costs predictable, Apiary enforces limits you can change under [Delegation rules](rules.md): team depth, agents per project, delegation rounds per message, and agent-to-agent messages. An agent that hits a limit is told so and must do the work itself.
 
 ## Mixing Claude and Codex
 

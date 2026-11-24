@@ -24,6 +24,8 @@ ln -sf ~/.local/share/apiary/bin/apiary.js ~/.local/bin/apiary
 
 * Chat-first projects with a live team tree; dark and light mode
 * Claude and Codex together, via your CLI logins or API keys
+* Approve or deny new sub-agents and merges; review the diff first
+* Agents message each other and hand work across the team
 * Git branch + checkout per agent, auto-commits, merges, pull requests
 * Take over any agent in your own terminal
 * Local only by default; zero dependencies

@@ -9,3 +9,5 @@
 Apiary cannot see the real limit of your plan. The limits are numbers *you* choose to stay under. Apiary also notices when the AI itself says its limit has been reached, and shows "Limit reached" for a few hours.
 
 Numbers come from the AI when it reports them. Otherwise Apiary estimates (about 4 characters per token) and marks them as estimated. Cached input is not counted.
+
+Under each AI in the sidebar there is a small bar from 0% to 100%. It fills as you use up the limit you set for that AI. Until you set a limit the bar stays empty, with a link to set one.

@@ -16,3 +16,6 @@ Every agent has a name (default: an original comic-book style codename) and a ti
 ## Markdown files
 
 Profiles are plain Markdown. The file is the source of truth: edit it in Apiary or in any editor and the agent uses the new text next turn.
+
+## Answering the questions
+Each question offers suggested answers. You can **pick several**, and you can **write your own words** in the box below them (for example to add detail). Press **Send answer** to send them together.

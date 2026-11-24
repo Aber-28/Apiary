@@ -887,5 +887,73 @@ let orgIds;
   assert.equal((await new Promise((resolve) => http.get({ host: '127.0.0.1', port: server.address().port, path: '/api/state', headers: { host: '192.168.1.50:7777' } }, (r) => { r.resume(); resolve(r.statusCode); }))), 403);
 }
 
+// ---- 0.8.0: project stages, export and import ----
+{
+  const proj = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Stage site', approvals: false })).body;
+  assert.equal(engine.stageOf(engine.agents[proj.id]), 'building', 'new projects are being built');
+  assert.equal((await call(`/api/projects/${proj.id}/stage`, 'PUT', { stage: 'nonsense' })).status, 400);
+  assert.equal((await call(`/api/projects/${proj.id}/stage`, 'PUT', { stage: 'maintenance', note: 'live now' })).body.stage, 'maintenance');
+  assert.match(engine._system(engine.agents[proj.id]) + engine._planContext(engine.agents[proj.id]), /Maintenance/);
+  assert.equal((await call(`/api/projects/${proj.id}/stage`, 'PUT', { stage: 'closed' })).body.stage, 'closed');
+  const closedSend = await call(`/api/agents/${proj.id}/messages`, 'POST', { text: 'hello' });
+  assert.equal(closedSend.status, 409); assert.match(closedSend.body.error, /closed/i);
+  assert.ok(engine.agents[proj.id], 'closing deletes nothing');
+  const log = (await call(`/api/projects/${proj.id}/stage`, 'PUT', { stage: 'building' })).body.stageLog; assert.deepEqual(log.map((x) => x.stage), ['maintenance', 'closed', 'building']);
+  assert.equal((await call('/api/agents', 'GET')).body.find?.((x) => x.id === proj.id)?.stage ?? 'building', 'building');
+  // finishing the last phase moves a project that is being built into maintenance by itself
+  const root = engine.agents[proj.id];
+  root.plan = { goal: 'g', phases: [{ id: 1, title: 'One', status: 'active', steps: [{ text: 'a', done: false }] }] };
+  engine.editPlan(proj.id, { phase: 1, step: 1, done: true });
+  assert.equal(engine.stageOf(root), 'maintenance'); assert.equal(root.stageLog.at(-1).by, 'automatic');
+  assert.equal((await call(`/api/projects/${(await engine.general()).id}/stage`, 'PUT', { stage: 'closed' })).status, 400);
+
+  // export, then import into a different home
+  const { importFrom, exportTo } = await import('../src/transfer.js');
+  const { createWriteStream, createReadStream, mkdirSync: mk, writeFileSync: wf, readFileSync: rf, readdirSync: rd } = await import('node:fs');
+  const { Vault: V } = await import('../src/vault.js');
+  const { once } = await import('node:events');
+  mk(path.join(tmp, 'workspaces', 'travel'), { recursive: true }); wf(path.join(tmp, 'workspaces', 'travel', 'notes.txt'), 'hello from the old computer');
+  if (!engine.vault.unlocked) await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  const bundle = path.join(os.tmpdir(), `apiary-bundle-${Date.now()}.tar.gz`);
+  const ws = createWriteStream(bundle), c1 = once(ws, 'close'); const ex = exportTo(engine, ws, { vault: true, files: true, version: 'test' }); await ex.done; await c1;
+  assert.ok(ex.manifest.vault && ex.manifest.includes.includes('vault.json'));
+  const noVault = path.join(os.tmpdir(), `apiary-bundle-nv-${Date.now()}.tar.gz`);
+  const ws2 = createWriteStream(noVault), c2 = once(ws2, 'close'); const ex2 = exportTo(engine, ws2, { vault: false, files: false }); await ex2.done; await c2;
+  assert.equal(ex2.manifest.vault, false); assert.ok(!ex2.manifest.includes.includes('workspaces'));
+
+  const tmp2 = mkdtempSync(path.join(os.tmpdir(), 'apiary-test2-'));
+  const mkEngine = () => { const st = new Store(path.join(tmp2, 'state.json')); return new Engine(st); };
+  let e2 = mkEngine(); e2.store.data.settings.marker = 'new computer'; e2.store.flush();
+  const rejects = async (fn, status, re) => { try { await fn(); assert.fail('should have failed'); } catch (e) { assert.equal(e.status, status, e.message); assert.match(e.message, re); return e; } };
+  const e1 = await rejects(() => importFrom(e2, createReadStream(bundle), {}), 400, /passphrase/i); assert.equal(e1.needsPassphrase, true);
+  await rejects(() => importFrom(e2, createReadStream(bundle), { passphrase: 'wrong one here' }), 403, /Wrong passphrase/);
+  assert.equal(JSON.parse(rf(path.join(tmp2, 'state.json'), 'utf8')).settings.marker, 'new computer', 'a failed import changes nothing');
+  assert.equal(fsExists(path.join(tmp2, 'vault.json')), false);
+  const junk = path.join(os.tmpdir(), 'junk.bin'); wf(junk, 'not a tar file');
+  await rejects(() => importFrom(e2, createReadStream(junk), {}), 400, /valid|manifest/i);
+
+  const res = await importFrom(e2, createReadStream(bundle), { passphrase: 'correct horse battery' });
+  assert.ok(res.imported.includes('state.json') && res.vault && /^backup-before-import-/.test(res.backup));
+  const st2 = JSON.parse(rf(path.join(tmp2, 'state.json'), 'utf8'));
+  assert.ok(st2.agents[proj.id], 'the projects came across'); assert.equal(st2.settings.marker, undefined);
+  assert.equal(rf(path.join(tmp2, 'workspaces', 'travel', 'notes.txt'), 'utf8'), 'hello from the old computer');
+  assert.equal(JSON.stringify(st2).includes(JSON.stringify(tmp).slice(1, -1)), false, 'paths point at the new home');
+  assert.equal(JSON.parse(rf(path.join(tmp2, res.backup, 'state.json'), 'utf8')).settings.marker, 'new computer', 'what was there is kept in a backup');
+  const v2 = new V(path.join(tmp2, 'vault.json')); await v2.unlock('correct horse battery'); assert.ok(v2.list().length >= 2);
+  assert.ok(!rd(tmp2).some((n) => n.startsWith('.import-')), 'temporary files are cleaned up');
+  e2.store.flush(); assert.ok(st2 && JSON.parse(rf(path.join(tmp2, 'state.json'), 'utf8')).agents[proj.id], 'the imported data is not written over after the import');
+
+  // import without a vault in the file leaves the existing vault alone
+  const tmp3 = mkdtempSync(path.join(os.tmpdir(), 'apiary-test3-')); const e3 = new Engine(new Store(path.join(tmp3, 'state.json')));
+  const r3 = await importFrom(e3, createReadStream(noVault), {}); assert.equal(r3.vault, false); assert.ok(!r3.imported.includes('workspaces'));
+
+  // HTTP: info, download, and a rejected upload
+  const info = (await call('/api/export?info=1')).body; assert.ok(info.bytes > 0 && info.parts.includes('state.json'));
+  const dl = await fetch(`${base}/api/export?vault=0&files=0`); assert.equal(dl.status, 200); assert.match(dl.headers.get('content-disposition'), /apiary-export-/);
+  const buf = Buffer.from(await dl.arrayBuffer()); assert.equal(buf[0], 0x1f); assert.equal(buf[1], 0x8b);
+  const bad = await fetch(`${base}/api/import`, { method: 'POST', headers: { 'content-type': 'application/gzip', 'x-apiary-import': '1' }, body: 'nope' }); assert.equal(bad.status, 400);
+  const noHdr = await fetch(`${base}/api/import`, { method: 'POST', headers: { 'content-type': 'application/gzip' }, body: 'nope' }); assert.equal(noHdr.status, 415);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

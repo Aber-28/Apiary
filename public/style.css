@@ -188,3 +188,14 @@ details summary{cursor:pointer;color:var(--accent-text);font-weight:600;min-heig
 .upd-steps li.st-run{font-weight:600}.upd-steps li.st-wait{color:var(--muted)}.upd-steps li.st-done span{color:var(--ok)}.upd-steps li.st-fail{color:var(--err)}.upd-steps li.st-run span{display:inline-block;animation:spin 1s linear infinite}
 .upd-log{height:150px;overflow:auto;margin:8px 0;font-size:12px}
 @keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.upd-steps li.st-run span{animation:none}}
+
+/* 0.8.0 fixes */
+input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;padding:9px 12px;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:10px;font:inherit;color-scheme:light}
+.dark input[type=time],.dark input[type=date],.dark input[type=datetime-local]{color-scheme:dark}
+.uscale{display:flex;justify-content:space-between;font-size:10px;color:var(--muted);line-height:1}
+.ubar.nolimit{background:repeating-linear-gradient(45deg,var(--line) 0 6px,transparent 6px 12px)}
+
+.choice button[aria-pressed=true],.choice button.on{border-color:var(--accent);background:var(--accent-soft)}
+.choice button[aria-pressed=true] b::before{content:'✔ '}
+
+.stage-closed summary{cursor:pointer;list-style:none}.stage-closed summary h2{display:inline}.stage-closed:not([open]) summary h2::after{content:' ▸'}.stage-closed[open] summary h2::after{content:' ▾'}

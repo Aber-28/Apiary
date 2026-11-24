@@ -14,6 +14,7 @@ import { Engine } from './engine.js';
 import { Updater } from './updater.js';
 import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
+import * as transfer from './transfer.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -57,7 +58,8 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       const given = req.headers['x-apiary-token'] || url.searchParams.get('token') || (cookie && decodeURIComponent(cookie));
       if (given !== TOKEN) return [401, 'Token required'];
     }
-    if (['POST', 'PUT', 'DELETE'].includes(req.method) && !(req.headers['content-type'] || '').startsWith('application/json')) {
+    const upload = url.pathname === '/api/import' && /^application\/(gzip|x-gzip|octet-stream)/.test(req.headers['content-type'] || '') && req.headers['x-apiary-import'] === '1';
+    if (['POST', 'PUT', 'DELETE'].includes(req.method) && !upload && !(req.headers['content-type'] || '').startsWith('application/json')) {
       return [415, 'Use application/json'];
     }
     return null;
@@ -137,6 +139,24 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         return json(res, 200, engine.tickets.get(r[1]));
       }
       if ((r = m(/^\/api\/tickets\/([\w-]+)\/status$/)) && req.method === 'POST') return json(res, 200, engine.tickets.setStatus(r[1], (await readBody(req)).status));
+      // ----- project stages -----
+      if ((r = m(/^\/api\/projects\/([\w-]+)\/stage$/)) && req.method === 'PUT') { const b = await readBody(req); const root = engine.setStage(r[1], b.stage, b.note); return json(res, 200, { stage: engine.stageOf(root), stageLog: root.stageLog || [] }); }
+      // ----- export and import: move everything to another computer -----
+      if (url.pathname === '/api/export' && req.method === 'GET') {
+        const opt = { vault: url.searchParams.get('vault') !== '0', files: url.searchParams.get('files') !== '0', version: VERSION };
+        if (url.searchParams.get('info') === '1') return json(res, 200, transfer.exportInfo(engine.store, opt));
+        res.writeHead(200, { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="apiary-export-${new Date().toISOString().slice(0, 10)}.tar.gz"` });
+        const { done } = transfer.exportTo(engine, res, opt);
+        done.catch((e) => { console.error(e.message); res.destroy(); });
+        return;
+      }
+      if (url.pathname === '/api/import' && req.method === 'POST') {
+        let pass = ''; try { pass = decodeURIComponent(req.headers['x-vault-passphrase'] || ''); } catch { /* ignore */ }
+        const out = await transfer.importFrom(engine, req, { passphrase: pass });
+        json(res, 200, { ...out, restarting: true });
+        res.on('finish', () => setTimeout(restart, 600));
+        return;
+      }
       // ----- project plans -----
       if ((r = m(/^\/api\/projects\/([\w-]+)\/plan$/))) {
         const root = engine.agents[r[1]]; if (!root) throw Object.assign(new Error('No such project'), { status: 404 });
@@ -327,7 +347,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       }
       json(res, 404, { error: 'Not found' });
     } catch (e) {
-      json(res, e.status || 500, { error: e.message });
+      json(res, e.status || 500, { error: e.message, ...(e.needsPassphrase ? { needsPassphrase: true } : {}) });
     }
   });
 }

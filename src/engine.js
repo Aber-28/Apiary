@@ -47,6 +47,7 @@ const id8 = () => randomUUID().slice(0, 8);
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'agent';
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
+export const STAGES = { building: { label: 'Building', hint: 'Being made for the first time' }, maintenance: { label: 'Maintenance', hint: 'Finished. Fixes, security updates and small changes' }, closed: { label: 'Closed', hint: 'Finished for good. Kept, but not worked on' } };
 export class Engine extends EventEmitter {
   constructor(store) {
     super();
@@ -388,7 +389,7 @@ export class Engine extends EventEmitter {
     answers = (Array.isArray(answers) ? answers : []).slice(0, 12).map((a) => ({ q: String(a.q || '').slice(0, 400), a: String(a.a || '').slice(0, 1500) }));
     const MAX = 8;
     const transcript = answers.map((a, i) => `Q${i + 1}: ${a.q}\nA${i + 1}: ${a.a}`).join('\n\n');
-    const system = `ONBOARDING INTERVIEW. You are helping a person set up their personal organisation of AI agents: a CEO and a few specialists. Interview them to learn their setup and goals. Ask ONE short question at a time, each building on earlier answers (their infrastructure and network, servers and hosting, websites, tools they use, what they want help with, how much the agents may change without asking, how they like to be kept informed). Offer 2 to 5 short quick-answer choices. Never ask for passwords, keys or tokens: those go in an encrypted vault later. Ask at most ${MAX} questions in total${answers.length >= MAX - 1 ? '; you have asked enough, so finish now' : ''}.\n` +
+    const system = `ONBOARDING INTERVIEW. You are helping a person set up their personal organisation of AI agents: a CEO and a few specialists. Interview them to learn their setup and goals. Ask ONE short question at a time (the person can pick several of your choices and add their own words, so offer choices that can be combined and say so when they cannot), each building on earlier answers (their infrastructure and network, servers and hosting, websites, tools they use, what they want help with, how much the agents may change without asking, how they like to be kept informed). Offer 2 to 5 short quick-answer choices. Never ask for passwords, keys or tokens: those go in an encrypted vault later. Ask at most ${MAX} questions in total${answers.length >= MAX - 1 ? '; you have asked enough, so finish now' : ''}.\n` +
       'Reply with JSON only, no other text. To ask: {"question":"...","choices":["..."]}. When you know enough: {"done":true,"overview":"markdown summary of their setup and goals, no secrets","team":[{"title":"Job title","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","role":"what they do","reason":"why this person needs them","instructions":"specifics for this setup"}]} with 3 to 6 specialists that fit what they said and no one they do not need.';
     let out;
     try { out = await this._oneShot(system, transcript ? `Interview so far:\n\n${transcript}\n\nContinue.` : 'Start the interview.'); }
@@ -508,7 +509,7 @@ export class Engine extends EventEmitter {
     const since = m.last || due.getTime() - 86400000;
     this.store.data.settings.meeting = { ...m, last: now.getTime() }; this.store.save();
     const ran = [];
-    for (const root of Object.values(this.agents).filter((a) => !a.parentId)) {
+    for (const root of Object.values(this.agents).filter((a) => !a.parentId && this.stageOf(a) !== 'closed')) {
       if (this._roster(root).length < 1 || (root.kind !== 'general' && !this.memory.items.some((e) => e.project === this._pkey(root) && e.ts >= since))) continue;
       try { ran.push(await this.runMeeting(root.id, { since })); } catch (e) { this._log(root, `! team meeting failed: ${e.message}`); }
     }
@@ -653,6 +654,8 @@ export class Engine extends EventEmitter {
   send(agentId, text, from = null) {
     const agent = this.agents[agentId];
     if (!agent) throw httpErr(404, 'No such agent');
+    const rt = this.rootOf(agent);
+    if (rt.kind !== 'general' && this.stageOf(rt) === 'closed') throw httpErr(409, 'This project is closed. Reopen it (Projects page) to continue. Nothing has been deleted.');
     const prev = this.chains.get(agentId) || Promise.resolve();
     const run = prev.catch(() => {}).then(() => this._converse(agent, text, from));
     this.chains.set(agentId, run);
@@ -882,6 +885,27 @@ export class Engine extends EventEmitter {
     else this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: estimateTokens(system, prompt), output: estimateTokens(res.text), estimated: true });
   }
 
+  // ----- project stages: Building, then Maintenance, finally Closed (nothing is ever deleted) -----
+  stageOf(root) { return root.stage || 'building'; }
+  setStage(rootId, stage, note = '', by = 'you') {
+    const root = this.agents[rootId];
+    if (!root || root.parentId) throw httpErr(404, 'No such project');
+    if (root.kind === 'general') throw httpErr(400, 'The main chat has no stage');
+    if (!STAGES[stage]) throw httpErr(400, 'Stage must be building, maintenance or closed');
+    const was = this.stageOf(root);
+    if (was === stage) return root;
+    root.stage = stage; root.stageNote = String(note || '').slice(0, 300);
+    (root.stageLog ||= []).push({ stage, from: was, at: Date.now(), by, note: root.stageNote });
+    if (stage === 'closed') { this.stop(rootId); root.closedAt = Date.now(); }
+    else delete root.closedAt;
+    this._msg(root, { role: 'system', text: `Project moved to ${STAGES[stage].label}${by === 'you' ? '' : ' (' + by + ')'}${root.stageNote ? ': ' + root.stageNote : ''}. ${stage === 'closed' ? 'Everything is kept. Reopen it any time.' : ''}`.trim() });
+    this.emit('event', { type: 'agent', agent: root }); this.store.save();
+    return root;
+  }
+  _planDone(root) {
+    const plan = root?.plan;
+    if (plan && plan.phases.length && plan.phases.every((p) => p.status === 'done') && this.stageOf(root) === 'building') this.setStage(root.id, 'maintenance', 'All phases are done. From now on it is kept up to date: fixes, security updates and small changes.', 'automatic');
+  }
   // ----- project plans: big projects are done in phases, and the human can see where they stand -----
   _planOwner(agent) { const r = this.rootOf(agent); return r.kind === 'general' ? null : r; }
   _planFix(plan) {
@@ -913,7 +937,7 @@ export class Engine extends EventEmitter {
     }
     const old = root.plan, now = Date.now();
     root.plan = { goal: np.goal, createdAt: old?.createdAt || now, updatedAt: now, phases: np.phases.map((p, i) => { const prev = old?.phases.find((o) => o.title.toLowerCase() === p.title.toLowerCase()); return { id: i + 1, title: p.title, goal: p.goal, status: prev?.status || 'pending', startedAt: prev?.startedAt, doneAt: prev?.doneAt, steps: p.steps.map((t) => ({ text: t, done: !!prev?.steps.find((x) => x.text.toLowerCase() === t.toLowerCase() && x.done) })) }; }) };
-    this._planFix(root.plan);
+    this._planFix(root.plan); this._planDone(root);
     this._msg(root, { role: 'system', text: `Project plan ${old ? 'updated' : 'created'}: ${root.plan.phases.map((p) => p.title).join(' → ')}` });
     this.emit('event', { type: 'agent', agent: root }); this.store.save();
     notes.push('The plan is saved and the human can see it. Work phase by phase, and report progress with apiary-progress.');
@@ -935,7 +959,7 @@ export class Engine extends EventEmitter {
       if (x.note) ph.note = x.note;
       if (status === 'blocked') ph.status = 'blocked'; else if (ph.status === 'blocked' && status !== 'blocked') ph.status = 'active';
     }
-    this._planFix(plan);
+    this._planFix(plan); this._planDone(root);
     this.emit('event', { type: 'agent', agent: root }); this.store.save();
   }
   // The human can tick steps and set phases by hand; the plan is theirs too.
@@ -947,7 +971,7 @@ export class Engine extends EventEmitter {
     if (step != null) { const st = ph.steps[Number(step) - 1]; if (!st) throw httpErr(400, 'No such step'); st.done = !!done; }
     if (status !== undefined) { if (!['pending', 'active', 'done', 'blocked'].includes(status)) throw httpErr(400, 'Unknown status'); ph.status = status; if (status === 'done') { ph.steps.forEach((t) => (t.done = true)); ph.doneAt = Date.now(); } }
     if (note !== undefined) ph.note = String(note).slice(0, 300);
-    this._planFix(plan);
+    this._planFix(plan); this._planDone(root);
     this.emit('event', { type: 'agent', agent: root }); this.store.save();
     return plan;
   }
@@ -961,9 +985,10 @@ export class Engine extends EventEmitter {
   }
   _planContext(agent) {
     const root = this._planOwner(agent), plan = root?.plan;
-    if (!plan) return '';
+    const stage = root && this.stageOf(root) === 'maintenance' ? '\nPROJECT STAGE: Maintenance. The project is built. Only do fixes, security updates and small changes. Do not start big new work without telling the human.\n' : '';
+    if (!plan) return stage;
     const st = this.planStats(plan);
-    return `\nPROJECT PLAN (where the project stands: ${st.pct}% done${st.current ? `, now in "${st.current}"` : ''}):\n${plan.goal ? 'Goal: ' + plan.goal + '\n' : ''}` + plan.phases.map((p, i) => `${i + 1}. ${p.title} [${p.status}]${p.note ? ' (' + p.note + ')' : ''}${p.steps.length ? '\n' + p.steps.map((t, j) => `   ${j + 1}. [${t.done ? 'x' : ' '}] ${t.text}`).join('\n') : ''}`).join('\n') + '\nStay inside the current phase. When you finish a step, record it with apiary-progress.\n';
+    return stage + `\nPROJECT PLAN (where the project stands: ${st.pct}% done${st.current ? `, now in "${st.current}"` : ''}):\n${plan.goal ? 'Goal: ' + plan.goal + '\n' : ''}` + plan.phases.map((p, i) => `${i + 1}. ${p.title} [${p.status}]${p.note ? ' (' + p.note + ')' : ''}${p.steps.length ? '\n' + p.steps.map((t, j) => `   ${j + 1}. [${t.done ? 'x' : ' '}] ${t.text}`).join('\n') : ''}`).join('\n') + '\nStay inside the current phase. When you finish a step, record it with apiary-progress.\n';
   }
 
   // ----- task board, tickets, model advice -----

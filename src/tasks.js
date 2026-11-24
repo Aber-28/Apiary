@@ -1,10 +1,10 @@
 // The task board: to do, back burner, in progress, blocked and done.
-//   todo       will be done soon
-//   backburner an idea that is not finished yet; more detail comes later
+//   backburner an unfinished idea; more detail comes later
+//   todo       finished and ready: work on it can start
 import { randomUUID } from 'node:crypto';
 
-export const STATUSES = ['todo', 'backburner', 'inprogress', 'blocked', 'done'];
-export const STATUS_LABELS = { todo: 'To do', backburner: 'Back burner', inprogress: 'In progress', blocked: 'Blocked', done: 'Done' };
+export const STATUSES = ['backburner', 'todo', 'inprogress', 'blocked', 'done'];
+export const STATUS_LABELS = { backburner: 'Back burner', todo: 'To do', inprogress: 'In progress', blocked: 'Blocked', done: 'Done' };
 const err = (status, message) => Object.assign(new Error(message), { status });
 const clean = (s, n) => String(s ?? '').trim().slice(0, n);
 

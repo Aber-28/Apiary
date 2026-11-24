@@ -18,4 +18,4 @@ The tests start a real server and exercise: the delegation and message parsers, 
 
 ## Documentation
 
-The `docs/` folder is the source of the GitBook site (`docs/SUMMARY.md` is the table of contents). Edit it here and let GitBook's Git Sync publish it.
+The `docs/` folder is the source of the GitBook site (`docs/SUMMARY.md` is the table of contents). Edit it here; GitBook Git Sync publishes it (`gitbook-docs.yaml` maps this folder to the site).

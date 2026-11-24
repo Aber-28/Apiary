@@ -1596,5 +1596,66 @@ let orgIds;
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /pageHealth/);
 }
 
+// ---- telegram alerts ----
+{
+  const http = await import('node:http'), fs = await import('node:fs');
+  const TOKEN = '123456789:AAEhBOweik6ad9r_QXMENQjcrGbqCr4K-Tq';
+  const fake = { updates: [], sent: [], id: 1 };
+  const tg = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => {
+      const body = b ? JSON.parse(b) : {}, m = /^\/bot([^/]+)\/(\w+)/.exec(req.url);
+      res.setHeader('content-type', 'application/json');
+      if (!m || m[1] !== TOKEN) { res.statusCode = 401; return res.end(JSON.stringify({ ok: false, description: 'Unauthorized' })); }
+      if (m[2] === 'getUpdates') { const u = fake.updates.splice(0); return res.end(JSON.stringify({ ok: true, result: u })); }
+      if (m[2] === 'sendMessage') { fake.sent.push(body); return res.end(JSON.stringify({ ok: true, result: {} })); }
+      res.end(JSON.stringify({ ok: true, result: {} }));
+    });
+  });
+  await new Promise((r) => tg.listen(0, '127.0.0.1', r));
+  process.env.APIARY_TELEGRAM_API = `http://127.0.0.1:${tg.address().port}`;
+  const T = engine.telegram, until2 = async (f, ms = 4000) => { const t0 = Date.now(); while (!f()) { if (Date.now() - t0 > ms) throw new Error('timeout waiting: ' + f); await new Promise((r) => setTimeout(r, 40)); } };
+  // the token must go to the vault, and the vault must be open
+  await call('/api/vault/lock', 'POST', {});
+  assert.equal((await call('/api/telegram', 'PUT', { token: TOKEN })).status, 409, 'locked vault: nowhere to put the token');
+  assert.equal((await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' })).status, 200);
+  assert.equal((await call('/api/telegram', 'PUT', { token: 'nonsense' })).status, 400);
+  assert.equal((await call('/api/telegram', 'PUT', { token: TOKEN })).status, 200);
+  assert.ok(engine.vault.list().some((x) => x.name === 'Telegram bot token'), 'token stored in the vault');
+  assert.ok(!JSON.stringify((await call('/api/telegram')).body).includes(TOKEN), 'token never comes back from the API');
+  assert.ok(!fs.readFileSync(path.join(tmp, 'state.json'), 'utf8').includes(TOKEN), 'token is not in the state file');
+  assert.equal((await call('/api/telegram', 'PUT', { enabled: true })).status, 200);
+  // linking: a stranger and a wrong code do nothing; the right code from a private chat links it
+  const code = (await call('/api/telegram/link', 'POST', {})).body.linking.code; assert.match(code, /^\d{6}$/);
+  fake.updates.push({ update_id: 1, message: { chat: { id: 555, type: 'private' }, text: '000000' } }, { update_id: 2, message: { chat: { id: 777, type: 'group' }, text: code } });
+  await new Promise((r) => setTimeout(r, 600)); assert.equal(T.config.chatId, '', 'wrong code and group chats are ignored');
+  assert.equal(fake.sent.length, 0, 'strangers get no reply');
+  fake.updates.push({ update_id: 3, message: { chat: { id: 42, type: 'private' }, text: code } });
+  await until2(() => T.config.chatId === '42'); await until2(() => fake.sent.some((m) => /Linked/.test(m.text)));
+  // alerts: approvals, health, long tasks; never output
+  fake.sent.length = 0;
+  const ag = Object.values(engine.agents)[0];
+  engine._ask(ag, { kind: 'plan', title: 'Review the deployment plan' }).catch(() => {});
+  await until2(() => fake.sent.some((m) => /Approval waiting.*Review the deployment plan/.test(m.text)));
+  engine.emit('health-new', { id: 'x', level: 'err', title: 'The disk is almost full', problem: 'secret detail /home/x', fix: 'free space' });
+  await until2(() => fake.sent.some((m) => /Health: The disk is almost full/.test(m.text)));
+  assert.ok(!fake.sent.some((m) => /secret detail/.test(m.text)), 'health detail is not sent, only the title');
+  T.st.longTaskMinutes = 1; engine.emit('task-done', { agent: ag, ms: 30000, failed: false }); engine.emit('task-done', { agent: ag, ms: 5 * 60000, failed: false });
+  await until2(() => fake.sent.some((m) => /Finished.*after 5 min/.test(m.text))); assert.equal(fake.sent.filter((m) => /Finished/.test(m.text)).length, 1, 'short tasks are not announced');
+  // dedupe and settings
+  const n = fake.sent.length; await T.alert('same text'); await T.alert('same text'); assert.equal(fake.sent.length, n + 1, 'repeats within 10 minutes are dropped');
+  await call('/api/telegram', 'PUT', { events: { approvals: false } });
+  const n2 = fake.sent.length; engine._ask(ag, { kind: 'plan', title: 'Another one' }).catch(() => {}); await new Promise((r) => setTimeout(r, 300)); assert.equal(fake.sent.length, n2, 'switched off');
+  assert.equal((await call('/api/telegram', 'PUT', { longTaskMinutes: 0 })).status, 400);
+  // /status answers only the linked chat
+  fake.updates.push({ update_id: 4, message: { chat: { id: 99, type: 'private' }, text: '/status' } }, { update_id: 5, message: { chat: { id: 42, type: 'private' }, text: '/status' } });
+  await until2(() => fake.sent.some((m) => /Apiary: \d+ working/.test(m.text))); assert.ok(fake.sent.filter((m) => m.chat_id === '99' || m.chat_id === 99).length === 0);
+  // redaction and test alert
+  assert.equal((await call('/api/telegram/test', 'POST', {})).status, 200);
+  assert.equal((await call('/api/telegram/unlink', 'POST', {})).body.linked, false);
+  await call('/api/telegram', 'PUT', { enabled: false });
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /pageTelegram/);
+  await new Promise((r) => setTimeout(r, 1300)); tg.close();
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

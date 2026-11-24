@@ -109,3 +109,9 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 - `GET /api/health` returns `{ at, level, count, items: [{ id, level, title, problem, fix, link }] }`. `level` is `ok`, `info`, `warn` or `err`.
 - `POST /api/health/check` tests the devices and runs every check now, and returns the same shape.
+
+## Telegram alerts
+
+- `GET /api/telegram` returns `{ config, status }` (`status`: enabled, linked, hasToken, vaultLocked, lastError, lastOk, linking). The bot token is never returned.
+- `PUT /api/telegram` takes any of `token` (saved to the vault), `enabled`, `events` (`approvals`, `health`, `tasks`) and `longTaskMinutes`.
+- `POST /api/telegram/link` starts linking and returns a one-time code to send to the bot. `POST /api/telegram/unlink` removes the chat. `POST /api/telegram/test` sends a test alert.

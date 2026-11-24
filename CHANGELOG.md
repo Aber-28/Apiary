@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.19.0
+
+- **Telegram alerts** (Settings > Telegram alerts): urgent alerts to your own Telegram bot when an approval is waiting, a health warning appears or a long task finishes. The bot token is stored in the vault. Only the chat you link (with a one-time code) is answered. Alerts only: command output, file contents and secrets are never sent. `/status` in the linked chat gives a one-line summary.
+
 ## 0.18.0
 
 - **Health page** (Infrastructure > Health): warns about a nearly full disk, a device on the map that stopped answering, an expired Claude/Codex/GitHub login, a locked vault, and failed or stopped backups. Each warning says what is wrong and what to do. It checks every 5 minutes and tests the devices, so the map turns red by itself. The menu shows a warning count.

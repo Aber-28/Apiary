@@ -369,6 +369,11 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/telegram' && req.method === 'GET') return json(res, 200, { config: engine.telegram.config, status: engine.telegram.status });
+      if (url.pathname === '/api/telegram' && req.method === 'PUT') { const status = engine.telegram.setConfig(await readBody(req)); engine.audit.add('system', { actor: 'You', action: 'changed Telegram alert settings' }); return json(res, 200, { config: engine.telegram.config, status }); }
+      if (url.pathname === '/api/telegram/test' && req.method === 'POST') { await readBody(req); return json(res, 200, await engine.telegram.test()); }
+      if (url.pathname === '/api/telegram/link' && req.method === 'POST') { await readBody(req); return json(res, 200, engine.telegram.startLink()); }
+      if (url.pathname === '/api/telegram/unlink' && req.method === 'POST') { await readBody(req); return json(res, 200, engine.telegram.unlink()); }
       if (url.pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ...engine.health.state, count: engine.health.count });
       if (url.pathname === '/api/health/check' && req.method === 'POST') { await readBody(req); const st = await engine.health.run(); return json(res, 200, { ...st, count: engine.health.count }); }
       if (url.pathname === '/api/audit' && req.method === 'GET') { const q = Object.fromEntries(url.searchParams); return json(res, 200, engine.audit.search({ ...q, from: +q.from || 0, to: +q.to || 0 })); }
@@ -395,7 +400,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (url.pathname.startsWith('/api/vault/')) {
         const vb = req.method === 'GET' ? {} : await readBody(req), v = engine.vault;
         if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
-        if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); engine.audit.add('vault', { actor: 'You', action: 'unlocked the vault' }); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); engine.telegram.poll(); engine.audit.add('vault', { actor: 'You', action: 'unlocked the vault' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/auto') {
           // turning it on needs the passphrase again, so a borrowed open window cannot do it
           if (vb.enable) v.enableAuto(vb.passphrase); else v.disableAuto();
@@ -503,6 +508,7 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setTimeout(() => engine.telegram.poll(), 3000).unref();
   setTimeout(() => engine.health.run().catch(() => {}), 15000).unref();
   setInterval(() => engine.health.run().catch(() => {}), 5 * 60000).unref();   // the map turns red by itself
   setInterval(() => engine.audit.prune(), 3600000).unref();

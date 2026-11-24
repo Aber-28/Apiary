@@ -102,7 +102,7 @@ const NAV = [
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/telegram', 'Telegram alerts'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -147,6 +147,7 @@ const ROUTES = [
   [/^#\/backups$/, () => pageBackups()],
   [/^#\/audit$/, () => pageAudit()],
   [/^#\/health$/, () => pageHealth()],
+  [/^#\/telegram$/, () => pageTelegram()],
   [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
@@ -1311,6 +1312,39 @@ async function pollSystem() {
 setInterval(pollSystem, 5000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
 
 // ---------- backups ----------
+async function pageTelegram() {
+  crumbs('Settings', 'Telegram alerts');
+  const draw = async () => {
+    let d; try { d = await api('/api/telegram'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const c = d.config, st = d.status;
+    const token = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: st.hasToken ? 'Saved in the vault. Paste a new one to replace it.' : '123456789:ABC…', 'aria-label': 'Bot token' });
+    const on = h('input', { type: 'checkbox', checked: c.enabled, disabled: !st.linked }), ev = {};
+    for (const k of ['approvals', 'health', 'tasks']) ev[k] = h('input', { type: 'checkbox', checked: c.events[k] });
+    const mins = h('input', { type: 'number', min: '1', max: '600', value: c.longTaskMinutes, 'aria-label': 'Minutes' });
+    const saveToken = guard(async () => { if (!token.value.trim()) return toast('Paste the bot token first'); await api('/api/telegram', 'PUT', { token: token.value }); toast('Token saved in the vault'); draw(); });
+    const save = guard(async () => { await api('/api/telegram', 'PUT', { enabled: on.checked, events: Object.fromEntries(Object.entries(ev).map(([k, el]) => [k, el.checked])), longTaskMinutes: Number(mins.value) }); toast('Saved'); draw(); });
+    const link = guard(async () => { await api('/api/telegram/link', 'POST', {}); draw(); });
+    const test = guard(async () => { await api('/api/telegram/test', 'POST', {}); toast('Test alert sent'); draw(); });
+    const unlink = guard(async () => { await api('/api/telegram/unlink', 'POST', {}); draw(); });
+    view.replaceChildren(h('h1', {}, 'Telegram alerts'), h('p', { class: 'sub-title' }, 'Urgent alerts on your phone: approvals waiting, health warnings, and long tasks finishing. Alerts only. Command output, file contents and secrets are never sent.'),
+      st.vaultLocked ? h('div', { class: 'card', role: 'alert', style: 'max-width:680px;margin-bottom:12px' }, 'The secrets vault is locked, so the bot token cannot be read and no alerts go out. Unlock it on the Secrets page.') : null,
+      st.lastError ? h('p', { class: 'hint', role: 'alert', style: 'color:var(--err);max-width:680px' }, st.lastError) : null,
+      h('div', { class: 'card', style: 'max-width:680px;margin-bottom:12px' }, h('h2', {}, '1. Your bot'),
+        h('p', { class: 'hint' }, 'In Telegram, message @BotFather, send /newbot, follow the steps, and copy the token it gives you. The token is stored encrypted in your Secrets vault.'),
+        h('div', { class: 'formrow' }, token, h('button', { class: 'btn primary', onclick: saveToken }, 'Save token'))),
+      h('div', { class: 'card', style: 'max-width:680px;margin-bottom:12px' }, h('h2', {}, '2. Link your chat'),
+        st.linked ? h('p', {}, h('span', { class: 'pill ok' }, 'Linked'), ' Only your chat is answered. Anyone else who finds the bot is ignored. ', h('button', { class: 'btn', onclick: unlink }, 'Unlink')) : st.linking ? h('div', {}, h('p', {}, 'Open your bot in Telegram and send it this code:'), h('p', { style: 'font-size:28px;letter-spacing:6px;font-weight:700' }, st.linking.code), h('p', { class: 'hint' }, 'It works for 10 minutes. This page updates when the chat is linked.'))
+          : h('div', {}, h('p', { class: 'hint' }, 'Press the button, then send the code it shows to your bot. Nobody else can link a chat without that code.'), h('button', { class: 'btn', onclick: link, disabled: !st.hasToken }, 'Link my chat'))),
+      h('div', { class: 'card', style: 'max-width:680px' }, h('h2', {}, '3. What to send'),
+        h('label', { class: 'check' }, on, ' Send alerts', st.linked ? '' : ' (link your chat first)'),
+        h('label', { class: 'check' }, ev.approvals, ' An approval is waiting for you'), h('label', { class: 'check' }, ev.health, ' A health warning appears'),
+        h('label', { class: 'check' }, ev.tasks, ' A long task finishes, one that took more than ', mins, ' minutes'),
+        h('div', { class: 'formrow', style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: save }, 'Save'), h('button', { class: 'btn', onclick: test, disabled: !st.linked }, 'Send a test alert')),
+        h('p', { class: 'hint' }, 'In Telegram, send /status to the bot for a one-line summary.')));
+  };
+  await draw();
+  page = { shows: () => true, update: (e) => e.type === 'telegram' && draw() };
+}
 async function pageHealth() {
   crumbs('Infrastructure', 'Health');
   const draw = async (st) => {

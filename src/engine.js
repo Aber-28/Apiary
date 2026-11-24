@@ -22,6 +22,7 @@ import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js
 import { Infra } from './infra.js';
 import { Audit } from './audit.js';
 import { Health } from './health.js';
+import { Telegram } from './telegram.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -72,8 +73,10 @@ export class Engine extends EventEmitter {
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
+    this._workStart = new Map();
     this.health = new Health(this);
     this.audit = new Audit(path.join(path.dirname(store.file), 'audit.jsonl'), (t) => this._redact(t));
+    this.telegram = new Telegram(this);
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
@@ -829,6 +832,12 @@ export class Engine extends EventEmitter {
     return agent;
   }
   _setStatus(agent, status) {
+    const was = agent.status;
+    if (status === 'working' && was !== 'working' && was !== 'waiting') this._workStart.set(agent.id, Date.now());
+    else if ((status === 'idle' || status === 'error') && (was === 'working' || was === 'waiting') && this._workStart.has(agent.id)) {
+      const ms = Date.now() - this._workStart.get(agent.id); this._workStart.delete(agent.id);
+      this.emit('task-done', { agent, ms, failed: status === 'error' });
+    }
     agent.status = status;
     this.emit('event', { type: 'agent', agent });
     this.store.save();

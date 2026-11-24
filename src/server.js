@@ -363,7 +363,8 @@ export function main(links = []) {
   const updater = new Updater({ dir: fileURLToPath(new URL('..', import.meta.url)), current: VERSION, authArgs: () => authArgs(engine.connections.get('github')) });
   const restart = () => {
     store.flush(); engine.memory.flush();
-    const svc = spawnSync('systemctl', ['--user', 'is-active', '--quiet', 'apiary']).status === 0 && !!process.env.INVOCATION_ID;
+    // INVOCATION_ID is set by systemd for every service it starts, so no systemctl call is needed to know
+    const svc = !!process.env.INVOCATION_ID;
     if (svc) {
       // A helper started from inside the service would be killed together with it when we exit.
       // Exiting with an error code makes systemd (Restart=on-failure) start us again by itself.

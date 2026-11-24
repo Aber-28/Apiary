@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.1
+- Fixed: the service restart after an update no longer depends on `systemctl` working from inside the service
+
 ## 0.8.0
 - **Export and import**: move everything to another computer in one file (vault optional, stays encrypted and needs its passphrase on import; the old data is kept in a backup folder)
 - **Project stages**: Building, Maintenance and Closed. Finished plans move to Maintenance by themselves. Closing keeps everything

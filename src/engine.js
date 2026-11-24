@@ -543,8 +543,17 @@ export class Engine extends EventEmitter {
       if (!this.vault.unlocked) { notes.push(`The secrets vault is locked, so "${r.name}" is not available. Ask the human to unlock it (Secrets page).`); continue; }
       if (!it || !(agent.member || !agent.parentId)) { notes.push(`There is no secret called "${r.name}" that you can use.`); continue; }
       const key = this._mkey(agent), asg = it.assigned?.[key];
-      if (!asg) { notes.push(`"${r.name}" has not been assigned to you. Ask the human to assign it to you on the Secrets page; do not look for it elsewhere.`); continue; }
-      let allowed = asg.grant === 'always';
+      let asgd = asg;
+      if (!asg) {
+        // Not assigned to this agent yet (for example you gave it to the CEO and the project's lead is asking). Ask the human on the spot.
+        this._setStatus(agent, 'waiting');
+        this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval to use a secret' });
+        const d = await this._ask(agent, { kind: 'secret', title: `${agent.name} wants to use the secret "${it.name}"`, detail: `${it.name} is NOT assigned to ${agent.name} yet. "Allow once" lets it use the secret this one time. "Always allow" also gives it permanent access (you can take it away on the Secrets page).${r.why ? ` Reason given: ${r.why}` : ''}`, secret: it.name, unassigned: true });
+        if (d.decision === 'deny') { notes.push(`The human did not give you access to "${it.name}"${d.note ? ': ' + d.note : ''}. Do not look for it elsewhere.`); continue; }
+        if (d.mode === 'always') this.vault.assign(it.id, key, this._agentLabel(agent), 'always');
+        asgd = { grant: d.mode === 'always' ? 'always' : 'ask' };
+      }
+      let allowed = !asg || asg.grant === 'always';   // not assigned: the human just approved it above
       if (!allowed) {
         this._setStatus(agent, 'waiting');
         this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval to use a secret' });
@@ -558,7 +567,7 @@ export class Engine extends EventEmitter {
       (this.leases.get(agent.id) || this.leases.set(agent.id, new Map()).get(agent.id)).set(it.name, val);
       const uname = this.vault.user(it.id);
       if (uname) (this.userLeases.get(agent.id) || this.userLeases.set(agent.id, new Map()).get(agent.id)).set(it.name, uname);
-      this._log(agent, `🔑 using secret "${it.name}"${asg.grant === 'always' ? ' (always allowed)' : ''}`);
+      this._log(agent, `🔑 using secret "${it.name}"${asgd.grant === 'always' ? ' (always allowed)' : ''}`);
       const type = typeOf(it), EV = envName(it.name), meta = this.vault.list().find((x) => x.id === it.id) || {};
       if (type === 'ssh') { const mm = this.metaLeases.get(agent.id) || this.metaLeases.set(agent.id, {}).get(agent.id); Object.assign(mm, { [`${EV}_HOST`]: meta.host, [`${EV}_PORT`]: String(meta.port || 22), [`${EV}_AUTH`]: meta.auth || 'password' }); }
       if (type === 'ssh') notes.push(`"${it.name}" is an SSH login for ${uname}@${meta.host}:${meta.port || 22}. To use it run: apiary-ssh "${it.name}" -- <command on the server>   (leave out "-- <command>" for a shell). Add ssh options before the "--", for example -L 8080:localhost:80. The helper handles the ${meta.auth === 'key' ? 'private key' : 'password'} and the server's fingerprint for you. Do not call ssh, sshpass or ssh-keygen yourself, and never print the secret. It is available for this task only.`);
@@ -853,7 +862,7 @@ export class Engine extends EventEmitter {
       s += '\nProgress: when you finish a step (or get stuck), tell Apiary so the human can see where the project stands: ```apiary-progress\n{"phase":1,"step":2,"status":"done","note":"Optional short note"}\n```. "phase" and "step" are numbers or exact names; status is done, active or blocked. Omit "step" to update the whole phase.' + (lead ? ' If the plan needs to change, send a new apiary-plan block; finished work is kept.' : '') + '\n';
     }
     s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
-    if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
+    if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. If it is not assigned to you yet, the human is asked right then whether to allow it. The human approves each use unless they chose always. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += this._secretsNote(agent);
     if (agent.member || !agent.parentId) s += this._ownerNote(agent);
     if (agent.member) {

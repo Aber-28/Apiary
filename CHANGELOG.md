@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.12.1
+
+* An agent that asks for a secret that is not assigned to it no longer just gets refused. You get an approval card saying the secret is **not assigned** to that agent: *Allow once*, *Always allow* (which also assigns it), or *Deny*. This fixes the case where you gave a secret to the CEO but the project's lead agent was the one doing the work.
+
 ## 0.12.0
 
 * **Kinds of secret.** Add an **SSH login** (server, port, username, password or private key), a **Login** (username and password) or an **API key or long-lived token**. Agents you give access to can use all of them.

@@ -45,3 +45,11 @@ When you add a secret you choose what it is. Agents you give access to can use a
 * The first time you connect to a server, its fingerprint is remembered in Apiary's own `known_hosts` file (`~/.apiary/known_hosts`). If the server's key later changes, ssh refuses to connect and the agent is told, which protects you from impostors.
 * Agents with **Safe** access, and Codex's default sandbox, may not be allowed network access. Use **Full access** for projects that need to reach servers.
 * The OpenSSH client (`ssh`, `ssh-agent`, `ssh-add`) must be installed. It is on most Linux desktops. Otherwise: `sudo apt install openssh-client`.
+
+## When an agent asks for a secret that is not assigned to it
+
+You do not have to assign every secret in advance. If an agent asks for a secret it does not hold (for example you gave "website ssh" to your CEO, but the project's lead agent is the one doing the work), you get an approval card that says the secret is **not assigned** to that agent:
+
+* **Allow once** lets it use the secret this one time and nothing is stored.
+* **Always allow** also assigns the secret to that agent for good. You can remove that on the Secrets page.
+* **Deny** tells the agent no, and it does not look for the secret anywhere else.

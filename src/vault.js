@@ -136,6 +136,7 @@ export class Vault {
     this._save();
     return this.list().find((i) => i.id === id);
   }
+  assign(id, key, label, grant) { const it = this.data?.items[id]; if (!it) throw err(404, 'No such secret'); (it.assigned ||= {})[key] = { label: String(label || key).slice(0, 80), grant: grant === 'always' ? 'always' : 'ask' }; this._save(); }
   setGrant(id, key, grant) { const a = this.data?.items[id]?.assigned?.[key]; if (a) { a.grant = grant; this._save(); } }
   remove(id) { if (!this.data?.items[id]) throw err(404, 'No such secret'); delete this.data.items[id]; this.values.delete(id); this._save(); }
   value(id) { return this.values.get(id) ?? null; }

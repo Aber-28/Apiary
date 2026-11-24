@@ -598,11 +598,25 @@ let orgIds;
   const pendingSecret = async () => { let f; await until(() => (f = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'secret')), 8000); return f; };
   const idle = (a) => until(() => engine.agents[a.id].status === 'idle' && !engine.approvals().some((x) => x.status === 'pending' && x.agentId === a.id), 8000);
 
-  // not assigned -> no approval is even offered
-  await ask(se, 'use-secret:NPM_admin please'); await idle(se);
-  assert.ok(engine.messages(se.id).some((m) => /has not been assigned to you/.test(m.text || '') || m.role === 'report'), 'unassigned agents are refused');
-  assert.equal(engine.approvals().some((a) => a.status === 'pending' && a.kind === 'secret'), false);
+  // not assigned -> the human is asked on the spot; a "no" leaves the agent without it and without any assignment
+  await ask(se, 'use-secret:NPM_admin please');
+  { const f = await pendingSecret(); assert.equal(f.unassigned, true); assert.match(f.detail, /NOT assigned to/);
+    assert.equal((await call(`/api/approvals/${f.id}/decide`, 'POST', { decision: 'deny' })).status, 200); }
+  await idle(se);
+  assert.ok(engine.messages(se.id).some((m) => /did not give you access/.test(m.text || '') || m.role === 'report'), 'a refused request is reported to the agent');
+  assert.equal(engine.vault.list().find((x) => x.name === 'NPM admin').assigned.some((a) => a.key === 'security-engineer'), false);
   assert.ok(!engine.messages(se.id).some((m) => (m.text || '').includes(SECRET)));
+  // approved "once": it can use the secret this time but is not assigned afterwards
+  await ask(se, 'use-secret:NPM_admin please');
+  { const f = await pendingSecret(); assert.equal((await call(`/api/approvals/${f.id}/decide`, 'POST', { decision: 'approve', mode: 'once' })).status, 200); }
+  await idle(se);
+  assert.equal(engine.vault.list().find((x) => x.name === 'NPM admin').assigned.some((a) => a.key === 'security-engineer'), false, 'once does not assign');
+  // approved "always": now it is assigned for good
+  await ask(se, 'use-secret:NPM_admin please');
+  { const f = await pendingSecret(); assert.equal((await call(`/api/approvals/${f.id}/decide`, 'POST', { decision: 'approve', mode: 'always' })).status, 200); }
+  await idle(se);
+  assert.deepEqual(engine.vault.list().find((x) => x.name === 'NPM admin').assigned.filter((a) => a.key === 'security-engineer').map((a) => a.grant), ['always']);
+  await call('/api/vault/secrets/' + engine.vault.list().find((x) => x.name === 'NPM admin').id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });   // back to how it was for the tests below
   // assigned, allow once
   await ask(ne, 'use-secret:NPM_admin please');
   let ap1 = await pendingSecret(); assert.equal(ap1.secret, 'NPM admin'); assert.match(ap1.detail, /to log in/);

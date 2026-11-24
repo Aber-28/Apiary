@@ -1741,5 +1741,64 @@ let orgIds;
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageReports/); assert.match(app, /usageChart/);
 }
 
+// ---- runbooks and approval rules ----
+{
+  const { parseSpawns } = await import('../src/engine.js');
+  const ag = Object.values(engine.agents).find((a) => !a.parentId && a.kind !== 'general');
+  const rb = parseSpawns('Done.\n```apiary-runbook\n{"title":"Restart Pi-hole DNS","problem":"DNS stops answering","steps":["1. ssh in with the secret \\"Pi login\\"","sudo systemctl restart pihole-FTL","password: hunter2 is wrong"],"tags":["dns","Server"]}\n```');
+  assert.equal(rb.runbooks.length, 1); assert.ok(!/apiary-runbook/.test(rb.clean));
+  const d1 = engine.runbooks.propose(ag.name, ag.name, rb.runbooks[0]);
+  assert.equal(d1.status, 'draft'); assert.deepEqual(d1.tags, ['dns', 'server']); assert.equal(d1.steps[0], 'ssh in with the secret "Pi login"', 'numbering stripped');
+  assert.ok(!/hunter2/.test(JSON.stringify(d1)), 'passwords are masked');
+  assert.equal(engine.runbooks.draftCount, 1); assert.equal((await call('/api/state')).body.runbookDrafts, 1);
+  assert.ok(!engine._system(ag).includes('sudo systemctl restart pihole-FTL'), 'drafts are never given to agents');
+  assert.match(engine._system(ag), /apiary-runbook/); assert.match(engine._system(ag), /no approved runbooks/);
+  // an agent can refresh its own draft, but needs title and steps
+  assert.throws(() => engine.runbooks.propose('x', '', { title: 'No steps' }), /needs steps/); assert.equal(engine.runbooks.list().length, 1);
+  engine.runbooks.propose(ag.name, ag.name, { title: 'restart pi-hole dns', steps: ['Just restart pihole-FTL'] }); assert.equal(engine.runbooks.list().length, 1, 'same draft updated');
+  // approve (you), then agents get it
+  const ap = await call('/api/runbooks/' + d1.id, 'PUT', { status: 'trusted' }); assert.equal(ap.body.status, 'trusted'); assert.equal(engine.runbooks.draftCount, 0);
+  assert.match(engine._system(ag), /APPROVED RUNBOOKS[\s\S]*Restart Pi-hole DNS[\s\S]*Just restart pihole-FTL/);
+  // an agent cannot change a trusted one: a separate draft appears
+  const upd = engine.runbooks.propose(ag.name, '', { title: 'Restart Pi-hole DNS', steps: ['rm -rf /'] }); assert.equal(upd.title, 'Restart Pi-hole DNS (update)'); assert.equal(upd.status, 'draft');
+  assert.ok(!engine._system(ag).includes('rm -rf'), 'trusted text unchanged and the draft is not shown');
+  // you can write, edit, search and delete
+  const mine = await call('/api/runbooks', 'POST', { title: 'Renew certificate', steps: '1. Open the proxy\n2. Press renew', tags: 'tls' }); assert.equal(mine.status, 201); assert.equal(mine.body.status, 'trusted'); assert.deepEqual(mine.body.steps, ['Open the proxy', 'Press renew']);
+  assert.equal((await call('/api/runbooks', 'POST', { title: 'renew certificate', steps: 'x' })).status, 409);
+  assert.equal((await call('/api/runbooks/' + mine.body.id, 'PUT', { steps: '' })).status, 400); assert.equal((await call('/api/runbooks/' + mine.body.id, 'PUT', { status: 'weird' })).status, 400);
+  assert.ok((await call('/api/search?q=pihole')).body.groups.some((g) => g.type === 'runbook'));
+  assert.equal((await call('/api/runbooks/' + mine.body.id, 'DELETE')).status, 200); assert.equal((await call('/api/runbooks/' + upd.id, 'DELETE')).status, 200);
+  assert.ok((await call('/api/audit?q=runbook')).body.total >= 2);
+
+  // approval rules
+  const ask = (kind, title, extra = {}) => engine._ask(ag, { kind, title, ...extra });
+  const P = engine.policy; for (const r of [...P.rules]) P.remove(r.id);
+  assert.equal((await call('/api/policy', 'POST', { kind: 'nonsense', action: 'allow' })).status, 400); assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'maybe' })).status, 400); assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'allow', project: 'nope' })).status, 400);
+  const pending0 = engine.approvals().filter((a) => a.status === 'pending').length;
+  const r1 = await call('/api/policy', 'POST', { kind: 'plan', action: 'allow' }); assert.equal(r1.status, 201); assert.match(r1.body.text, /Allow without asking: when an agent wants to accept a project plan/);
+  assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'allow' })).status, 409, 'duplicates refused');
+  const res = await ask('plan', 'A plan'); assert.equal(res.decision, 'approve'); assert.equal(engine.approvals().filter((a) => a.status === 'pending').length, pending0, 'nobody was asked');
+  const auto = engine.approvals().find((a) => a.title === 'A plan'); assert.ok(auto.auto && auto.status === 'approved' && /rule/.test(auto.note));
+  assert.ok((await call('/api/audit?kind=approval&q=automatically')).body.items.length >= 1);
+  // other kinds still ask
+  let settled = false; ask('hire', 'Hire someone').then(() => { settled = true; }); await new Promise((r) => setTimeout(r, 50)); assert.equal(settled, false); const hp = engine.approvals().find((a) => a.title === 'Hire someone'); assert.equal(hp.status, 'pending'); engine.decide(hp.id, { decision: 'deny' });
+  // the most careful rule wins: ask beats allow, block beats ask
+  await call('/api/policy', 'POST', { kind: 'any', action: 'allow' });
+  await call('/api/policy', 'POST', { kind: 'secret', action: 'ask', secret: 'Vault root' });
+  const ok2 = await ask('merge', 'Merge branch'); assert.equal(ok2.decision, 'approve', 'allow-anything covers merges');
+  let sec = false; ask('secret', 'Use Vault root', { secret: 'vault ROOT' }).then(() => { sec = true; }); await new Promise((r) => setTimeout(r, 50)); assert.equal(sec, false, '"ask" overrides "allow"'); const sp = engine.approvals().find((a) => a.title === 'Use Vault root'); engine.decide(sp.id, { decision: 'deny' });
+  const ok3 = await ask('secret', 'Use another', { secret: 'Other' }); assert.equal(ok3.decision, 'approve'); assert.equal(ok3.mode, 'once');
+  await call('/api/policy', 'POST', { kind: 'secret', action: 'deny', contains: 'delete' });
+  const bl = await ask('secret', 'Use it to delete everything', { secret: 'Other' }); assert.equal(bl.decision, 'deny'); assert.match(bl.note, /Blocked by your rule/);
+  // project scope
+  for (const r of [...P.rules]) P.remove(r.id);
+  await call('/api/policy', 'POST', { kind: 'hire', action: 'allow', project: ag.id });
+  assert.equal((await ask('hire', 'Hire in scope')).decision, 'approve');
+  const other = await engine.createLead({ name: 'Other project', provider: 'mock' }); let o = false; engine._ask(other, { kind: 'hire', title: 'Hire out of scope' }).then(() => { o = true; }); await new Promise((r) => setTimeout(r, 50)); assert.equal(o, false, 'a rule for one project does not cover another'); engine.decide(engine.approvals().find((a) => a.title === 'Hire out of scope').id, { decision: 'deny' });
+  assert.equal((await call('/api/policy')).body.rules.length, 1);
+  for (const r of [...P.rules]) assert.equal((await call('/api/policy/' + r.id, 'DELETE')).status, 200); assert.equal((await call('/api/policy/zzzz', 'DELETE')).status, 404);
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageRunbooks/); assert.match(app, /pagePolicy/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

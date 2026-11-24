@@ -16,6 +16,7 @@ import { Auth, COOKIE, maxAge } from './auth.js';
 import { Engine } from './engine.js';
 import { Updater } from './updater.js';
 import { search as globalSearch } from './search.js';
+import { KINDS, ACTIONS } from './policy.js';
 import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
@@ -161,7 +162,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), health: engine.health.summary, usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), health: engine.health.summary, runbookDrafts: engine.runbooks.draftCount, usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
@@ -370,6 +371,15 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/runbooks' && req.method === 'GET') return json(res, 200, { items: engine.runbooks.list(), drafts: engine.runbooks.draftCount });
+      if (url.pathname === '/api/runbooks' && req.method === 'POST') return json(res, 201, engine.runbooks.create(await readBody(req)));
+      if ((r = m(/^\/api\/runbooks\/([\w-]+)$/))) {
+        if (req.method === 'PUT') return json(res, 200, engine.runbooks.update(r[1], await readBody(req)));
+        if (req.method === 'DELETE') { engine.runbooks.remove(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if (url.pathname === '/api/policy' && req.method === 'GET') return json(res, 200, { rules: engine.policy.view(), kinds: KINDS, actions: ACTIONS });
+      if (url.pathname === '/api/policy' && req.method === 'POST') return json(res, 201, engine.policy.add(await readBody(req)));
+      if ((r = m(/^\/api\/policy\/([\w-]+)$/)) && req.method === 'DELETE') { engine.policy.remove(r[1]); return json(res, 200, { ok: true }); }
       if (url.pathname === '/api/reports' && req.method === 'GET') return json(res, 200, { config: engine.reports.config, list: engine.reports.list() });
       if (url.pathname === '/api/reports' && req.method === 'PUT') return json(res, 200, { config: engine.reports.setConfig(await readBody(req)), list: engine.reports.list() });
       if (url.pathname === '/api/reports/run' && req.method === 'POST') { await readBody(req); return json(res, 201, await engine.reports.generate({})); }

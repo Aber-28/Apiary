@@ -98,11 +98,11 @@ applyTheme(document.documentElement.className || 'dark');
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/reports', 'Weekly report'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/reports', 'Weekly report'], ['#/runbooks', 'Runbooks'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/telegram', 'Telegram alerts'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/telegram', 'Telegram alerts'], ['#/policy', 'Approval rules'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -114,7 +114,7 @@ function renderSide() {
     const open = S.openGroup === undefined ? has : S.openGroup === g.id;
     return h('div', { class: `nav-group${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
       h('button', { 'aria-expanded': String(open), onclick: () => { S.openGroup = open ? null : g.id; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
-      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null, href === '#/health' && S.health?.count ? h('span', { class: 'badge', style: S.health.level === 'err' ? 'background:var(--err)' : '', 'aria-label': `${S.health.count} warnings` }, S.health.count) : null))));
+      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null, href === '#/runbooks' && S.runbookDrafts ? h('span', { class: 'badge', 'aria-label': `${S.runbookDrafts} to review` }, S.runbookDrafts) : null, href === '#/health' && S.health?.count ? h('span', { class: 'badge', style: S.health.level === 'err' ? 'background:var(--err)' : '', 'aria-label': `${S.health.count} warnings` }, S.health.count) : null))));
   });
   const conn = (S.conns || []).map((c) => {
     const ok = c.id === 'github' ? c.status?.ok : c.ready;
@@ -147,6 +147,8 @@ const ROUTES = [
   [/^#\/backups$/, () => pageBackups()],
   [/^#\/audit$/, () => pageAudit()],
   [/^#\/health$/, () => pageHealth()],
+  [/^#\/runbooks$/, () => pageRunbooks()],
+  [/^#\/policy$/, () => pagePolicy()],
   [/^#\/reports$/, () => pageReports()],
   [/^#\/project-templates$/, () => pageProjectTemplates()],
   [/^#\/telegram$/, () => pageTelegram()],
@@ -187,7 +189,7 @@ function refreshConns() { return api('/api/connections').then((c) => { S.conns =
 async function loadState() {
   const st = await api('/api/state');
   Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, account: st.account || { exists: false }, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
-  S.health = st.health; renderUpdateChip(); renderSignOut();
+  S.health = st.health; S.runbookDrafts = st.runbookDrafts || 0; renderUpdateChip(); renderSignOut();
   updateBadge();
 }
 function connectEvents() {
@@ -210,6 +212,7 @@ function connectEvents() {
       updateBadge(); renderSide();
       if (ev.approval.status === 'pending' && document.hidden) try { new Notification('Apiary needs your approval', { body: ev.approval.title }); } catch { /* not allowed */ }
     } else if (ev.type === 'delta') S.stream[ev.agentId] = (S.stream[ev.agentId] || '') + ev.text;
+    else if (ev.type === 'runbook') { S.runbookDrafts = ev.drafts; renderSide(); }
     else if (ev.type === 'health') { S.health = { level: ev.level, count: ev.count }; renderSide(); }
     else if (ev.type === 'activity') S.activity[ev.agentId] = ev.text;
     else if (ev.type === 'log') { (S.logs[ev.agentId] ||= []).push(ev.line); }
@@ -1439,6 +1442,50 @@ async function pageReports() {
         u.topAgents.length ? h('tfoot', {}, h('tr', {}, h('td', { colspan: 4, class: 'hint' }, 'Biggest users this week: ' + u.topAgents.map((a) => `${a.name} (${TOK(a.tokens)})`).join(', ')))) : null)) : null);
   };
   await draw(); page = { shows: () => false, update: (ev) => ev.type === 'report' && !document.querySelector('dialog[open]') && draw() };
+}
+async function pageRunbooks() {
+  crumbs('Workspace', 'Runbooks');
+  const q = h('input', { type: 'search', placeholder: 'Search runbooks', 'aria-label': 'Search runbooks', style: 'min-width:220px' });
+  const box = h('div');
+  let items = [];
+  const edit = (r) => {
+    const t = h('input', { type: 'text', value: r?.title || '', maxlength: '100' }), prob = h('input', { type: 'text', value: r?.problem || '', maxlength: '500', placeholder: 'When does this apply?' });
+    const steps = h('textarea', { rows: '9', placeholder: 'One step per line' }); steps.value = (r?.steps || []).join('\n'); const tags = h('input', { type: 'text', value: (r?.tags || []).join(', '), placeholder: 'For example: server, backup' });
+    const d = dlgOpen(r ? 'Edit runbook' : 'New runbook', h('label', { class: 'f' }, 'Title', t), h('label', { class: 'f' }, 'Problem it solves', prob), h('label', { class: 'f' }, 'Steps', steps), h('label', { class: 'f' }, 'Tags (comma separated)', tags),
+      h('p', { class: 'hint' }, 'Never put passwords or keys in a runbook. Name the secret to use instead.'),
+      h('div', { class: 'formrow' }, h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { const body = { title: t.value, problem: prob.value, steps: steps.value, tags: tags.value }; await (r ? api('/api/runbooks/' + r.id, 'PUT', body) : api('/api/runbooks', 'POST', body)); d.close(); load(); })(); } }, 'Save')));
+  };
+  const card = (r) => h('div', { class: 'card', style: 'max-width:760px;margin-bottom:10px' },
+    h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, r.title), r.status === 'trusted' ? h('span', { class: 'pill ok' }, 'Approved') : h('span', { class: 'pill work' }, 'Draft: needs your review')),
+    r.problem ? h('p', { class: 'hint' }, 'For: ' + r.problem) : null, h('ol', { style: 'margin:6px 0 6px 18px' }, r.steps.map((x) => h('li', {}, x))),
+    h('p', { class: 'hint' }, `By ${r.author}${r.project ? ' in ' + r.project : ''} · ${ago(r.updatedAt)}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
+    h('div', { class: 'formrow' }, r.status === 'trusted' ? h('button', { class: 'btn', onclick: guard(async () => { await api('/api/runbooks/' + r.id, 'PUT', { status: 'draft' }); load(); }) }, 'Stop trusting') : h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/runbooks/' + r.id, 'PUT', { status: 'trusted' }); load(); }) }, 'Approve'),
+      h('button', { class: 'btn', onclick: () => edit(r) }, 'Edit'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete the runbook "${r.title}"?`)) return; await api('/api/runbooks/' + r.id, 'DELETE'); load(); }) }, 'Delete')));
+  const show = () => {
+    const w = q.value.toLowerCase().split(/\s+/).filter(Boolean), list = items.filter((r) => w.every((x) => `${r.title} ${r.problem} ${r.steps.join(' ')} ${(r.tags || []).join(' ')}`.toLowerCase().includes(x)));
+    box.replaceChildren(...(list.length ? [...list.filter((r) => r.status === 'draft'), ...list.filter((r) => r.status !== 'draft')].map(card) : [h('div', { class: 'card empty', style: 'max-width:760px' }, items.length ? 'Nothing matches.' : 'No runbooks yet. When an agent solves a problem it can save the steps here for you to review, or press New runbook to write one.')]));
+  };
+  const load = async () => { try { items = (await api('/api/runbooks')).items; } catch (e) { box.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; } show(); };
+  q.oninput = show;
+  view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Runbooks'), h('p', { class: 'sub-title' }, 'Steps for problems that were solved once, so they can be followed again. Agents save drafts. Only runbooks you approve are given to agents to follow.')), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'New runbook')), h('div', { style: 'margin-bottom:10px' }, q), box);
+  await load(); page = { shows: () => false, update: (ev) => ev.type === 'runbook' && !document.querySelector('dialog[open]') && load() };
+}
+async function pagePolicy() {
+  crumbs('Settings', 'Approval rules');
+  const draw = async () => {
+    let d; try { d = await api('/api/policy'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const act = h('select', { 'aria-label': 'What to do' }, Object.entries(d.actions).map(([k, t]) => h('option', { value: k }, t))), kind = h('select', { 'aria-label': 'When an agent wants to' }, Object.entries(d.kinds).map(([k, t]) => h('option', { value: k }, k === 'any' ? 'do anything that needs approval' : t)));
+    const roots = S.agents.filter((a) => !a.parentId && a.kind !== 'general'), proj = h('select', { 'aria-label': 'Project' }, h('option', { value: '' }, 'In any project'), roots.map((a) => h('option', { value: a.id }, a.name)));
+    const secret = h('input', { type: 'text', placeholder: 'Secret name (empty = any secret)', 'aria-label': 'Secret name' }), words = h('input', { type: 'text', placeholder: 'Optional: the request must mention…', 'aria-label': 'Words in the request' });
+    const sync = () => { secret.style.display = kind.value === 'secret' ? '' : 'none'; }; kind.onchange = sync; sync();
+    const add = guard(async () => { await api('/api/policy', 'POST', { action: act.value, kind: kind.value, project: proj.value, secret: secret.value, contains: words.value }); toast('Rule added'); draw(); });
+    const word = { allow: 'ok', ask: 'info', deny: 'err' };
+    view.replaceChildren(h('h1', {}, 'Approval rules'), h('p', { class: 'sub-title' }, 'Decide once instead of approving each request. When more than one rule fits, the most careful wins: block, then ask, then allow. Requests with no rule are asked as usual.'),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Add a rule'), h('div', { class: 'formrow', style: 'flex-wrap:wrap' }, act, h('span', {}, 'when an agent wants to'), kind), h('div', { class: 'formrow', style: 'flex-wrap:wrap;margin-top:8px' }, proj, secret, words), h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: add }, 'Add rule')),
+        h('p', { class: 'hint' }, 'Examples: "Always ask me" when an agent wants to use the secret "Router password"; "Allow without asking" when an agent wants to accept a project plan in one project. Rules cover Apiary approvals (secrets, new agents, hires, plans, merges), not the individual commands an agent runs in its terminal. Those follow each agent\'s Safe or Full access setting. A secret still needs to be assigned to the agent and the vault unlocked.')),
+      d.rules.length ? h('div', { style: 'max-width:760px' }, d.rules.map((r) => h('div', { class: 'card', style: 'margin-bottom:8px;display:flex;gap:10px;align-items:center;justify-content:space-between' }, h('span', {}, h('span', { class: 'pill ' + word[r.action] }, d.actions[r.action]), ' ', r.text.replace(/^[^:]*: /, '')), h('button', { class: 'btn danger', onclick: guard(async () => { await api('/api/policy/' + r.id, 'DELETE'); draw(); }) }, 'Remove')))) : h('div', { class: 'card empty', style: 'max-width:760px' }, 'No rules yet. Every request asks you.'));
+  };
+  await draw(); page = { shows: () => false, update: () => {} };
 }
 async function pageHealth() {
   crumbs('Infrastructure', 'Health');

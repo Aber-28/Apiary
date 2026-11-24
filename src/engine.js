@@ -25,6 +25,8 @@ import { Health } from './health.js';
 import { Telegram } from './telegram.js';
 import { Templates } from './templates.js';
 import { Reports } from './report.js';
+import { Runbooks } from './runbooks.js';
+import { Policy } from './policy.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -52,6 +54,7 @@ const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
 const PLAN_RE = /```apiary-plan\s*([\s\S]*?)```/g;
 const PROGRESS_RE = /```apiary-progress\s*([\s\S]*?)```/g;
 const INFRA_RE = /```apiary-infra\s*([\s\S]*?)```/g;
+const RUNBOOK_RE = /```apiary-runbook\s*([\s\S]*?)```/g;
 const TASK_RE = /```apiary-task\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
@@ -81,6 +84,8 @@ export class Engine extends EventEmitter {
     this.telegram = new Telegram(this);
     this.templates = new Templates(this);
     this.reports = new Reports(this);
+    this.runbooks = new Runbooks(this);
+    this.policy = new Policy(this);
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
@@ -137,6 +142,17 @@ export class Engine extends EventEmitter {
   _ask(agent, fields) {
     const id = id8();
     const rec = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields };
+    const rule = this.policy.match({ kind: fields.kind, title: fields.title, secret: fields.secret, project: rec.projectId });
+    if (rule) {   // one of your rules decides, so nobody is asked
+      const allow = rule.action === 'allow';
+      Object.assign(rec, { status: allow ? 'approved' : 'denied', decidedAt: Date.now(), auto: true, rule: rule.id, note: allow ? `Allowed automatically by your rule. ${this.policy.describe(rule)}` : `Blocked by your rule. ${this.policy.describe(rule)}`, ...(allow && fields.kind === 'secret' ? { mode: 'once' } : {}) });
+      this.store.data.approvals[id] = rec;
+      this.audit.add('approval', { actor: 'Rule', project: this._pname(agent), action: `${rec.status} automatically: ${rec.title}`, detail: this.policy.describe(rule) });
+      this.emit('event', { type: 'approval', approval: rec });
+      this._log(agent, `${allow ? '✔' : '!'} ${allow ? 'allowed' : 'blocked'} by your rule: ${rec.title}`);
+      this.store.save();
+      return Promise.resolve({ decision: allow ? 'approve' : 'deny', note: rec.note, only: undefined, names: undefined, mode: rec.mode, models: undefined });
+    }
     this.store.data.approvals[id] = rec;
     const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
     for (const r of decided.slice(500)) delete this.store.data.approvals[r.id];
@@ -905,6 +921,11 @@ export class Engine extends EventEmitter {
       const known = this.infra.summary();
       s += '\nINFRASTRUCTURE MAP: the person keeps a map of their devices, servers, VMs, websites and how they connect (Infrastructure page). When they mention a device, server, VM, website or service, or you learn one while working, propose it and Apiary shows it to them as an "Is this right?" card; nothing is added until they confirm. Guess sensible details from your own knowledge (type, what it runs on, what it connects to), say why in "why", and when something important is unknown ask in "question" (for example where it is stored, its address, or which secret in the vault logs in to it). Only ask when it matters. Never put passwords in the map: name the vault secret in "notes" instead.\n```apiary-infra\n{"items":[{"name":"pve1","type":"proxmox|server|vm|container|pi|nas|router|switch|website|service|database|cloud|device|other","address":"10.0.0.5","hostedOn":"Existing item name","connectsTo":["Other item name"],"notes":"Optional","why":"Why you think so","question":"Optional question for the person"}]}\n```\n' + (known ? 'Already on the map:\n' + known + '\n' : '');
     }
+    if (agent.kind === 'general' || agent.org || !agent.parentId || agent.member) {
+      const rb = this.runbooks.promptText();
+      s += '\nRUNBOOKS: when you solve a problem that could come back (a fix, a setup, a recovery), save the steps so they can be followed next time. Add a block ```apiary-runbook\n{"title":"Short name","problem":"When this applies","steps":["Step one","Step two"],"tags":["server"]}\n```. Never put passwords, keys or tokens in a runbook; say which secret to use by name. It is saved as a draft that the human must read and approve before it is trusted.\n' +
+        (rb ? 'APPROVED RUNBOOKS (the human has approved these; follow them when the problem matches, and say which one you used):\n' + rb + '\n' : 'There are no approved runbooks yet.\n');
+    }
     if (this._planOwner(agent) && (!agent.parentId || agent.member)) {
       const lead = !agent.parentId;
       s += this._planContext(agent);
@@ -1237,11 +1258,12 @@ export class Engine extends EventEmitter {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, errors } = parseSpawns(mem.clean);
+        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, runbooks, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
         if (tasks.length) this._agentTasks(agent, tasks);
         if (infra.length) this._infra(agent, infra);
+        for (const rb of runbooks) { try { const r = this.runbooks.propose(agent.name, this._pname(agent), rb); this._msg(agent, { role: 'system', text: `Saved the runbook "${r.title}" as a draft for you to review (Runbooks page).` }); } catch (e) { this._msg(agent, { role: 'system', text: `Runbook not saved: ${e.message}`, error: true }); } }
         const planNotes = [];
         if (plans.length) await this._plan(agent, plans.at(-1), planNotes);
         if (progress.length) this._progress(agent, progress, planNotes);
@@ -1578,7 +1600,7 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], infra = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], infra = [], runbooks = [], errors = [];
   reply = reply.replace(PLAN_RE, (_, body) => {
     try {
       const o = JSON.parse(body.trim()), ph = [].concat(o.phases || []).filter((p) => p && String(p.title || '').trim());
@@ -1590,6 +1612,11 @@ export function parseSpawns(reply) {
   reply = reply.replace(PROGRESS_RE, (_, body) => {
     try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || x.phase == null) { errors.push('An apiary-progress block needs a "phase".'); continue; } progress.push({ phase: x.phase, step: x.step, status: x.status, note: String(x.note || '').slice(0, 300) }); } }
     catch (err) { errors.push(`An apiary-progress block was not valid JSON (${err.message}).`); }
+    return '';
+  });
+  reply = reply.replace(RUNBOOK_RE, (_, body) => {
+    try { for (const x of [].concat(JSON.parse(body.trim()))) runbooks.push(x); }
+    catch (err) { errors.push(`An apiary-runbook block was not valid JSON (${err.message}).`); }
     return '';
   });
   reply = reply.replace(INFRA_RE, (_, body) => {
@@ -1653,7 +1680,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, runbooks, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };

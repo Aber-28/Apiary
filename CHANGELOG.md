@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.22.0
+
+- **Runbook library** (Workspace > Runbooks): agents save the steps of problems they solved as drafts; you read, edit and approve them. Only approved runbooks are given to agents to follow. Passwords are masked, and an agent can never change an approved runbook.
+- **Approval rules** (Settings > Approval rules): decide once to allow, always ask, or block a kind of request (secrets, sub-agents, hires, plans, merges), optionally for one project, one secret or requests that mention certain words. The most careful matching rule wins. Automatic decisions are recorded in the Approvals list and the Audit log.
+
 ## 0.21.0
 
 - **Weekly report** (Workspace > Weekly report): a plain-English summary made once a week on the day and time you choose (progress, tasks, approvals, health, servers down, next week's plan) with tokens used this week by AI and by agent compared with last week, and a chart of the last 8 weeks that marks weeks a usage limit was hit. Optionally sends a short digest to Telegram.

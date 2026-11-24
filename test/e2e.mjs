@@ -1461,6 +1461,14 @@ let orgIds;
   await call(`/api/infra/${ph.id}/confirm`, 'POST', { ok: true });
   assert.equal((await call('/api/infra')).body.items.find((i) => i.id === ph.id).state, 'confirmed');
   assert.match(engine._system(engine.agents[orgIds.ceo.id]), /INFRASTRUCTURE MAP[\s\S]*Pi-hole/);
+  // standing team members get the same map summary (names, addresses, links, secret NAMES only)
+  for (const m of [orgIds.ne, orgIds.se]) {
+    assert.ok(m.member, 'fixture is a standing team member');
+    const sys = engine._system(engine.agents[m.id]);
+    assert.match(sys, /INFRASTRUCTURE MAP[\s\S]*Already on the map:[\s\S]*Pi-hole \(.*\) 10\.0\.0\.2/, 'team member sees the map');
+    assert.match(sys, /Web VM[\s\S]*\[vault: NPM admin\]/, 'secret name is shown');
+    assert.ok(!sys.includes('S3cr3t-Value-123!') && !sys.includes('S3cr3t'), 'no secret value in a member prompt');
+  }
   // rejecting removes it, and removing something frees what ran on it
   engine.infra.propose('x', [{ name: 'Ghost', type: 'nas' }]); const gh = engine.infra.byName('Ghost');
   await call(`/api/infra/${gh.id}/confirm`, 'POST', { ok: false }); assert.equal(engine.infra.byName('Ghost'), undefined);

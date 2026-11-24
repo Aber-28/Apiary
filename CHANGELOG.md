@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.24.1
+
+- **Fix:** standing team members now see the Infrastructure map (names, types, addresses, what runs on what, and vault secret names, never secret values). Before, only leads and the CEO did, so a job handed to a teammate could fail with "no address" even though the device was on the map.
+
 ## 0.24.0
 
 - **Task IDs.** Every task gets a unique code (T-0001, T-0002, ...) that is never reused. Existing tasks were numbered. Work asked of an agent in a chat is now a task too.

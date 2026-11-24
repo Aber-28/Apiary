@@ -170,14 +170,14 @@ await until(() => engine.agents[lead2.id].status === 'idle' && Object.values(eng
   await until(() => engine.agents[l.id].status === 'idle' && engine.messages(l.id).some((m) => m.role === 'report'), 8000);
   const [res, wri] = ['Researcher', 'Writer'].map((n) => Object.values(engine.agents).find((a) => a.parentId === l.id && a.name === n));
   assert.ok(engine.messages(wri.id).some((m) => m.from?.name === 'Researcher' && /Need your input/.test(m.text)), 'Writer received the message with its sender');
-  const rr = engine.messages(res.id).filter((m) => m.role === 'agent').map((m) => m.text).join('\n');
-  assert.match(rr, /### Writer \(T-\d+, closed\) \| ok/, 'Researcher got Writer\'s reply: ' + rr);
-  // deadlock: child asks its waiting parent with wait=true -> refused, with advice
+  // the reply comes back as a message in Researcher's own chat (Researcher is not held waiting)
+  await until(() => engine.messages(res.id).some((m) => /Reply from Writer/.test(m.text || '')), 8000);
+  assert.ok(engine.messages(res.id).some((m) => /Reply from Writer/.test(m.text || '')), 'Researcher got Writer\'s reply as a message');
+  // no one is held waiting: a child may ask its parent while the parent is busy, and the reply comes back as a message
   const l2 = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, goal: 'collab-lead please' })).body;
   await until(() => engine.agents[l2.id].status === 'idle' && engine.messages(l2.id).some((m) => m.role === 'report'), 8000);
   const r2 = Object.values(engine.agents).find((a) => a.parentId === l2.id && a.name === 'Researcher');
-  assert.match(engine.messages(r2.id).filter((m) => m.role === 'agent').map((m) => m.text).join('\n'), /blocked/, 'waiting on a waiting parent is refused');
-  assert.ok(engine.messages(r2.id).some((m) => /wait forever/.test(m.text || '')), 'told how to fix it');
+  assert.ok(!engine.messages(r2.id).some((m) => /wait forever|blocked/.test(m.text || '')), 'a child is never refused for asking its parent');
   // unknown teammate
   const l3 = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, goal: 'collab-ghost please' })).body;
   await until(() => engine.agents[l3.id].status === 'idle' && engine.messages(l3.id).some((m) => m.role === 'report'), 8000);

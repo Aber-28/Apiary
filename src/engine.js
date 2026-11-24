@@ -960,8 +960,8 @@ export class Engine extends EventEmitter {
     if (mates.length && this.limits.maxPeerMessages > 0) {
       s += '\nYou can talk to or hand work to any teammate by name. Put a block like this in your reply:\n\n' +
         '```apiary-send\n{"to":"Teammate name","text":"Your question or the task, written so it stands alone","wait":true}\n```\n\n' +
-        '"to" can also be "parent" or "lead". With "wait":true (default) you get the teammate\'s reply as your next message; with "wait":false the message is delivered and you carry on. ' +
-        'You cannot wait on someone who is waiting on you. Keep it purposeful: do not chat for the sake of it.\nTeammates:\n' +
+        '"to" can also be "parent" or "lead". Anyone can message anyone on the team, in any direction. With "wait":true (default) the teammate\'s reply comes to you as a new message, and you are not held while they work; with "wait":false the message is delivered and no reply is expected. ' +
+        'Keep it purposeful: do not chat for the sake of it.\nTeammates:\n' +
         mates.map((a) => `- ${a.name}${a.role ? ': ' + a.role : ''}`).join('\n') + '\n';
     }
     if (agent.depth < this.limits.maxDepth) {
@@ -1538,28 +1538,29 @@ export class Engine extends EventEmitter {
     }
     return false;
   }
+  // A message to a teammate. Nobody's turn waits for anybody: the message is delivered, and a reply (when asked for)
+  // comes back to the sender as a new message in its own chat, so people can talk freely in any direction.
   async _peerJob(agent, m, notes) {
     const root = this.rootOf(agent).id;
     if ((this.peerCounts.get(root) || 0) >= this.limits.maxPeerMessages) { notes.push(`Message to "${m.to}" not sent: this project reached its limit of ${this.limits.maxPeerMessages} agent-to-agent messages.`); return null; }
     const { peer, error } = await this._findPeer(agent, m.to);
     if (error) { notes.push(error); return null; }
     if (peer.id === agent.id) { notes.push('You cannot message yourself.'); return null; }
-    if (m.wait && this._wouldDeadlock(agent.id, peer.id)) {
-      notes.push(`Not sent to ${peer.name} with wait: ${peer.name} is already waiting for you, so you would both wait forever. Send it with "wait":false and carry on.`);
-      return null;
-    }
     this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
     this._msg(agent, { role: 'system', text: `${m.wait ? 'Asked' : 'Told'} ${peer.name}: ${m.text.slice(0, 160)}${m.text.length > 160 ? '…' : ''}`, agentId: peer.id });
     const proj = this._isProject(this.rootOf(agent)) && this.rootOf(peer).id !== this.rootOf(agent).id ? this.rootOf(agent) : null;
-    if (!m.wait) {
-      this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).catch(() => {});
+    const sent = this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).then((text) => text || '(no reply)', (e) => `(no reply: ${e.message})`);
+    if (m.wait) {
+      notes.push(`Sent to ${peer.name}. Their reply will come to you as a new message, so carry on with other work meanwhile.`);
+      sent.then((text) => this._replyBack(agent, peer, text));
+    } else {
       notes.push(`Message delivered to ${peer.name} (no reply awaited).`);
-      return null;
     }
-    this._edge(agent.id, peer.id);
-    let code = '';
-    return this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent, { onTask: (t) => { code = t.code; } })).then((text) => ({ kind: 'reply', name: peer.name, code, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, code, text: `FAILED: ${e.message}` }))
-      .finally(() => this.waitingOn.get(agent.id)?.delete(peer.id));
+    return null;
+  }
+  // Puts a teammate's reply into the asker's chat as a new message, so the asker picks it up on its next turn.
+  _replyBack(asker, peer, text) {
+    return this.send(asker.id, `Reply from ${peer.name} to your message:\n\n${text}`, peer).catch(() => {});
   }
   _codeNote(code) { if (!code) return ''; const t = this.tasks.byCode(code); return ` (${code}${t?.status === 'done' ? ', closed' : t?.status === 'blocked' ? ', blocked' : ''})`; }
   _edge(a, b) { (this.waitingOn.get(a) || this.waitingOn.set(a, new Set()).get(a)).add(b); }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.28.0
+
+- **Open a task and carry on with it.** Task titles on the Tasks board are links. A task page shows its details, status, subtasks, history and the conversation with the agent doing it. You can send that agent the next instruction (it is linked to the task's code), ask it to carry on, or start work on the task.
+
 ## 0.27.0
 
 - **Choose how much an agent may do without asking.** When an agent wants to run a shell command, the Approvals page now offers: Allow once, Always allow this exact command, Always allow any command that runs the same program, Always allow read-only commands, Allow everything for this agent (asks you to confirm), and Deny.

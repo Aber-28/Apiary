@@ -188,6 +188,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (req.method === 'GET' && url.pathname === '/api/tasks/agents') return json(res, 200, engine.assignable());
       if (req.method === 'POST' && (r = m(/^\/api\/tasks\/([\w-]+)\/start$/))) return json(res, 202, engine.startTask(r[1]));
       if ((r = m(/^\/api\/tasks\/([\w-]+)$/))) {
+        if (req.method === 'GET') { const t = engine.tasksView().find((x) => x.id === r[1]); if (!t) throw Object.assign(new Error('No such task'), { status: 404 }); return json(res, 200, t); }
         if (req.method === 'PUT') return json(res, 200, engine.updateTask(r[1], await readBody(req)));
         if (req.method === 'DELETE') { engine.tasks.remove(r[1]); return json(res, 200, { ok: true }); }
       }

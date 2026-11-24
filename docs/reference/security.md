@@ -9,7 +9,8 @@ Agents can run commands on your computer, so Apiary is strict by default.
 * **Safe by default.** New projects use **Safe** access. **Full access** must be chosen per project.
 * **Your checkout is untouched.** In git projects, agents work in separate worktrees on separate branches, and nothing is pushed until you open a pull request.
 * **No markup injection.** The interface renders all agent text as plain text.
-* **Limits.** Team depth, size and rounds are capped to prevent runaway agents.
+* **You decide.** By default agents must ask before creating sub-agents or merging their work, and nothing is pushed until you open a pull request. See [Approvals and review](../using-apiary/approvals.md).
+* **Limits.** Team depth, size, delegation rounds and agent-to-agent messages are capped, and agents cannot wait on each other in a circle.
 
 ## Using it beyond your own computer
 

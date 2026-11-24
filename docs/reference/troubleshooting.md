@@ -35,3 +35,12 @@ Press **Stop**. Use **Take over** to continue in your terminal. Check the **Term
 
 ## Reset everything
 Stop Apiary and delete `~/.apiary` (this removes projects, saved agents and keys).
+
+## An agent says “Waiting for you”
+It needs an approval. Open **Workspace → Approvals** (or the card in the project chat) and approve or deny.
+
+## “This request was already answered or has expired”
+Another tab answered it, or Apiary restarted. Message the agent again to continue.
+
+## An agent could not message a teammate
+Read the note it received: the name may not exist in this project, the teammate may be waiting for it (use `"wait":false`), or the project reached its message limit (**Agents → Delegation rules**).

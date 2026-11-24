@@ -5,8 +5,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | Method and path | Purpose |
 | --- | --- |
 | `GET /api/state` | Agents, connected AIs, limits, saved agents, version |
-| `GET /api/events` | Live updates (Server-Sent Events) |
-| `POST /api/agents` | Create a project. Body: `provider`, `goal`, `name`, `access`, `source`, `base` |
+| `GET /api/events` | Live updates (Server-Sent Events, including `approval` events) |
+| `POST /api/agents` | Create a project. Body: `provider`, `goal`, `name`, `access`, `source`, `base`, `approvals` |
 | `GET /api/agents/:id/messages` | Chat history |
 | `POST /api/agents/:id/messages` | Send a message. Body: `text` |
 | `GET /api/agents/:id/logs` | Terminal log lines |
@@ -15,10 +15,13 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `POST /api/agents/:id/takeover` | Stop and return the resume command |
 | `POST /api/agents/:id/pr` | Push and open a pull request. Body: `title`, `body` |
 | `DELETE /api/agents/:id` | Delete an agent and its team |
+| `GET /api/agents/:id/diff` | Changes on the agent's branch (for review) |
+| `GET /api/approvals` | Pending and recent approval requests |
+| `POST /api/approvals/:id/decide` | Answer a request. Body: `decision` (`approve`/`deny`), `note`, `only` (indexes of sub-agents to create) |
 | `GET /api/connections` | Connection status (never includes secrets) |
 | `PUT /api/connections/:id` | Change method, key/token, model |
 | `POST /api/connections/:id/test` | Run a real connection test |
 | `GET /api/github/repos?q=` | Your repositories |
 | `GET /api/github/branches?repo=owner/name` | Branches of a repository |
 | `GET/POST /api/defs`, `PUT/DELETE /api/defs/:id` | Saved agents |
-| `GET/PUT /api/settings` | Delegation limits |
+| `GET/PUT /api/settings` | Delegation limits and the default for approvals |

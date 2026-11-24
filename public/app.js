@@ -1,6 +1,6 @@
 // Apiary web UI: vanilla JS, no build step. All text is inserted with textContent (never innerHTML),
 // so agent output can never inject markup.
-const S = { agents: [], providers: [], limits: {}, defs: [], conns: null, msgs: {}, logs: {}, stream: {}, activity: {}, sel: null, tab: 'chat', open: {}, version: '' };
+const S = { agents: [], providers: [], limits: {}, defs: [], approvals: [], approvalsDefault: true, conns: null, msgs: {}, logs: {}, stream: {}, activity: {}, sel: null, tab: 'chat', open: {}, version: '' };
 const $ = (s) => document.querySelector(s);
 const view = $('#view');
 let page = null; // { update?() } for the current route
@@ -52,6 +52,9 @@ const ago = (ts) => { const s = (Date.now() - ts) / 1000; return s < 60 ? 'just 
 const STATUS = { idle: ['ok', 'Idle'], working: ['work', 'Working'], waiting: ['info', 'Waiting for team'], error: ['err', 'Error'] };
 const pill = (status) => { const [c, t] = STATUS[status] || ['', status]; return h('span', { class: 'pill ' + c }, t); };
 const PNAME = { claude: 'Claude', codex: 'Codex', mock: 'Mock' };
+const pending = () => S.approvals.filter((a) => a.status === 'pending');
+const pendingCount = () => pending().length;
+function updateBadge() { document.title = pendingCount() ? `(${pendingCount()}) Apiary` : 'Apiary'; }
 const leads = () => S.agents.filter((a) => !a.parentId).sort((a, b) => b.createdAt - a.createdAt);
 const kidsOf = (id) => S.agents.filter((a) => a.parentId === id).sort((a, b) => a.createdAt - b.createdAt);
 const rootOf = (a) => { while (a.parentId) a = S.agents.find((x) => x.id === a.parentId) || { id: null }; return a; };
@@ -70,7 +73,7 @@ applyTheme(document.documentElement.className || 'dark');
 
 // ---------- sidebar ----------
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/projects', 'Projects'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/projects', 'Projects'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/access', 'Access and safety'], ['#/folders', 'Folders']] },
@@ -85,7 +88,7 @@ function renderSide() {
     const open = S.open[g.id] ?? has;
     return h('div', { class: `nav-group${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
       h('button', { 'aria-expanded': String(open), onclick: () => { S.open[g.id] = !open; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
-      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, label))));
+      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null))));
   });
   const conn = (S.conns || []).map((c) => {
     const ok = c.id === 'github' ? c.status?.ok : c.ready;
@@ -105,6 +108,7 @@ function crumbs(...parts) {
 const ROUTES = [
   [/^#\/projects$/, () => pageProjects()],
   [/^#\/project\/([\w-]+)$/, (m) => pageProject(m[1])],
+  [/^#\/approvals$/, () => pageApprovals()],
   [/^#\/terminal$/, () => pageTerminals()],
   [/^#\/agents$/, () => pageAgents()],
   [/^#\/templates$/, () => pageTemplates()],
@@ -129,7 +133,8 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, version: st.version });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, version: st.version });
+  updateBadge();
 }
 function connectEvents() {
   const es = new EventSource('/api/events');
@@ -145,12 +150,63 @@ function connectEvents() {
     } else if (ev.type === 'message') {
       (S.msgs[ev.agentId] ||= []).push(ev.message);
       if (ev.message.role === 'agent') delete S.stream[ev.agentId];
+    } else if (ev.type === 'approval') {
+      const i = S.approvals.findIndex((a) => a.id === ev.approval.id);
+      if (i >= 0) S.approvals[i] = ev.approval; else S.approvals.unshift(ev.approval);
+      updateBadge(); renderSide();
+      if (ev.approval.status === 'pending' && document.hidden) try { new Notification('Apiary needs your approval', { body: ev.approval.title }); } catch { /* not allowed */ }
     } else if (ev.type === 'delta') S.stream[ev.agentId] = (S.stream[ev.agentId] || '') + ev.text;
     else if (ev.type === 'activity') S.activity[ev.agentId] = ev.text;
     else if (ev.type === 'log') { (S.logs[ev.agentId] ||= []).push(ev.line); }
     if (['agent', 'removed'].includes(ev.type)) renderSide();
+    if (ev.type === 'approval') toastIfPending(ev.approval);
     page?.update?.(ev);
   };
+}
+
+function toastIfPending(a) { if (a.status === 'pending' && !(page && page.shows?.(a))) toast(`Needs your approval: ${a.title}`); }
+
+// ---------- approvals ----------
+function diffView(d) {
+  const pre = h('pre', { class: 'diff mono', tabindex: '0' });
+  for (const line of (d.patch || '').split('\n')) pre.append(h('span', { class: line.startsWith('+') && !line.startsWith('+++') ? 'add' : line.startsWith('-') && !line.startsWith('---') ? 'del' : line.startsWith('@@') ? 'hunk' : line.startsWith('diff ') ? 'file' : '' }, line), '\n');
+  return h('div', {}, d.stat ? h('pre', { class: 'diffstat mono' }, d.stat) : h('p', { class: 'hint' }, 'No changes.'),
+    d.patch ? h('details', {}, h('summary', {}, 'Show the full changes'), pre, d.truncated ? h('p', { class: 'hint' }, 'Only the first part is shown. Review the rest on the branch.') : null) : null);
+}
+function approvalCard(ap) {
+  const isPending = ap.status === 'pending';
+  const note = h('input', { type: 'text', placeholder: 'Optional note to the agent', 'aria-label': 'Note to the agent' });
+  const checks = (ap.items || []).map((it, i) => h('input', { type: 'checkbox', checked: true, 'aria-label': `Create ${it.name}`, 'data-i': i }));
+  const decide = (decision) => guard(async () => {
+    const body = { decision, note: note.value };
+    if (decision === 'approve' && checks.length) { const only = checks.filter((c) => c.checked).map((c) => Number(c.dataset.i)); if (!only.length) { toast('Select at least one, or choose Deny', true); return; } if (only.length < checks.length) body.only = only; }
+    await api(`/api/approvals/${ap.id}/decide`, 'POST', body);
+  });
+  const label = { approved: ['ok', 'Approved'], denied: ['err', 'Denied'], cancelled: ['', 'Cancelled'], expired: ['', 'Expired'], pending: ['work', 'Waiting for you'] }[ap.status];
+  return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
+    h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
+    ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
+    ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
+    ap.diff ? diffView(ap.diff) : null,
+    isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
+      : ap.note ? h('p', { class: 'hint', style: 'margin-top:8px' }, `Your note: ${ap.note}`) : null);
+}
+function pageApprovals() {
+  crumbs('Workspace', 'Approvals');
+  const draw = () => {
+    const p = pending(), done = S.approvals.filter((a) => a.status !== 'pending');
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Approvals'), h('p', { class: 'sub-title' }, 'Agents ask you before they create sub-agents or merge their work. Nothing is pushed to GitHub until you open a pull request.'))),
+      p.length ? p.map(approvalCard) : h('div', { class: 'card empty' }, 'Nothing is waiting for you.'),
+      done.length ? h('h2', { style: 'margin-top:28px' }, 'Earlier decisions') : null, ...done.slice(0, 30).map(approvalCard));
+  };
+  draw(); page = { shows: () => true, update: (ev) => ev.type === 'approval' && draw() };
+}
+async function openReview(agent) {
+  const body = h('div', {}, h('p', { class: 'hint' }, 'Loading…'));
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, `Review changes: ${agent.name}`), body, h('div', { class: 'dlg-actions' }, h('button', { class: 'btn primary' }, 'Close'))));
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
+  try { const d = await api(`/api/agents/${agent.id}/diff`); body.replaceChildren(h('p', { class: 'hint' }, `Compared with ${d.from}`), diffView(d)); }
+  catch (e) { body.replaceChildren(h('p', { class: 'hint' }, e.message)); }
 }
 
 // ---------- projects ----------
@@ -195,6 +251,7 @@ function pageProject(leadId) {
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       pill(a.status),
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
+      a.git ? h('button', { class: 'btn', onclick: () => openReview(a) }, 'Review changes') : null,
       a.method !== 'api' ? h('button', { class: 'btn', onclick: guard(() => takeOver(a)) }, 'Take over') : null,
       l.git && a.id === l.id ? (l.git.prUrl ? h('a', { class: 'btn', href: l.git.prUrl, target: '_blank', rel: 'noopener' }, 'View pull request') : h('button', { class: 'btn', onclick: () => openPrDialog(l) }, 'Open pull request')) : null,
       a.id === l.id ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents? Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
@@ -209,6 +266,7 @@ function pageProject(leadId) {
   };
   const drawMsgs = () => {
     if (!msgsEl) return;
+    if (msgsEl.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't wipe a note being typed
     const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
     const list = (S.msgs[a.id] || []).map((m) => {
       if (m.role === 'system') return h('div', { class: 'msg system' + (m.error ? ' error' : '') }, m.text);
@@ -216,6 +274,7 @@ function pageProject(leadId) {
       return h('div', { class: 'msg ' + m.role }, h('div', { class: 'who' }, who), m.text);
     });
     if (S.stream[a.id]) list.push(h('div', { class: 'msg agent' }, h('div', { class: 'who' }, a.name), S.stream[a.id]));
+    for (const ap of pending().filter((x) => x.projectId === leadId)) list.push(approvalCard(ap));
     if (!list.length) list.push(h('div', { class: 'empty' }, 'Nothing here yet.'));
     msgsEl.replaceChildren(...list);
     if (near) msgsEl.scrollTop = msgsEl.scrollHeight;
@@ -253,7 +312,9 @@ function pageProject(leadId) {
       if (ev.type === 'agent' || ev.type === 'removed') { if (!S.agents.find((a) => a.id === leadId)) { location.hash = '#/projects'; return; } drawHead(); drawTeam(); if (ev.agent && !S.msgs[ev.agent.id]) ensureMsgs(ev.agent.id).then(drawAll).catch(() => {}); }
       if (['message', 'delta', 'activity', 'agent'].includes(ev.type)) { drawMsgs(); if (ev.type === 'activity') drawTeam(); }
       if (ev.type === 'log') drawTerm();
+      if (ev.type === 'approval') { drawMsgs(); drawHead(); }
     },
+    shows: (ap) => ap.projectId === leadId,
   };
 }
 
@@ -279,7 +340,7 @@ function openPrDialog(lead) {
 // ---------- new project dialog ----------
 async function openNewProject() {
   if (!S.conns) await refreshConns();
-  const st = { src: 'empty', ai: S.providers.find((p) => p.id !== 'mock')?.id || S.providers[0]?.id || '', access: 'safe', repo: '', branches: [], base: '' };
+  const st = { approvals: S.approvalsDefault, src: 'empty', ai: S.providers.find((p) => p.id !== 'mock')?.id || S.providers[0]?.id || '', access: 'safe', repo: '', branches: [], base: '' };
   const goal = h('textarea', { rows: '4', placeholder: 'e.g. Add dark mode to the settings page and write tests', 'aria-label': 'Goal' });
   const name = h('input', { type: 'text', placeholder: 'Optional — defaults to your goal' });
   const sourceBox = h('div'), aiBox = h('div'), accBox = h('div'), err = h('p', { class: 'hint', style: 'color:var(--err);min-height:20px', role: 'alert' });
@@ -309,16 +370,17 @@ async function openNewProject() {
     }
     sourceBox.replaceChildren(...parts);
   }
+  const appr = h('input', { type: 'checkbox', checked: st.approvals, 'aria-label': 'Ask me before agents create sub-agents or merge changes' });
   const go = h('button', { class: 'btn primary big', type: 'button' }, 'Start project');
   const dlg = h('dialog', { 'aria-label': 'New project' }, h('form', { method: 'dialog' }, h('h2', { style: 'font-size:20px' }, 'New project'),
     h('label', { class: 'f' }, 'What should the team do?', goal), h('label', { class: 'f' }, 'Project name', name),
-    h('div', { class: 'f' }, 'Lead agent uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, h('div', { class: 'f' }, 'Access'), accBox, err,
+    h('div', { class: 'f' }, 'Lead agent uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, h('div', { class: 'f' }, 'Access'), accBox, h('label', { class: 'check' }, appr, h('span', {}, h('b', {}, 'Ask me before agents create sub-agents or merge changes'), h('small', { class: 'hint', style: 'display:block' }, 'Recommended. You can review exactly what will happen first.'))), err,
     h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), go)));
   go.onclick = async () => {
     err.textContent = '';
     if (!st.ai) { err.textContent = 'Connect an AI first (Connections).'; return; }
     if (!goal.value.trim() && !name.value.trim()) { err.textContent = 'Describe what you want done.'; return; }
-    const body = { provider: st.ai, goal: goal.value.trim(), name: name.value.trim(), access: st.access };
+    const body = { provider: st.ai, goal: goal.value.trim(), name: name.value.trim(), access: st.access, approvals: appr.checked };
     if (st.src === 'folder') { if (!folder.value.trim()) { err.textContent = 'Enter a folder path.'; return; } body.source = folder.value.trim(); }
     if (st.src === 'github') { if (!st.repo) { err.textContent = 'Choose a repository.'; return; } body.source = st.repo; if (st.base) body.base = st.base; }
     go.disabled = true; go.textContent = st.src === 'github' ? 'Cloning…' : 'Starting…';
@@ -378,9 +440,11 @@ function pageRules() {
   crumbs('Agents', 'Delegation rules');
   const L = S.limits;
   const field = (k, label, help) => ({ k, el: h('input', { type: 'number', value: L[k], min: '0', max: '40', 'aria-label': label }), node: (el) => h('label', { class: 'f' }, label, el, h('small', {}, help)) });
-  const fs = [field('maxDepth', 'How deep the team can go', '1 = the lead can create sub-agents, 2 = they can create their own. Lower is simpler and cheaper.'), field('maxAgents', 'Maximum agents per project', 'A hard cap on the whole team, including the lead.'), field('maxRounds', 'Delegation rounds per message', 'How many times the lead may hand out work and read reports before it must answer.')];
+  const fs = [field('maxDepth', 'How deep the team can go', '1 = the lead can create sub-agents, 2 = they can create their own. Lower is simpler and cheaper.'), field('maxAgents', 'Maximum agents per project', 'A hard cap on the whole team, including the lead.'), field('maxRounds', 'Delegation rounds per message', 'How many times the lead may hand out work and read reports before it must answer.'), field('maxPeerMessages', 'Agent-to-agent messages per project', 'How many messages agents may send each other. 0 turns teammate messaging off.')];
+  const appr = h('input', { type: 'checkbox', checked: S.approvalsDefault, 'aria-label': 'Ask before agents create sub-agents or merge changes' });
   view.replaceChildren(h('h1', {}, 'Delegation rules'), h('p', { class: 'sub-title' }, 'Guard rails that keep teams small and costs predictable.'),
-    h('div', { class: 'card', style: 'max-width:640px' }, fs.map((f) => f.node(f.el)), h('button', { class: 'btn primary', onclick: guard(async () => { const r = await api('/api/settings', 'PUT', { limits: Object.fromEntries(fs.map((f) => [f.k, Number(f.el.value)])) }); S.limits = r.limits; toast('Saved'); }) }, 'Save')));
+    h('div', { class: 'card', style: 'max-width:640px' }, h('label', { class: 'check', style: 'margin-bottom:18px' }, appr, h('span', {}, h('b', {}, 'Ask me first (default for new projects)'), h('small', { class: 'hint', style: 'display:block' }, 'Approve or deny new sub-agents and merges of their work. You can change this per project when you create it.'))),
+      fs.map((f) => f.node(f.el)), h('button', { class: 'btn primary', onclick: guard(async () => { const r = await api('/api/settings', 'PUT', { approvalsDefault: appr.checked, limits: Object.fromEntries(fs.map((f) => [f.k, Number(f.el.value)])) }); S.limits = r.limits; S.approvalsDefault = r.approvalsDefault; toast('Saved'); }) }, 'Save')));
 }
 
 // ---------- connections ----------

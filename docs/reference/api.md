@@ -52,6 +52,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | PUT/DELETE | `/api/vault/secrets/:id` | Edit (value, optional username, note), assign, delete |
 | GET | `/api/update` | Update status |
 | POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install (install answers 202 and runs in the background; `GET /api/update` then returns `progress` with `pct`, `steps`, `log`, `failed`) |
+| GET | `/api/tools` | Which AI tools are installed, and the progress of a running install |
+| POST | `/api/tools/install` | Install `{tools: ["claude", "codex"]}` for the current user (answers 202; watch `GET /api/tools`) |
 | GET | `/api/provider-usage` | Usage as reported by Claude and Codex themselves (cached, refreshed hourly) |
 | POST | `/api/provider-usage/refresh` | Refresh now (`{id}` for one AI) |
 | PUT | `/api/settings` | includes `updateCheck`: `daily`, `weekly`, `monthly` or `manual` |

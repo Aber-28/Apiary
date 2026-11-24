@@ -487,7 +487,7 @@ async function pageChat() {
     S.sel = a.id;
     pageProject(a.id, true);
     if (!S.orgDone) { const cta = h('div', { class: 'card', style: 'margin:12px 16px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, h('div', { style: 'flex:1;min-width:240px' }, h('b', {}, 'You have not set up your CEO yet'), h('p', { class: 'hint', style: 'margin:2px 0 0' }, 'A short interview about your setup lets Apiary propose the team you need and write each person\'s profile for you.')), h('button', { class: 'btn primary', onclick: () => openSetup(3) }, 'Set up my CEO')); view.querySelector('.chat')?.prepend(cta); }
-  } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message, ' ', h('a', { href: '#/connections', style: 'text-decoration:underline' }, 'Open Connections'))); }
+  } catch (e) { view.replaceChildren(...[getStartedCard(() => route()), h('div', { class: 'card empty' }, getStartedCard() ? 'No AI is connected yet.' : e.message, ' ', h('a', { href: '#/connections', style: 'text-decoration:underline' }, 'Open Connections'))].filter(Boolean)); }
 }
 
 // ---------- profile editor ----------
@@ -567,6 +567,52 @@ function renderUpdateChip() {
 async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
 // A full-screen view of the installation, so nobody thinks it has frozen.
+// ---------- install the AI tools from inside Apiary ----------
+const TOOLNAME = { claude: 'Claude Code', codex: 'Codex' };
+function installOverlay(ids, after) {
+  if (document.getElementById('inst-overlay')) return;
+  const bar2 = h('span', { style: 'width:0%' }), log = h('pre', { class: 'term upd-log', tabindex: '0', 'aria-label': 'Install log' }), list = h('ol', { class: 'upd-steps' });
+  const title = h('h2', {}, `Installing ${ids.map((i) => TOOLNAME[i]).join(' and ')}`), sub = h('p', { class: 'hint', role: 'status' }, 'Please keep this page open. This usually takes one to three minutes.');
+  const secs = h('small', { class: 'hint' }), actions = h('div', { class: 'kv', style: 'justify-content:flex-end;margin-top:10px' }), next = h('div');
+  const ov = h('div', { id: 'inst-overlay', class: 'upd-overlay', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Installing' }, h('div', { class: 'card upd-card' }, title, sub, h('div', { class: 'ubar big' }, bar2), list, log, h('div', { class: 'kv', style: 'justify-content:space-between;margin-top:6px' }, secs), next, actions));
+  document.body.append(ov);
+  const close = () => { ov.remove(); clearInterval(tick); stop = true; };
+  const t0 = Date.now(); let stop = false;
+  const tick = setInterval(() => { secs.textContent = `${Math.round((Date.now() - t0) / 1000)} s`; }, 500);
+  const icon = { wait: '○', run: '◐', done: '✔', skip: '✔', fail: '✖' };
+  const begin = async () => { try { await api('/api/tools/install', 'POST', { tools: ids }); } catch (e) { if (!/already running/i.test(e.message)) { sub.textContent = e.message; actions.replaceChildren(h('button', { class: 'btn', onclick: close }, 'Close')); return; } } stop = false; poll(); };
+  const poll = async () => {
+    if (stop) return;
+    try {
+      const { install: st } = await api('/api/tools');
+      bar2.style.width = st.pct + '%'; bar2.className = st.state === 'failed' ? 'err' : '';
+      list.replaceChildren(...st.steps.map((x) => h('li', { class: 'st-' + (x.state === 'skip' ? 'done' : x.state) }, h('span', { 'aria-hidden': 'true' }, icon[x.state]), ` ${x.label}${x.state === 'skip' ? ' (already there)' : ''}`)));
+      log.textContent = st.log.join('\n'); log.scrollTop = log.scrollHeight;
+      if (st.state === 'failed') {
+        stop = true; clearInterval(tick); title.textContent = 'The install did not finish'; sub.textContent = st.failed?.message || 'Something went wrong.';
+        actions.replaceChildren(h('button', { class: 'btn', onclick: close }, 'Close'), h('button', { class: 'btn primary', onclick: () => { clearInterval(tick); ov.remove(); installOverlay(ids, after); } }, 'Try again')); return;
+      }
+      if (st.state === 'done') {
+        stop = true; clearInterval(tick); bar2.style.width = '100%'; title.textContent = 'Installed'; sub.textContent = 'One last step: sign in once, so Apiary can use your account.';
+        await loadState().catch(() => {}); await refreshConns();
+        next.replaceChildren(...ids.flatMap((i) => [h('p', { style: 'margin:10px 0 4px' }, h('b', {}, TOOLNAME[i]), ': run this in a terminal on this computer. It shows a link to open in your browser.'), cmdBox(CINFO[i].login)]), h('p', { class: 'hint' }, 'You can also use a web API key instead of signing in: open Connections.'));
+        actions.replaceChildren(h('button', { class: 'btn', onclick: close }, 'Close'), h('button', { class: 'btn primary', onclick: () => { close(); if (after) after(); else location.hash = `#/connections/${ids[0]}`; route(); } }, 'I have signed in. Check now')); return;
+      }
+    } catch { /* the page keeps trying */ }
+    setTimeout(poll, 600);
+  };
+  begin();
+}
+const installBtn = (id, after, label) => h('button', { class: 'btn primary', onclick: () => installOverlay([id], after) }, label || `Install ${TOOLNAME[id]} for me`);
+function getStartedCard(after) {
+  if (!S.providers || S.providers.some((p) => p.id !== 'mock')) return null;
+  return h('div', { class: 'card start-card', role: 'region', 'aria-label': 'Get an AI onto this computer' },
+    h('h2', { style: 'margin-top:0' }, 'Let us get an AI onto this computer'),
+    h('p', {}, 'Apiary needs an AI to work with, and none is installed yet. Click one and Apiary downloads and installs it for you. You will see what is happening.'),
+    h('div', { class: 'kv' }, installBtn('claude', after), installBtn('codex', after), h('button', { class: 'btn', onclick: () => installOverlay(['claude', 'codex'], after) }, 'Install both')),
+    h('p', { class: 'hint', style: 'margin-bottom:0' }, 'Already have an API key? ', h('a', { href: '#/connections', style: 'text-decoration:underline' }, 'Use it under Connections'), ' instead.'));
+}
+
 // ---------- export and import: move everything to another computer ----------
 function pageTransfer() {
   crumbs('Settings', 'Export and import');
@@ -856,7 +902,7 @@ function pageRules() {
 
 // ---------- connections ----------
 const CINFO = {
-  claude: { title: 'Claude Code', login: 'claude', install: 'npm install -g @anthropic-ai/claude-code', key: 'Anthropic API key', keyUrl: 'console.anthropic.com' },
+  claude: { title: 'Claude Code', login: 'claude', install: 'curl -fsSL https://claude.ai/install.sh | bash', key: 'Anthropic API key', keyUrl: 'console.anthropic.com' },
   codex: { title: 'Codex', login: 'codex login', install: 'npm install -g @openai/codex', key: 'OpenAI API key', keyUrl: 'platform.openai.com' },
   github: { title: 'GitHub', login: 'gh auth login', install: 'See cli.github.com', key: 'Personal access token' },
 };
@@ -869,7 +915,7 @@ function connCard(c, full = false) {
   const setMethod = guard(async (m) => { await api('/api/connections/' + c.id, 'PUT', { method: m }); await refreshConns(); route(); });
   const body = c.method === 'cli'
     ? h('div', {}, h('p', {}, c.cli.found ? h('span', {}, h('span', { class: 'pill ok' }, 'Found'), ' ', h('span', { class: 'mono hint' }, `${c.cli.path}${c.cli.version ? ' · ' + c.cli.version : ''}`)) : h('span', {}, h('span', { class: 'pill err' }, 'Not installed'))),
-      c.cli.found ? null : h('div', {}, h('p', { class: 'hint' }, 'Install it:'), cmdBox(info.install)),
+      c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(c.id, () => route())), h('p', { class: 'hint' }, isGh ? 'Install it:' : 'Or run it yourself:'), cmdBox(info.install)),
       h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal. Apiary reuses that login:' : 'Log in once in a terminal. Apiary reuses that login — no key needed:'), cmdBox(info.login),
       isGh && c.status ? h('p', { class: 'hint' }, c.status.ok ? `Signed in as ${c.status.account || 'unknown'}` : c.status.reason) : null)
     : h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? 'Needs “repo” access. Stored only on this machine in a private file.' : `From ${info.keyUrl}. Stored only on this machine in a private file. Web agents can chat but cannot edit files.`)), model ? h('label', { class: 'f' }, 'Model', model) : null,
@@ -885,7 +931,7 @@ function connCard(c, full = false) {
 function pageConnections() {
   crumbs('Connections', 'Overview');
   view.replaceChildren(h('h1', {}, 'Connections'), h('p', { class: 'sub-title' }, 'Connect each service through your terminal or through the web. You can mix them.'), h('div', { class: 'hint' }, 'Loading…'));
-  refreshConns().then(() => view.replaceChildren(h('h1', {}, 'Connections'), h('p', { class: 'sub-title' }, 'Connect each service through your terminal or through the web. You can mix them.'), h('div', { class: 'grid', style: 'grid-template-columns:repeat(auto-fit,minmax(340px,1fr))' }, S.conns.map((c) => connCard(c)))));
+  refreshConns().then(() => view.replaceChildren(h('h1', {}, 'Connections'), h('p', { class: 'sub-title' }, 'Connect each service through your terminal or through the web. You can mix them.'), getStartedCard(() => pageConnections()) || h('span'), h('div', { class: 'grid', style: 'grid-template-columns:repeat(auto-fit,minmax(340px,1fr))' }, S.conns.map((c) => connCard(c)))));
 }
 function pageConnection(id) {
   crumbs('Connections', CINFO[id].title);
@@ -1113,7 +1159,7 @@ async function openSetup(startAt = 0) {
       if (t.state === 'checking') { box.replaceChildren(head, h('p', { class: 'hint' }, 'Making a tiny test request to confirm you are signed in…')); return; }
       if (t.ok) { box.replaceChildren(head, h('p', {}, `✔ ${t.detail || 'Works'}`, h('span', { class: 'hint' }, ` · via ${c.method === 'cli' ? 'terminal' : 'web'}`)), h('button', { class: 'btn', onclick: () => { W.tests[id] = { ok: false, error: '' }; draw(); } }, 'Change how it connects')); return; }
       const key = h('input', { type: 'password', autocomplete: 'off', placeholder: isGh ? 'ghp_… or github_pat_…' : 'Paste your key', 'aria-label': info.key });
-      const terminal = h('div', {}, c.cli.found ? null : h('div', {}, h('p', { class: 'hint' }, `${info.title.replace(' Code', '')} is not installed. Install it:`), cmdBox(info.install)),
+      const terminal = h('div', {}, c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(id, () => { refreshConns().then(() => go(1)); })), h('p', { class: 'hint' }, `${info.title.replace(' Code', '')} is not installed. ${isGh ? 'Install it:' : 'Or run it yourself:'}`), cmdBox(info.install)),
         h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal:' : 'Sign in once in a terminal (Apiary then reuses that login):'), cmdBox(info.login),
         h('div', { class: 'kv', style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: guard(test) }, 'I have signed in. Check again')));
       const web = h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? 'Needs “repo” access. Stored only on this machine in a private file.' : 'Stored only on this machine in a private file. Web agents can chat but cannot edit files.')),
@@ -1140,7 +1186,7 @@ async function openSetup(startAt = 0) {
       const cont = h('button', { class: 'btn primary big', disabled: !okAI().length, onclick: () => go(2) }, 'Continue');
       // Detect what is already set up: anything that looks configured gets a real test right away.
       for (const [i, id] of ['claude', 'codex'].entries()) { const c = conn(id); if (!W.tests[id] && c.ready) panels[i].recheck(); else if (!W.tests[id]) W.tests[id] = { ok: false, error: '' }; }
-      return h('div', {}, h('h1', {}, 'Connect your AI'), h('p', { class: 'sub-title' }, 'Connect at least one. Apiary checks what you already have set up; anything not signed in is explained below.'), ...panels,
+      return h('div', {}, h('h1', {}, 'Connect your AI'), h('p', { class: 'sub-title' }, 'Connect at least one. Apiary checks what you already have set up; anything not signed in is explained below.'), getStartedCard(() => { refreshConns().then(() => go(1)); }) || h('span'), ...panels,
         h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(0) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', onclick: () => go(3) }, 'Skip'), cont));
     },
     // 2 Default models
@@ -1328,5 +1374,6 @@ function pageStartup() {
 (async () => {
   try { await loadState(); } catch (e) { toast(e.message, true); }
   connectEvents(); route(); refreshConns(); loadUsage(); if (S.update?.state === 'installing') updateOverlay(S.version);
+  api('/api/tools').then((t) => { if (t.install.state === 'running') installOverlay(t.install.tools); }).catch(() => {});
   if (!S.onboardingDone && cur() !== '#/setup') openSetup();
 })();

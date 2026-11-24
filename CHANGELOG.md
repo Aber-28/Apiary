@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.0
+- **Install the AI from inside Apiary**: if no Claude Code or Codex is found, the first screen offers *Install Claude Code*, *Install Codex* or *Install both*. A progress bar, step list and live log show what is happening, and plain-language errors with *Try again* if it fails. Installed for your user only, no sudo
+- Apiary also finds tools in `~/.local/bin` when started as a service
+
 ## 0.9.1
 - **Installer now starts Apiary**: it sets up the service (or runs it in the background), waits until it answers, and prints the link. It asks whether you will open it from another device and prints your private access link for that. Clear errors if the port is taken
 

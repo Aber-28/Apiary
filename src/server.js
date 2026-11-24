@@ -9,6 +9,7 @@ import { providers } from './providers.js';
 import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import os from 'node:os';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
 import { Updater } from './updater.js';
@@ -113,6 +114,9 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (req.method === 'DELETE') { engine.tasks.remove(r[1]); return json(res, 200, { ok: true }); }
       }
       // ----- usage -----
+      // ----- install the AI tools (Claude Code, Codex) from inside Apiary -----
+      if (url.pathname === '/api/tools' && req.method === 'GET') { const have = engine.toolInstaller.installed(); return json(res, 200, { installed: have, anyAI: engine.available.some((p) => p.id !== 'mock'), install: engine.toolInstaller.status }); }
+      if (url.pathname === '/api/tools/install' && req.method === 'POST') { const b = await readBody(req); return json(res, 202, engine.toolInstaller.start(Array.isArray(b.tools) ? b.tools : [])); }
       if (url.pathname === '/api/provider-usage' && req.method === 'GET') { const v = engine.limitsView(); if (v.pending.length) engine.refreshLimits().catch(() => {}); return json(res, 200, v); }
       if (url.pathname === '/api/provider-usage/refresh' && req.method === 'POST') { const b = await readBody(req); await engine.refreshLimits(b.id || null, true); return json(res, 200, engine.limitsView()); }
       if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, 200, engine.usage.summary(Number(url.searchParams.get('days')) || 14));
@@ -360,6 +364,8 @@ export function main(links = []) {
     console.error('Refusing to listen on a non-local address without APIARY_TOKEN set.');
     process.exit(1);
   }
+  // the AI tools are installed for this user in ~/.local/bin; make sure a service finds them too
+  { const bin = path.join(os.homedir(), '.local', 'bin'), parts = (process.env.PATH || '').split(path.delimiter); if (!parts.includes(bin)) process.env.PATH = [...parts, bin].filter(Boolean).join(path.delimiter); }
   const store = new Store();
   const engine = new Engine(store);
   if (!engine.available.length) console.warn('No AI connected yet. Open the web UI > Connections, or install the `claude` / `codex` CLI.');

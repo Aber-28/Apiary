@@ -9,7 +9,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 export function which(bin) {
-  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+  // ~/.local/bin is where the AI tools are installed for the current user; a service may not have it on its PATH
+  for (const dir of [...(process.env.PATH || '').split(path.delimiter), path.join(os.homedir(), '.local', 'bin')]) {
     if (!dir) continue;
     const p = path.join(dir, bin);
     try { accessSync(p, constants.X_OK); return p; } catch { /* keep looking */ }

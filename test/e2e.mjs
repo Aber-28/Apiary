@@ -1021,5 +1021,44 @@ let orgIds;
   await call('/api/settings', 'PUT', { autoUpdate: true }); assert.equal(engine.updateCheck, 'daily', 'the old on/off switch still works');
 }
 
+// ---- 0.10.0: install the AI tools from inside Apiary ----
+{
+  const { ToolInstaller, explain, RECIPES } = await import('../src/tools.js');
+  const { mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  const bindir = path.join(mkdtempSync(path.join(os.tmpdir(), 'apiary-tools-')), 'bin'); mk(bindir, { recursive: true });
+  process.env.PATH = `${process.env.PATH}${path.delimiter}${bindir}`;
+  const script = `mkdir -p ${bindir} && printf '#!/bin/sh\\necho fakeai 1.2.3\\n' > ${bindir}/fakeai && chmod +x ${bindir}/fakeai`;
+  const waitDone = async (t) => { for (let i = 0; i < 100 && t.running; i++) await new Promise((r) => setTimeout(r, 100)); return t.status; };
+  let finished = 0;
+  const t = new ToolInstaller({ heartbeat: 150, onDone: () => { finished++; }, recipes: {
+    fakeai: { label: 'Fake AI', needs: [['sh', 'sh is needed']], cmd: 'sh', args: ['-c', `echo "downloading…"; sleep 0.5; echo "http fetch GET 200 registry"; ${script}; echo done`], login: 'fakeai login' },
+    bad: { label: 'Bad AI', needs: [], cmd: 'sh', args: ['-c', 'echo "getaddrinfo ENOTFOUND registry.npmjs.org" >&2; exit 1'], login: 'bad' },
+    nope: { label: 'Needs a tool', needs: [['definitely-not-installed-xyz', 'Install xyz first']], cmd: 'sh', args: ['-c', 'true'], login: 'nope' },
+    node: { label: 'Node', needs: [], cmd: 'sh', args: ['-c', 'exit 9'], login: 'node' },
+  } });
+  assert.equal(t.status.state, 'idle'); assert.equal(t.installed().fakeai, false);
+  assert.throws(() => t.start([]), /Choose/); assert.throws(() => t.start(['unknown']), /Choose/);
+  t.start(['fakeai']); assert.equal(t.status.state, 'running'); assert.throws(() => t.start(['fakeai']), /already running/);
+  let st = await waitDone(t);
+  assert.equal(st.state, 'done'); assert.equal(st.pct, 100); assert.equal(finished, 1); assert.equal(t.installed().fakeai, true);
+  assert.deepEqual(st.steps.map((x) => x.state), ['done', 'done', 'done']);
+  const logText = st.log.join('\n'); assert.match(logText, /downloading/); assert.match(logText, /Still working/); assert.match(logText, /fakeai 1\.2\.3/);
+  // a second run finds it and skips the download
+  t.start(['fakeai']); st = await waitDone(t); assert.equal(st.steps[1].state, 'skip'); assert.equal(st.state, 'done');
+  // already on the computer (node): nothing is installed again even though the recipe would fail
+  t.start(['node']); st = await waitDone(t); assert.equal(st.state, 'done'); assert.equal(st.steps[1].state, 'skip');
+  // failure: plain-language reason, the failing step is marked, nothing claims success
+  t.start(['bad']); st = await waitDone(t); assert.equal(st.state, 'failed'); assert.match(st.failed.message, /internet/); assert.equal(st.steps[1].state, 'fail'); assert.ok(st.pct < 100);
+  t.start(['nope']); st = await waitDone(t); assert.equal(st.state, 'failed'); assert.match(st.failed.message, /Install xyz first/);
+  assert.match(explain(['EACCES: permission denied'], 1), /allowed to write/); assert.match(explain(['No space left on device'], 1), /disk is full/); assert.match(explain(['??'], 3), /code 3/);
+  // the real recipes install for the current user only, never with sudo
+  for (const r of Object.values(RECIPES)) assert.equal([r.cmd, ...r.args].join(' ').includes('sudo'), false);
+  assert.match(RECIPES.claude.args.join(' '), /claude\.ai\/install\.sh/); assert.match(RECIPES.codex.args.join(' '), /--prefix/);
+
+  // API
+  const g = (await call('/api/tools')).body; assert.ok(typeof g.installed === 'object' && typeof g.anyAI === 'boolean'); assert.equal(g.install.state, 'idle');
+  assert.equal((await call('/api/tools/install', 'POST', { tools: [] })).status, 400); assert.equal((await call('/api/tools/install', 'POST', { tools: ['rm -rf'] })).status, 400);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

@@ -27,6 +27,7 @@ import { Tickets } from './tickets.js';
 import { Repos } from './repos.js';
 import { suggestModel } from './models.js';
 import { Limits } from './limits.js';
+import { ToolInstaller } from './tools.js';
 
 const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
@@ -65,6 +66,7 @@ export class Engine extends EventEmitter {
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
+    this.toolInstaller = new ToolInstaller({ onDone: () => { this.connections._cache.clear(); this.emit('event', { type: 'tools' }); } });
     this.tasks = new Tasks(store);
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));

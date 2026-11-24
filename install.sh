@@ -26,8 +26,9 @@ mkdir -p "$BIN"; chmod +x "$DIR/bin/apiary.js"; ln -sf "$DIR/bin/apiary.js" "$BI
 APIARY="$BIN/apiary"
 echo; echo "Installed: $APIARY"
 case ":$PATH:" in *":$BIN:"*) ;; *) echo "To use the short command 'apiary', add it to your PATH:  echo 'export PATH=\"$BIN:\$PATH\"' >> ~/.bashrc && source ~/.bashrc" ;; esac
-command -v claude >/dev/null || echo "Note: 'claude' CLI not found (npm install -g @anthropic-ai/claude-code), or use a web API key."
-command -v codex  >/dev/null || echo "Note: 'codex' CLI not found (npm install -g @openai/codex), or use a web API key."
+if ! command -v claude >/dev/null && ! command -v codex >/dev/null && [ ! -x "$BIN/claude" ] && [ ! -x "$BIN/codex" ]; then
+  echo "No AI tool (Claude Code or Codex) is installed yet. You do not need to do anything: Apiary offers to install one for you when you open it."
+fi
 
 # Who may open it? Only this computer (safest), or other devices on the network (needs the access token).
 UNIT="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/apiary.service"

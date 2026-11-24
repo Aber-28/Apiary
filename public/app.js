@@ -77,9 +77,9 @@ applyTheme(document.documentElement.className || 'dark');
 // ---------- sidebar ----------
 const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
-  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
+  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -110,6 +110,10 @@ function crumbs(...parts) {
 // ---------- routing ----------
 const ROUTES = [
   [/^#\/chat$/, () => pageChat()],
+  [/^#\/organisation$/, () => { S.nextTab = 'org'; pageChat(); }],
+  [/^#\/meetings$/, () => pageMeetings()],
+  [/^#\/secrets$/, () => pageSecrets()],
+  [/^#\/updates$/, () => pageUpdates()],
   [/^#\/teams$/, () => pageTeams()],
   [/^#\/memory$/, () => pageMemory()],
   [/^#\/projects$/, () => pageProjects()],
@@ -141,7 +145,8 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, vault: st.vault || { exists: false, unlocked: false }, update: st.update || null });
+  renderUpdateChip();
   updateBadge();
 }
 function connectEvents() {
@@ -185,8 +190,11 @@ function approvalCard(ap) {
   const isPending = ap.status === 'pending';
   const note = h('input', { type: 'text', placeholder: 'Optional note to the agent', 'aria-label': 'Note to the agent' });
   const checks = (ap.items || []).map((it, i) => h('input', { type: 'checkbox', checked: true, 'aria-label': `${ap.kind === 'hire' ? 'Hire' : 'Create'} ${it.name}`, 'data-i': i }));
-  const decide = (decision) => guard(async () => {
+  const nameIn = (ap.kind === 'hire' ? ap.items : []).map((it) => h('input', { type: 'text', value: it.name, 'aria-label': `Name for the ${it.title || it.role}` }));
+  const decide = (decision, mode) => guard(async () => {
     const body = { decision, note: note.value };
+    if (mode) body.mode = mode;
+    if (decision === 'approve' && nameIn.length) { const names = {}; nameIn.forEach((n, i) => { if (n.value.trim() && n.value.trim() !== ap.items[i].name) names[i] = n.value.trim(); }); if (Object.keys(names).length) body.names = names; }
     if (decision === 'approve' && checks.length) { const only = checks.filter((c) => c.checked).map((c) => Number(c.dataset.i)); if (!only.length) { toast('Select at least one, or choose Deny', true); return; } if (only.length < checks.length) body.only = only; }
     await api(`/api/approvals/${ap.id}/decide`, 'POST', body);
   });
@@ -194,19 +202,21 @@ function approvalCard(ap) {
   return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
     h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
     ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
-    ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, h('b', {}, it.name), ` · ${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
+    ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
     ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
     ap.diff ? diffView(ap.diff) : null,
-    isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'hire' ? 'Approve hiring' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
+    isPending && ap.kind === 'secret' ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve', 'once') }, 'Allow once'), h('button', { class: 'btn', onclick: decide('approve', 'always') }, 'Allow always'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
+    : isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'hire' ? 'Approve hiring' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
       : ap.note ? h('p', { class: 'hint', style: 'margin-top:8px' }, `Your note: ${ap.note}`) : null);
 }
 function pageApprovals() {
   crumbs('Workspace', 'Approvals');
   const draw = () => {
-    const p = pending(), done = S.approvals.filter((a) => a.status !== 'pending');
+    const p = pending(), done = S.approvals.filter((a) => a.status !== 'pending' && !a.archived), old = S.approvals.filter((a) => a.status !== 'pending' && a.archived);
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Approvals'), h('p', { class: 'sub-title' }, 'Agents ask you before they create sub-agents or merge their work. Nothing is pushed to GitHub until you open a pull request.'))),
       p.length ? p.map(approvalCard) : h('div', { class: 'card empty' }, 'Nothing is waiting for you.'),
-      done.length ? h('h2', { style: 'margin-top:28px' }, 'Earlier decisions') : null, ...done.slice(0, 30).map(approvalCard));
+      done.length ? h('h2', { style: 'margin-top:28px' }, 'Earlier decisions') : null, ...done.slice(0, 30).map(approvalCard),
+      old.length ? h('details', { style: 'margin-top:28px' }, h('summary', {}, h('b', {}, `Archived decisions (${old.length})`), ' · decisions move here after 24 hours'), ...old.slice(0, 100).map(approvalCard)) : null);
   };
   draw(); page = { shows: () => true, update: (ev) => ev.type === 'approval' && draw() };
 }
@@ -248,7 +258,7 @@ function pageProject(leadId, general = false) {
   if (general) crumbs('Workspace', 'Chat'); else crumbs('Workspace', 'Projects', lead.name);
   view.className = 'view flush';
   if (!S.sel || rootOf(S.agents.find((a) => a.id === S.sel) || { id: null }).id !== leadId) S.sel = leadId;
-  S.tab = 'chat';
+  S.tab = S.nextTab || 'chat'; S.nextTab = null;
   const el = { head: h('div', { class: 'chat-head' }), tabs: h('div', { class: 'tabs', role: 'tablist' }), body: h('div', { style: 'flex:1;display:flex;flex-direction:column;min-height:0' }), team: h('aside', { class: 'team', 'aria-label': 'Team' }) };
   view.replaceChildren(h('div', { class: 'ws' }, h('section', { class: 'chat' }, el.head, el.tabs, el.body), el.team));
   let msgsEl, termEl, liveEl, input;
@@ -259,6 +269,7 @@ function pageProject(leadId, general = false) {
     el.head.replaceChildren(...[
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       pill(a.status),
+      a.kind === 'general' || a.title || a.mdFile ? h('button', { class: 'btn', onclick: () => openProfile(a) }, 'Edit profile') : null,
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
       a.git ? h('button', { class: 'btn', onclick: () => openReview(a) }, 'Review changes') : null,
       a.method !== 'api' ? h('button', { class: 'btn', onclick: guard(() => takeOver(a)) }, 'Take over') : null,
@@ -266,8 +277,8 @@ function pageProject(leadId, general = false) {
       a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents? Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
   };
   const TABS = { chat: 'Chat', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
-  const drawTabs = () => el.tabs.replaceChildren(...(general ? ['chat'] : Object.keys(TABS)).map((t) => h('button', { role: 'tab', 'aria-selected': String(S.tab === t), onclick: () => { S.tab = t; drawTabs(); drawBody(); } }, TABS[t])));
-  if (general) el.tabs.style.display = 'none';
+  const drawTabs = () => el.tabs.replaceChildren(...(general ? (S.orgDone ? ['chat', 'org'] : ['chat']) : Object.keys(TABS)).map((t) => h('button', { role: 'tab', 'aria-selected': String(S.tab === t), onclick: () => { S.tab = t; drawTabs(); drawBody(); } }, TABS[t])));
+  if (general && !S.orgDone) el.tabs.style.display = 'none';
   const drawTeam = () => {
     if (general && !kidsOf(leadId).length) { el.team.style.display = 'none'; return; }
     el.team.style.display = '';
@@ -399,7 +410,107 @@ async function pageChat() {
     await ensureMsgs(a.id);
     S.sel = a.id;
     pageProject(a.id, true);
+    if (!S.orgDone) { const cta = h('div', { class: 'card', style: 'margin:12px 16px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, h('div', { style: 'flex:1;min-width:240px' }, h('b', {}, 'You have not set up your CEO yet'), h('p', { class: 'hint', style: 'margin:2px 0 0' }, 'A short interview about your setup lets Apiary propose the team you need and write each person\'s profile for you.')), h('button', { class: 'btn primary', onclick: () => openSetup(3) }, 'Set up my CEO')); view.querySelector('.chat')?.prepend(cta); }
   } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message, ' ', h('a', { href: '#/connections', style: 'text-decoration:underline' }, 'Open Connections'))); }
+}
+
+// ---------- profile editor ----------
+async function openProfile(agent) {
+  const err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' });
+  let p;
+  try { p = await api(`/api/agents/${agent.id}/profile`); } catch (e) { toast(e.message, true); return; }
+  const name = h('input', { type: 'text', value: p.name || agent.name, 'aria-label': 'Name' });
+  const text = h('textarea', { rows: '16', style: 'font-family:var(--mono,monospace)', 'aria-label': 'Profile in Markdown' }); text.value = p.text || '';
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, `Profile: ${agent.title || agent.name}`),
+    h('p', { class: 'hint' }, p.file ? `Saved as a Markdown file: ${p.file}` : 'Saved as a Markdown file.'),
+    h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Standing instructions and guardrails (Markdown)', text), err,
+    h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), h('button', { class: 'btn primary', value: 'save', onclick: (e) => { e.preventDefault(); guard(async () => { await api(`/api/agents/${agent.id}/profile`, 'PUT', { name: name.value, text: text.value }); dlg.close(); await loadState(); route(); toast('Profile saved'); })(); } }, 'Save'))));
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
+}
+
+// ---------- team meetings ----------
+function pageMeetings() {
+  crumbs('Agents', 'Team meetings');
+  const draw = async () => {
+    const list = await api('/api/meetings').catch(() => []);
+    const m = { frequency: S.meeting.frequency || 'off', time: S.meeting.time || '00:00', weekday: S.meeting.weekday ?? 0 };
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const freq = h('select', { 'aria-label': 'How often' }, [['off', 'Never'], ['daily', 'Every day'], ['weekly', 'Every week']].map(([v, t]) => h('option', { value: v, selected: m.frequency === v }, t)));
+    const day = h('select', { 'aria-label': 'Day of the week' }, days.map((d, i) => h('option', { value: i, selected: m.weekday === i }, d)));
+    const time = h('input', { type: 'time', value: m.time, 'aria-label': 'Time' });
+    const sync = () => { day.style.display = freq.value === 'weekly' ? '' : 'none'; time.style.display = freq.value === 'off' ? 'none' : ''; }; freq.onchange = sync; sync();
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Team meetings'), h('p', { class: 'sub-title' }, 'Your agents meet to stay in sync. Each says what they did and what changed, then reacts to the others. Minutes are saved as Markdown and added to everyone\'s memory.'))),
+      h('div', { class: 'card' }, h('div', { class: 'kv' }, freq, day, time, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/settings', 'PUT', { meeting: { frequency: freq.value, time: time.value || '00:00', weekday: Number(day.value) } }); await loadState(); toast('Meeting schedule saved'); }) }, 'Save schedule'),
+        h('button', { class: 'btn', onclick: guard(async () => { await api('/api/meetings/run', 'POST', {}); toast('Meeting started. Minutes will appear below.'); setTimeout(draw, 4000); }) }, 'Hold a meeting now'))),
+      h('h2', { style: 'margin-top:24px' }, 'Minutes'),
+      list.length ? list.map((x) => h('div', { class: 'card', style: 'display:flex;gap:12px;align-items:center;margin-bottom:8px' }, h('b', { style: 'flex:1' }, `${x.date} · ${x.scopeName || x.scope}`), h('button', { class: 'btn', onclick: guard(async () => { const d = await api(`/api/meetings/${encodeURIComponent(x.scope)}/${x.date}`); const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, `Meeting ${x.date}`), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap;max-height:60vh;overflow:auto' }, d.text || d.markdown || ''), h('div', { class: 'dlg-actions' }, h('button', { class: 'btn primary' }, 'Close')))); document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal(); }) }, 'Read'))) : h('div', { class: 'card empty' }, 'No meetings yet.'));
+  };
+  draw(); page = { shows: () => true };
+}
+
+// ---------- secrets vault ----------
+function pageSecrets() {
+  crumbs('Settings', 'Secrets vault');
+  const draw = async () => {
+    let v; try { v = await api('/api/vault'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    S.vault = { exists: v.exists, unlocked: v.unlocked };
+    const head = h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Secrets vault'), h('p', { class: 'sub-title' }, 'Passwords and keys are encrypted with your passphrase and never stored in plain text. Assign each secret to the agents that may use it. When an agent asks to use one you approve it once or always. Never paste secrets into a chat.')),
+      v.exists && v.unlocked ? h('button', { class: 'btn', onclick: guard(async () => { await api('/api/vault/lock', 'POST', {}); draw(); }) }, 'Lock now') : null);
+    if (!v.exists) {
+      const a = h('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Passphrase' }), b = h('input', { type: 'password', autocomplete: 'new-password', 'aria-label': 'Repeat passphrase' });
+      view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'Create the vault'), h('label', { class: 'f' }, 'Passphrase (8+ characters)', a), h('label', { class: 'f' }, 'Repeat it', b), h('p', { class: 'hint' }, 'If you forget it the secrets cannot be recovered.'), h('button', { class: 'btn primary', onclick: guard(async () => { if (a.value !== b.value) throw new Error('The passphrases differ.'); await api('/api/vault/init', 'POST', { passphrase: a.value }); draw(); }) }, 'Create vault'))); return;
+    }
+    if (!v.unlocked) {
+      const a = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': 'Passphrase', onkeydown: (e) => { if (e.key === 'Enter') go(); } });
+      const go = guard(async () => { await api('/api/vault/unlock', 'POST', { passphrase: a.value }); draw(); });
+      view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'The vault is locked'), h('p', { class: 'hint' }, 'It locks whenever Apiary restarts. Agents cannot use secrets while it is locked.'), h('label', { class: 'f' }, 'Passphrase', a), h('button', { class: 'btn primary', onclick: go }, 'Unlock'))); return;
+    }
+    const nm = h('input', { type: 'text', placeholder: 'Name, e.g. GITHUB_TOKEN', 'aria-label': 'Secret name' }), val = h('input', { type: 'password', autocomplete: 'off', placeholder: 'Value', 'aria-label': 'Secret value' }), note = h('input', { type: 'text', placeholder: 'What is it for? (optional)', 'aria-label': 'Note' });
+    const rows = v.secrets.map((x) => {
+      const asg = x.assigned || {};
+      const picks = v.eligible.map((a) => { const g = asg[a.key]?.grant; const sel = h('select', { 'aria-label': `${a.label} access to ${x.name}`, onchange: guard(async () => { const next = { ...asg }; if (sel.value === 'none') delete next[a.key]; else next[a.key] = { label: a.label, grant: sel.value }; await api(`/api/vault/secrets/${x.id}`, 'PUT', { assigned: next }); draw(); }) }, [['none', 'No access'], ['ask', 'Ask me each time'], ['always', 'Always allowed']].map(([k, t]) => h('option', { value: k, selected: (g || 'none') === k }, t))); return h('div', { class: 'kv', style: 'justify-content:space-between;margin:4px 0' }, h('span', {}, a.label), sel); });
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null),
+        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nv = prompt(`New value for ${x.name}`); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Value replaced'); } }) }, 'Replace value'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
+        h('details', { open: Object.keys(asg).length > 0 }, h('summary', {}, 'Who may use it'), picks.length ? picks : h('p', { class: 'hint' }, 'No agents yet.')));
+    });
+    view.replaceChildren(head, h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), h('div', { class: 'kv' }, nm, val, note, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/vault/secrets', 'POST', { name: nm.value, value: val.value, note: note.value }); draw(); }) }, 'Save to vault'))), rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
+  };
+  draw(); page = { shows: () => true };
+}
+
+// ---------- updates ----------
+function renderUpdateChip() {
+  let c = document.getElementById('upd');
+  const u = S.update;
+  if (!u || u.state !== 'ready') { c?.remove(); return; }
+  if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:13px' }); $('#theme').before(c); }
+  c.textContent = `Update ready: ${u.latest}`;
+}
+async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
+setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
+function pageUpdates() {
+  crumbs('Settings', 'Updates');
+  const draw = () => {
+    const u = S.update || { state: 'unsupported' };
+    const msg = { uptodate: `You are up to date (version ${S.version}).`, ready: `Version ${u.latest} is downloaded and ready to install.`, error: u.error || 'The last check failed.', unsupported: u.error || 'Updates are not available for this install (it is not a git checkout).', checking: 'Checking…' }[u.state] || 'Not checked yet. Press Check for updates.';
+    const busy = h('p', { class: 'hint', role: 'status' });
+    const check = h('button', { class: 'btn', onclick: guard(async () => { busy.textContent = 'Checking GitHub…'; S.update = await api('/api/update/check', 'POST', {}); renderUpdateChip(); draw(); }) }, 'Check for updates');
+    const install = u.state === 'ready' ? h('button', { class: 'btn primary big', onclick: guard(async () => {
+      let r;
+      try { r = await api('/api/update/install', 'POST', {}); }
+      catch (e) { if (/busy|working/i.test(e.message) && confirm(`${e.message}\n\nInstall anyway? Running agents will be stopped.`)) r = await api('/api/update/install', 'POST', { force: true }); else throw e; }
+      busy.textContent = 'Installing and restarting. This page will refresh by itself…';
+      const was = S.version; let tries = 0;
+      const t = setInterval(async () => { tries++; try { const st = await fetch('/api/state').then((x) => x.json()); if (st.version && st.version !== was) { clearInterval(t); location.reload(); } else if (tries > 4 && r?.restarted === false) { clearInterval(t); location.reload(); } } catch { /* restarting */ } if (tries > 90) { clearInterval(t); location.reload(); } }, 1500);
+    }) }, `Install ${u.latest}`) : null;
+    const auto = h('input', { type: 'checkbox', checked: S.autoUpdate, 'aria-label': 'Check for updates automatically', onchange: guard(async (e) => { await api('/api/settings', 'PUT', { autoUpdate: e.target.checked }); S.autoUpdate = e.target.checked; }) });
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Updates'), h('p', { class: 'sub-title' }, 'Apiary checks GitHub for a new version and downloads it without installing. You decide when to install; it then restarts and your browser refreshes.'))),
+      h('div', { class: 'card' }, h('p', {}, h('b', {}, `Installed: ${S.version}`), u.latest && u.state === 'ready' ? ` · Available: ${u.latest}` : ''), h('p', {}, msg), u.checkedAt ? h('p', { class: 'hint' }, `Last checked ${new Date(u.checkedAt).toLocaleString()}`) : null,
+        u.notes?.length ? h('details', { open: true }, h('summary', {}, 'What is new'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, [].concat(u.notes).join('\n'))) : null,
+        h('div', { class: 'kv', style: 'margin-top:12px' }, check, install), busy,
+        h('label', { class: 'check', style: 'margin-top:12px' }, auto, ' Check automatically every few hours')));
+  };
+  draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); }); page = { shows: () => true };
 }
 
 // ---------- teams ----------
@@ -658,19 +769,19 @@ function pageFolders() {
 
 // ---------- first-run setup wizard ----------
 const settle = (ms) => new Promise((r) => setTimeout(r, ms));
-async function openSetup() {
+async function openSetup(startAt = 0) {
   document.querySelector('.wizard')?.remove();
   await refreshConns();
-  const W = { step: 0, tests: {}, models: {}, pick: {}, other: {}, defAI: S.defaultProvider, svc: null, svcWant: true, startNow: false, github: null };
+  const W = { step: startAt, iv: { answers: [], cur: null, busy: false, result: null, err: '' }, ceoName: S.agents.find((a) => a.kind === 'general' && S.orgDone)?.name || 'Captain Atlas', meet: { frequency: S.meeting?.frequency && S.meeting.frequency !== 'off' ? S.meeting.frequency : 'daily', time: S.meeting?.time || '00:00', weekday: S.meeting?.weekday ?? 0 }, tests: {}, models: {}, pick: {}, other: {}, defAI: S.defaultProvider, svc: null, svcWant: true, startNow: false, github: null };
   const root = h('div', { class: 'wizard', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Set up Apiary' });
   document.body.append(root);
-  const NAMES = ['Welcome', 'Connect your AI', 'Default models', 'GitHub', 'Startup', 'All set'];
+  const NAMES = ['Welcome', 'Connect your AI', 'Default models', 'Your CEO', 'Your team', 'Meetings', 'GitHub', 'Secrets', 'Startup', 'All set'];
   const conn = (id) => S.conns.find((c) => c.id === id);
   const okAI = () => ['claude', 'codex'].filter((id) => W.tests[id]?.ok);
   const finish = guard(async () => {
     await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) });
     S.onboardingDone = true; if (W.defAI) S.defaultProvider = W.defAI;
-    root.remove(); await loadState(); await refreshConns(); location.hash = '#/projects'; route();
+    root.remove(); await loadState(); await refreshConns(); location.hash = '#/chat'; route();
   });
   // One panel per service: shows if it works; if not, how to sign in (terminal) or paste a key (web).
   function connPanel(id, onChange) {
@@ -709,7 +820,7 @@ async function openSetup() {
 
   const steps = [
     // 0 Welcome
-    () => h('div', {}, h('h1', {}, 'Welcome to Apiary'), h('p', { class: 'sub-title' }, 'A quick setup (about two minutes): connect your AI, choose default models, optionally connect GitHub, and decide whether Apiary starts automatically.'),
+    () => h('div', {}, h('h1', {}, 'Welcome to Apiary'), h('p', { class: 'sub-title' }, 'A short setup: connect your AI, create your CEO and team through a few questions, choose when your team meets, and decide whether Apiary starts automatically.'),
       h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: guard(async () => { await api('/api/settings', 'PUT', { onboardingDone: true }); S.onboardingDone = true; root.remove(); toast('You can run setup again from Settings → Setup guide'); if (cur() === '#/setup') location.hash = '#/projects'; }) }, 'Skip for now'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(1) }, 'Start setup'))),
     // 1 Connect AI
     () => {
@@ -752,13 +863,85 @@ async function openSetup() {
           await api('/api/settings', 'PUT', { defaultProvider: W.defAI || '' }); S.defaultProvider = W.defAI || ''; await refreshConns(); go(3);
         }) }, 'Continue')));
     },
-    // 3 GitHub
+    // 3 Your CEO: the AI interviews you
+    () => {
+      const iv = W.iv, box = h('div');
+      const name = h('input', { type: 'text', value: W.ceoName, 'aria-label': 'Name of your CEO', oninput: (e) => (W.ceoName = e.target.value) });
+      const next = async () => {
+        iv.busy = true; iv.err = ''; draw2();
+        try {
+          const r = await api('/api/interview', 'POST', { answers: iv.answers, ceoName: '' });
+          if (r.done) { iv.result = r; if (r.suggestedCeoName && (W.ceoName === 'Captain Atlas')) W.ceoName = r.suggestedCeoName; go(4); return; }
+          iv.cur = r;
+        } catch (e) { iv.err = e.message; }
+        iv.busy = false; draw2();
+      };
+      const answer = (text) => { text = String(text || '').trim(); if (!text) return; iv.answers.push({ q: iv.cur.question, a: text }); iv.cur = null; next(); };
+      function draw2() {
+        const free = h('input', { type: 'text', placeholder: 'Or type your own answer', 'aria-label': 'Your answer', onkeydown: (e) => { if (e.key === 'Enter') answer(free.value); } });
+        box.replaceChildren(
+          ...iv.answers.map((a) => h('div', { class: 'card wiz-card', style: 'padding:12px 16px' }, h('b', {}, a.q), h('p', { style: 'margin:4px 0 0' }, a.a))),
+          iv.busy ? h('p', { class: 'hint', role: 'status' }, iv.answers.length ? 'Thinking about your answer…' : 'Preparing the first question…')
+            : iv.cur ? h('div', { class: 'card wiz-card' }, h('small', { class: 'hint' }, `Question ${iv.cur.asked} of up to ${iv.cur.max}`), h('h2', { style: 'margin:4px 0 12px' }, iv.cur.question),
+              h('div', { class: 'choice' }, iv.cur.choices.map((c) => h('button', { type: 'button', onclick: () => answer(c) }, h('b', {}, c)))), h('div', { class: 'kv', style: 'margin-top:12px' }, free, h('button', { class: 'btn primary', onclick: () => answer(free.value) }, 'Answer')))
+            : null,
+          iv.err ? h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' }, iv.err) : null);
+      }
+      draw2();
+      if (!iv.cur && !iv.busy && !iv.result) next();
+      return h('div', {}, h('h1', {}, 'Create your CEO'), h('p', { class: 'sub-title' }, 'Your CEO runs your organisation: it takes what you ask for and hands it to the right specialist. Answer a few questions about your setup and goals. The AI asks them one at a time, then proposes the team you need. Never type passwords here; secrets go in the vault later.'),
+        h('label', { class: 'f' }, 'Name your CEO', name, h('small', {}, 'A comic-book style name is suggested. Type any name you like.')), box,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(2) }, 'Back'), h('span', { style: 'flex:1' }),
+          h('button', { class: 'btn', onclick: () => { iv.result = { done: true, overview: iv.answers.map((a) => `**${a.q}** ${a.a}`).join('\n\n'), team: [] }; go(4); } }, 'Skip the questions')));
+    },
+    // 4 Your team: review the proposal
+    () => {
+      const r = W.iv.result || { team: [], overview: '' };
+      W.team ||= r.team.map((t) => ({ ...t, on: true }));
+      const overview = h('textarea', { rows: '5', 'aria-label': 'What was understood about your setup' }); overview.value = W.ovText ?? r.overview; overview.oninput = () => (W.ovText = overview.value);
+      const cards = W.team.map((t) => {
+        const nm = h('input', { type: 'text', value: t.name, 'aria-label': `Name for the ${t.title}`, oninput: (e) => (t.name = e.target.value) });
+        return h('div', { class: 'card wiz-card' }, h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: t.on, 'aria-label': `Hire ${t.title}`, onchange: (e) => (t.on = e.target.checked) }), h('span', { style: 'flex:1' }, h('b', {}, `${t.title}`), ` · ${t.departmentLabel}`, h('small', { class: 'hint', style: 'display:block' }, t.role))),
+          h('label', { class: 'f', style: 'margin-top:8px' }, 'Name', nm), h('p', { class: 'hint', style: 'margin:4px 0' }, `Why: ${t.reason || 'not given'}`),
+          h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, t.instructions)));
+      });
+      const err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' });
+      return h('div', {}, h('h1', {}, 'Your team'), h('p', { class: 'sub-title' }, `${W.ceoName} will lead these people. Untick anyone you do not need and rename anyone you like. Their instructions and guardrails are already written, and saved as Markdown files you can edit later.`),
+        h('label', { class: 'f' }, 'What I understood about your setup (you can edit it)', overview),
+        cards.length ? cards : h('div', { class: 'card empty' }, 'No team members were proposed. Your CEO can suggest hires later, when there is work that needs a specialist.'), err,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => { W.team = null; W.iv = { answers: [], cur: null, busy: false, result: null, err: '' }; go(3); } }, 'Redo the questions'), h('span', { style: 'flex:1' }),
+          h('button', { class: 'btn primary big', onclick: guard(async () => {
+            err.textContent = '';
+            try { W.created = await api('/api/org', 'POST', { ceoName: W.ceoName, overview: overview.value, team: W.team.filter((t) => t.on).map((t) => ({ title: t.title, name: t.name, role: t.role, department: t.department, reason: t.reason, custom: t.custom })) }); await loadState(); go(5); }
+            catch (e) { err.textContent = e.message; }
+          }) }, 'Create my CEO and team')));
+    },
+    // 5 Meetings
+    () => {
+      const m = W.meet, box = h('div');
+      const draw3 = () => box.replaceChildren(h('div', { class: 'choice' }, [['off', 'Never', 'No automatic meetings'], ['daily', 'Every day', 'A daily catch-up'], ['weekly', 'Every week', 'A weekly review']].map(([v, t, sub]) => h('button', { type: 'button', 'aria-pressed': String(m.frequency === v), onclick: () => { m.frequency = v; draw3(); } }, h('b', {}, t), h('small', {}, sub)))),
+        m.frequency !== 'off' ? h('div', { class: 'kv', style: 'margin-top:12px' }, m.frequency === 'weekly' ? h('select', { 'aria-label': 'Day of the week', onchange: (e) => (m.weekday = Number(e.target.value)) }, ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map((d, i) => h('option', { value: i, selected: m.weekday === i }, d))) : null, h('label', { class: 'f', style: 'margin:0' }, 'At what time?', h('input', { type: 'time', value: m.time, 'aria-label': 'Meeting time', onchange: (e) => (m.time = e.target.value || '00:00') }))) : null);
+      draw3();
+      return h('div', {}, h('h1', {}, 'Team meetings'), h('p', { class: 'sub-title' }, 'Your agents can meet to stay in sync: each one says what they did and what changed, then everyone hears everyone else, so nobody works with out-of-date information. The minutes are saved as Markdown. When should they meet? (Midnight is a good time.)'), box,
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(4) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => { await api('/api/settings', 'PUT', { meeting: { frequency: m.frequency, time: m.time, weekday: m.weekday } }); m.saved = true; go(6); }) }, 'Continue')));
+    },
+    // 6 GitHub
     () => {
       const p = connPanel('github'); if (!W.tests.github) { const c = conn('github'); if (c.status?.ok || c.cli.found) p.recheck(); }
       return h('div', {}, h('h1', {}, 'Connect GitHub (optional)'), h('p', { class: 'sub-title' }, 'Lets agents work on your repositories and open pull requests. You can do this later.'), p,
-        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(2) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(4) }, W.tests.github?.ok ? 'Continue' : 'Skip for now')));
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(5) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(7) }, W.tests.github?.ok ? 'Continue' : 'Skip for now')));
     },
-    // 4 Startup
+    // 7 Secrets vault
+    () => {
+      const box = h('div'), pass = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Passphrase (8+ characters)', 'aria-label': 'Vault passphrase' }), again = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Repeat it', 'aria-label': 'Repeat the passphrase' }), err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' });
+      const made = S.vault?.exists || W.vaultMade;
+      return h('div', {}, h('h1', {}, 'Secrets vault (optional)'), h('p', { class: 'sub-title' }, 'Passwords and keys never go in plain text. The vault encrypts them with a passphrase only you know. You then choose which agent may use which secret, and approve each use: once, or always.'),
+        made ? h('div', { class: 'card wiz-card' }, h('p', {}, '✔ A vault already exists. Add secrets under Settings → Secrets.'))
+          : h('div', { class: 'card wiz-card' }, h('label', { class: 'f' }, 'Passphrase', pass), h('label', { class: 'f' }, 'Repeat passphrase', again), h('small', { class: 'hint' }, 'If you forget it, the secrets cannot be recovered. After Apiary restarts you unlock the vault again with it.'), err,
+            h('button', { class: 'btn primary', onclick: guard(async () => { err.textContent = ''; if (pass.value !== again.value) { err.textContent = 'The two passphrases differ.'; return; } try { await api('/api/vault/init', 'POST', { passphrase: pass.value }); W.vaultMade = true; await loadState(); draw(); } catch (e) { err.textContent = e.message; } }) }, 'Create the vault')),
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(6) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(8) }, made ? 'Continue' : 'Skip for now')));
+    },
+    // 8 Startup
     () => {
       const box = h('div', {});
       const draw = () => {
@@ -775,7 +958,7 @@ async function openSetup() {
       api('/api/service').then((s) => { W.svc = s; W.svcWant = s.supported ? (s.enabled || W.svcWant) : false; draw(); }).catch((e) => { W.svc = { supported: false, reason: e.message }; draw(); });
       draw();
       return h('div', {}, h('h1', {}, 'Run Apiary automatically?'), h('p', { class: 'sub-title' }, 'Apiary can start by itself whenever you log in, so it is always ready at its address.'), box,
-        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(3) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(7) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
           const sv = W.svc;
           if (sv?.supported) {
             if (W.svcWant && !sv.enabled) {
@@ -785,23 +968,25 @@ async function openSetup() {
               W.svc = await api('/api/service');
             } else if (!W.svcWant && sv.enabled) W.svc = await api('/api/service', 'POST', { enabled: false });
           }
-          go(5);
+          go(9);
         }) }, 'Continue')));
     },
-    // 5 Done
+    // 9 Done
     () => {
       const rows = [];
       for (const id of ['claude', 'codex']) { const c = conn(id); rows.push(h('li', {}, h('b', {}, CINFO[id].title), W.tests[id]?.ok ? ` connected (${c.method === 'cli' ? 'terminal' : 'web'}), model: ${c.api.model || 'default'}${W.defAI === id ? ', leads new projects' : ''}` : ' not connected yet')); }
+      rows.push(h('li', {}, h('b', {}, 'Your CEO'), S.orgDone || W.created ? ` ${W.ceoName} leads ${W.created ? W.created.hired : 'your'} team${W.created ? ` (${W.created.hired} hired)` : ''}` : ' not created yet (you can do this from the Chat page)'));
+      rows.push(h('li', {}, h('b', {}, 'Team meetings'), W.meet.saved ? (W.meet.frequency === 'off' ? ' off' : ` ${W.meet.frequency === 'daily' ? 'every day' : 'every week'} at ${W.meet.time}`) : ' not set'));
       rows.push(h('li', {}, h('b', {}, 'GitHub'), W.tests.github?.ok ? ` connected${W.tests.github.detail ? ': ' + W.tests.github.detail : ''}` : ' not connected (optional)'));
       rows.push(h('li', {}, h('b', {}, 'Startup'), W.svc?.enabled ? ' starts automatically at login' : ' you start it yourself'));
       return h('div', {}, h('h1', {}, 'You are all set'), h('p', { class: 'sub-title' }, 'You can change any of this later under Connections and Settings.'), h('div', { class: 'card wiz-card' }, h('ul', { class: 'summary' }, rows)),
-        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(4) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: finish }, 'Open Apiary')));
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(8) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: finish }, 'Open Apiary')));
     },
   ];
   function go(n) { W.step = n; draw(); }
   function draw() {
     root.replaceChildren(h('div', { class: 'wiz-body' },
-      W.step > 0 && W.step < 5 ? h('ol', { class: 'stepper', 'aria-label': 'Progress' }, NAMES.slice(1, 5).map((n, i) => h('li', { 'aria-current': W.step === i + 1 ? 'step' : null, class: W.step > i + 1 ? 'done' : '' }, n))) : null,
+      W.step > 0 && W.step < 9 ? h('ol', { class: 'stepper', 'aria-label': 'Progress' }, NAMES.slice(1, 9).map((n, i) => h('li', { 'aria-current': W.step === i + 1 ? 'step' : null, class: W.step > i + 1 ? 'done' : '' }, n))) : null,
       steps[W.step]()));
     root.scrollTop = 0;
   }

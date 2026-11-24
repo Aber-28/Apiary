@@ -27,3 +27,13 @@ Apiary needs no config file. Everything is set in the interface or with environm
 ## Backup
 
 Copy `~/.apiary/state.json`. Work in repositories is on git branches.
+
+
+## Files (0.5.0)
+
+- `~/.apiary/agents/<scope>/<role>.md`: agent profiles
+- `~/.apiary/org/company.md`: what the interview learned about your setup
+- `~/.apiary/meetings/<scope>/<date>.md`: meeting minutes
+- `~/.apiary/vault.json`: encrypted secrets (safe to back up; useless without the passphrase)
+
+Set `APIARY_NO_UPDATE_CHECK=1` to disable the automatic update check.

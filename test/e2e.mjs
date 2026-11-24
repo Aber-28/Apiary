@@ -1,6 +1,6 @@
 // End-to-end test with the mock provider: lead -> spawns 2 sub-agents -> reports -> final answer.
 import assert from 'node:assert/strict';
-import { mkdtempSync, statSync as fsStat } from 'node:fs';
+import { mkdtempSync, statSync as fsStat, readFileSync as fsRead, existsSync as fsExists } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -343,7 +343,7 @@ assert.ok(engine2.agents[lead2.id]);
   const run = async (goal, extra = {}) => {
     const l = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, team: preset.id, goal, ...extra })).body;
     await until(() => engine.agents[l.id].status === 'idle' && engine.messages(l.id).some((m) => m.role === 'report'), 10000);
-    const mem = (n) => Object.values(engine.agents).find((a) => a.parentId === l.id && a.name === n);
+    const mem = (n) => Object.values(engine.agents).find((a) => a.parentId === l.id && (a.title === n || a.name === n));
     const says = (a) => engine.messages(a.id);
     return { l, mem, says, report: engine.messages(l.id).find((m) => m.role === 'report').text };
   };
@@ -351,23 +351,24 @@ assert.ok(engine2.agents[lead2.id]);
   // full flow in a plain folder
   const t1 = await run('Change the network firewall rules');
   assert.equal(engine.agents[t1.l.id].role.startsWith('Chief executive'), true);
-  assert.deepEqual(Object.values(engine.agents).filter((a) => a.parentId === t1.l.id).map((a) => a.name).sort(), ['Networking', 'Research', 'Security']);
+  assert.deepEqual(Object.values(engine.agents).filter((a) => a.parentId === t1.l.id).map((a) => a.title).sort(), ['Networking', 'Research', 'Security']);
+  assert.ok(Object.values(engine.agents).filter((a) => a.parentId === t1.l.id).every((a) => a.name !== a.title && /^[A-Z]/.test(a.name)), 'team members get comic-book style names by default');
   const sec = t1.mem('Security'), net = t1.mem('Networking'), res = t1.mem('Research');
   const secMsgs = t1.says(sec), netMsgs = t1.says(net);
-  const precheck = secMsgs.findIndex((m) => /Pre-check requested by Networking/.test(m.text || '') && m.from?.name === 'Networking');
-  const prereq = secMsgs.findIndex((m) => /Prerequisite for Networking/.test(m.text || ''));
+  const precheck = secMsgs.findIndex((m) => new RegExp(`Pre-check requested by ${net.name}`).test(m.text || '') && m.from?.name === net.name);
+  const prereq = secMsgs.findIndex((m) => new RegExp(`Prerequisite for ${net.name}`).test(m.text || ''));
   assert.ok(precheck >= 0 && prereq > precheck, 'Security was asked first, then did its prerequisite');
-  assert.ok(t1.says(res).some((m) => /Pre-check requested by Networking/.test(m.text || '')), 'Research was consulted too');
+  assert.ok(t1.says(res).some((m) => new RegExp(`Pre-check requested by ${net.name}`).test(m.text || '')), 'Research was consulted too');
   const job = netMsgs.find((m) => /^Task from /.test(m.text || ''));
   const prereqDone = secMsgs.filter((m) => m.role === 'agent').find((m) => /^DONE/.test(m.text));
   assert.ok(job && prereqDone && job.ts >= prereqDone.ts, 'the job started only after the prerequisite was done');
   assert.match(netMsgs.find((m) => m.role === 'agent' && /Finished the job/.test(m.text)).text, /Sees prerequisite: yes/);
-  assert.match(t1.report, /Pre-check results/); assert.match(t1.report, /Security: CONDITIONS/); assert.match(t1.report, /Research: GO/);
+  assert.match(t1.report, /Pre-check results/); assert.match(t1.report, new RegExp(`${sec.name} \\(Security\\): CONDITIONS`)); assert.match(t1.report, new RegExp(`${res.name} \\(Research\\): GO`));
   assert.equal(t1.says(t1.mem('Research')).some((m) => /^Task from/.test(m.text || '')), false, 'only the assignee does the job');
 
   // BLOCK stops everything
   const t2 = await run('Wipe the network config');
-  assert.match(t2.report, /NOT STARTED/); assert.match(t2.report, /Security blocked it/);
+  assert.match(t2.report, /NOT STARTED/); assert.match(t2.report, new RegExp(`${t2.mem('Security').name} blocked it`));
   assert.equal(t2.says(t2.mem('Networking')).some((m) => /^Task from/.test(m.text || '')), false, 'a blocked task never starts');
   // a failed prerequisite stops it too
   const t3 = await run('network firewall failprereq');
@@ -375,7 +376,7 @@ assert.ok(engine2.agents[lead2.id]);
   assert.equal(t3.says(t3.mem('Networking')).some((m) => /^Task from/.test(m.text || '')), false);
   // an unclear answer is reported as unclear, never treated as a quiet yes
   const t4 = await run('network garble thing');
-  assert.match(t4.report, /Research: UNCLEAR/);
+  assert.match(t4.report, new RegExp(`${t4.mem('Research').name} \\(Research\\): UNCLEAR`));
   assert.ok(t4.says(t4.mem('Networking')).some((m) => /^Task from/.test(m.text || '')));
 
   // members keep their memory across assignments and projects
@@ -398,7 +399,7 @@ assert.ok(engine2.agents[lead2.id]);
   assert.ok(merges >= 2, `the prerequisite and the job each needed a merge approval (${merges})`);
   const files = sh(repo, 'ls-tree', '-r', '--name-only', engine.agents[gl.id].git.branch).split('\n');
   assert.ok(files.includes('security-prereq.txt') && files.includes('networking.txt'), `both pieces of work reached the lead's branch: ${files}`);
-  const nm = Object.values(engine.agents).find((a) => a.parentId === gl.id && a.name === 'Networking');
+  const nm = Object.values(engine.agents).find((a) => a.parentId === gl.id && a.title === 'Networking');
   assert.match(engine.messages(nm.id).find((m) => m.role === 'agent' && /Finished the job/.test(m.text)).text, /Sees prerequisite: yes/, 'the prerequisite was in the specialist\'s own checkout');
   assert.ok(sh(repo, 'worktree', 'list').includes(nm.id), 'standing members keep their checkout');
   await call('/api/agents/' + gl.id, 'DELETE');
@@ -412,7 +413,6 @@ assert.ok(engine2.agents[lead2.id]);
   await call(`/api/agents/${g1.id}/messages`, 'POST', { text: 'good morning' });
   await until(() => engine.messages(g1.id).some((m) => m.role === 'agent' && /You said: good morning/.test(m.text)));
   assert.match(engine._system(engine.agents[g1.id]), /everyday assistant/);
-  assert.doesNotMatch(engine._system(engine.agents[g1.id]), /apiary-hire/, 'the general chat does not hire');
   assert.equal((await call('/api/agents/' + g1.id, 'DELETE')).status, 400, 'the main chat cannot be deleted');
   await until(() => engine.agents[g1.id].status === 'idle');
 
@@ -448,10 +448,10 @@ assert.ok(engine2.agents[lead2.id]);
   await until(() => engine.agents[hp.id].status === 'idle' && engine.messages(hp.id).some((m) => /^Hired ?/.test(m.text || '')) , 8000);
   const org = (await call(`/api/projects/${hp.id}/org`)).body;
   assert.equal(org.id, hp.id);
-  assert.deepEqual(org.reports.map((n) => n.name), ['Frontend Engineer'], 'the engineer reports to the lead');
-  assert.deepEqual(org.reports[0].reports.map((n) => n.name), ['Brand Writer'], 'the writer reports to the engineer');
+  assert.deepEqual(org.reports.map((n) => n.title), ['Frontend Engineer'], 'the engineer reports to the lead');
+  assert.deepEqual(org.reports[0].reports.map((n) => n.title), ['Brand Writer'], 'the writer reports to the engineer');
   assert.equal(org.reports[0].departmentLabel, 'Engineering'); assert.equal(org.reports[0].reports[0].departmentLabel, 'Marketing');
-  const hired = Object.values(engine.agents).find((a) => a.name === 'Frontend Engineer');
+  const hired = Object.values(engine.agents).find((a) => a.title === 'Frontend Engineer');
   assert.ok(hired.member && hired.profile.reason && /Guardrails:/.test(hired.instructions) && hired.parentId === hp.id);
   assert.match(engine._system(hired), /Guardrails:/, 'the profile reaches the agent\'s instructions');
   assert.ok(engine.memory && engine._mkey(hired) === 'frontend-engineer');
@@ -460,10 +460,11 @@ assert.ok(engine2.agents[lead2.id]);
   // denied hires change nothing; partial approvals hire only the chosen ones; duplicates are refused
   const hp2 = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Site two', goal: 'please hire a team' })).body;
   await until(() => (ap = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'hire' && a.projectId === hp2.id)), 8000);
-  await call(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'approve', only: [1] });
+  assert.match(ap.items[1].name, /^[A-Z]/); assert.notEqual(ap.items[1].name, ap.items[1].title, 'a comic-book style name is suggested');
+  await call(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'approve', only: [1], names: { 1: 'Brenda Brand' } });
   await until(() => engine.agents[hp2.id].status === 'idle' && engine._roster(engine.agents[hp2.id]).length === 1, 8000);
   const only = engine._roster(engine.agents[hp2.id])[0];
-  assert.equal(only.name, 'Brand Writer'); assert.equal(only.reportsTo, hp2.id, 'falls back to the lead when the manager was not hired');
+  assert.equal(only.title, 'Brand Writer'); assert.equal(only.name, 'Brenda Brand', 'the human can overwrite the suggested name'); assert.ok(only.mdFile && /^name: Brenda Brand$/m.test(fsRead(only.mdFile, 'utf8')) && /Guardrails:/.test(fsRead(only.mdFile, 'utf8')), 'the profile is stored as Markdown'); assert.equal(only.reportsTo, hp2.id, 'falls back to the lead when the manager was not hired');
   const hp3 = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Site three', goal: 'please hire a team' })).body;
   await until(() => (ap = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'hire' && a.projectId === hp3.id)), 8000);
   await call(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'deny', note: 'not yet' });
@@ -482,6 +483,212 @@ assert.ok(engine2.agents[lead2.id]);
   const { buildProfile, inferDepartment } = await import('../src/roles.js');
   assert.equal(inferDepartment('SEO copywriter'), 'marketing'); assert.equal(inferDepartment('Backend developer'), 'engineering');
   assert.equal(buildProfile({ name: 'X', role: 'y', department: 'bogus' }).department, 'general');
+}
+
+// ---- approvals archive ----
+{
+  const rec = (status, hoursAgo) => { const id = 'arch' + status + hoursAgo; engine.store.data.approvals[id] = { id, agentId: 'x', agentName: 'x', projectId: 'x', status, kind: 'spawn', title: 't', createdAt: Date.now() - (hoursAgo + 1) * 3600000, decidedAt: Date.now() - hoursAgo * 3600000 }; return id; };
+  const a1 = rec('approved', 2), a2 = rec('denied', 30), a3 = rec('approved', 23.5), a4 = rec('denied', 24.5);
+  const list = (await call('/api/approvals')).body;
+  const get = (id) => list.find((x) => x.id === id);
+  assert.equal(get(a1).archived, false); assert.equal(get(a3).archived, false);
+  assert.equal(get(a2).archived, true); assert.equal(get(a4).archived, true, 'older than 24 hours is archived');
+  assert.ok(list.filter((x) => x.status === 'pending').every((x) => !x.archived));
+  for (const id of [a1, a2, a3, a4]) delete engine.store.data.approvals[id];
+}
+
+// ---- onboarding interview, the CEO, Markdown files, names ----
+let orgIds;
+{
+  const iv = async (answers) => (await call('/api/interview', 'POST', { answers })).body;
+  const q1 = await iv([]); assert.ok(q1.question && q1.choices.length && q1.asked === 1);
+  const q2 = await iv([{ q: q1.question, a: 'I run a home network and servers' }]); assert.ok(q2.question && q2.asked === 2);
+  const done = await iv([{ q: 'a', a: 'I run a home network and servers' }, { q: 'b', a: 'Proxmox and a firewall' }]);
+  assert.ok(done.done && done.overview && done.team.length === 2 && done.suggestedCeoName);
+  assert.deepEqual(done.team.map((t) => t.title), ['Network Engineer', 'Security Engineer']);
+  assert.ok(done.team.every((t) => /^[A-Z]/.test(t.name) && t.name !== t.title && /Guardrails:/.test(t.instructions) && t.reason));
+  // the AI failing must not block setup
+  const { fallbackInterview } = await import('../src/engine.js');
+  assert.ok(fallbackInterview([]).question && fallbackInterview([1, 2, 3, 4, 5].map(() => ({ q: 'q', a: 'home network and website' }))).team.length >= 2);
+
+  assert.equal(engine.orgDone, false);
+  const created = (await call('/api/org', 'POST', { ceoName: 'Captain Test', overview: 'Home network and a website.', team: done.team })).body;
+  assert.equal(created.hired, 2); assert.equal(engine.orgDone, true);
+  const ceo = engine.agents[created.ceo.id];
+  assert.equal(ceo.name, 'Captain Test'); assert.equal(ceo.title, 'CEO'); assert.equal(ceo.kind, 'general');
+  assert.equal((await call('/api/chat')).body.id, ceo.id, 'the main chat is the CEO');
+  const mem = engine._roster(ceo); orgIds = { ceo, ne: mem.find((m) => m.title === 'Network Engineer'), se: mem.find((m) => m.title === 'Security Engineer') };
+  assert.ok(fsExists(path.join(tmp, 'org', 'company.md')) && /Home network/.test(fsRead(path.join(tmp, 'org', 'company.md'), 'utf8')));
+  const md = fsRead(orgIds.ne.mdFile, 'utf8');
+  assert.match(md, /^---\nname: .+\ntitle: Network Engineer\ndepartment: Networking/); assert.match(md, /Hired because: They run a home network/); assert.match(md, /Guardrails:/);
+  assert.ok(orgIds.ne.mdFile.includes(path.join('agents', 'org')));
+  // the file is the source of truth: edits reach the agent on the next turn
+  assert.match(engine._system(orgIds.ne), /Never delete data/);
+  (await import('node:fs')).appendFileSync(orgIds.ne.mdFile, '\nALWAYS-USE-TABS-MARKER\n');
+  assert.match(engine._system(orgIds.ne), /ALWAYS-USE-TABS-MARKER/);
+  assert.match(engine._system(ceo), /About the human's setup/); assert.match(engine._system(ceo), /Network Engineer/);
+  // names can be overwritten; duplicates refused; the file follows
+  assert.equal((await call(`/api/agents/${orgIds.ne.id}/profile`, 'PUT', { name: 'Rex Router' })).body.name, 'Rex Router');
+  assert.match(fsRead(orgIds.ne.mdFile, 'utf8'), /^name: Rex Router$/m); assert.match(fsRead(orgIds.ne.mdFile, 'utf8'), /^# Rex Router — Network Engineer$/m);
+  assert.equal((await call(`/api/agents/${orgIds.se.id}/profile`, 'PUT', { name: 'rex router' })).status, 409);
+  assert.equal((await call(`/api/agents/${orgIds.ne.id}/profile`)).body.title, 'Network Engineer');
+  assert.equal((await call(`/api/agents/${ceo.id}/profile`, 'PUT', { text: '---\nname: Captain Test\n---\n# Captain Test\nDecide well.\n' })).status, 200);
+  // the CEO hands a job to the right person, who checks with the other first
+  await call(`/api/agents/${ceo.id}/messages`, 'POST', { text: 'assign-to:Network_Engineer check the firewall please' });
+  await until(() => engine.messages(ceo.id).some((m) => m.role === 'report') && engine.agents[ceo.id].status === 'idle', 10000);
+  assert.ok(engine.messages(orgIds.se.id).some((m) => /Pre-check requested by Rex Router/.test(m.text || '')), 'the security engineer was consulted');
+  assert.ok(engine.messages(orgIds.ne.id).some((m) => /^Task from /.test(m.text || '')));
+  // a new project can use the organisation as its team: the same people
+  const pr = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, team: 'org', name: 'From org' })).body;
+  assert.deepEqual(engine._roster(engine.agents[pr.id]).map((m) => m.title).sort(), ['Network Engineer', 'Security Engineer']);
+  assert.deepEqual(engine._roster(engine.agents[pr.id]).map((m) => m.name).sort(), ['Rex Router', orgIds.se.name].sort(), 'the same people, with the same names and memory');
+  await call('/api/agents/' + pr.id, 'DELETE');
+}
+
+// ---- team meetings ----
+{
+  assert.equal((await call('/api/settings', 'PUT', { meeting: { frequency: 'hourly' } })).status, 400);
+  assert.equal((await call('/api/settings', 'PUT', { meeting: { frequency: 'daily', time: '25:00' } })).status, 400);
+  const r = (await call('/api/settings', 'PUT', { meeting: { frequency: 'daily', time: '00:00' } })).body; assert.equal(r.meeting.frequency, 'daily'); assert.ok(r.meeting.last > 0);
+  assert.equal((await call('/api/meetings/run', 'POST', {})).status, 202);
+  let list; await until(async () => (list = (await call('/api/meetings')).body).length >= 1, 10000);
+  const text = (await call(`/api/meetings/${list[0].scope}/${list[0].date}`)).body.text;
+  assert.match(text, /# Team meeting/); assert.match(text, /## Updates/);
+  for (const a of [orgIds.ceo, orgIds.ne, orgIds.se]) assert.ok(text.includes(engine.agents[a.id].name), `${engine.agents[a.id].name} spoke at the meeting`);
+  assert.match(text, /Reactions and follow-ups/); assert.match(text, /Noted\./);
+  assert.ok(engine.memory.items.some((m) => m.who === 'Team meeting' && /Team meeting/.test(m.text)), 'everyone can recall the meeting');
+  assert.ok(!engine.messages(orgIds.ceo.id).some((m) => m.role === 'agent' && /TEAM MEETING/.test(m.text)));
+  assert.ok(engine.messages(orgIds.ne.id).some((m) => m.from?.name === 'Team meeting'));
+  // the schedule: holds one when the time has passed, only once
+  engine.store.data.settings.meeting = { frequency: 'daily', time: '03:00', weekday: 0, last: Date.now() - 2 * 86400000 };
+  const ran = await engine.tickMeetings(new Date());
+  assert.ok(Array.isArray(ran) && ran.length >= 1, 'a due meeting is held');
+  assert.equal(await engine.tickMeetings(new Date()), null, 'but not twice');
+  engine.store.data.settings.meeting = { frequency: 'off', time: '00:00', weekday: 0, last: 0 };
+  assert.equal(await engine.tickMeetings(new Date()), null);
+}
+
+// ---- secrets vault ----
+{
+  const SECRET = 'S3cr3t-Value-123!';
+  assert.equal((await call('/api/vault')).body.exists, false);
+  assert.equal((await call('/api/vault/init', 'POST', { passphrase: 'short' })).status, 400);
+  assert.equal((await call('/api/vault/secrets', 'POST', { name: 'x', value: 'y' })).status, 409, 'no vault yet');
+  assert.equal((await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' })).status, 201);
+  assert.equal((await call('/api/vault/init', 'POST', { passphrase: 'another long one' })).status, 409);
+  const sec = (await call('/api/vault/secrets', 'POST', { name: 'NPM admin', value: SECRET, note: 'Nginx Proxy Manager login' })).body;
+  assert.equal(JSON.stringify(sec).includes(SECRET), false, 'values are never returned');
+  assert.equal((await call('/api/vault/secrets', 'POST', { name: 'npm ADMIN', value: 'x' })).status, 409);
+  const raw = fsRead(path.join(tmp, 'vault.json'), 'utf8');
+  assert.equal(raw.includes(SECRET), false, 'the vault file holds no plaintext'); assert.equal(raw.includes('correct horse'), false);
+  assert.equal((fsStat(path.join(tmp, 'vault.json')).mode & 0o777), 0o600);
+  assert.equal(JSON.stringify((await call('/api/vault')).body).includes(SECRET), false);
+  // lock / wrong passphrase / unlock
+  await call('/api/vault/lock', 'POST', {});
+  assert.equal((await call('/api/vault')).body.unlocked, false);
+  assert.equal((await call('/api/vault/secrets', 'POST', { name: 'y', value: 'z' })).status, 423, 'locked vaults cannot be written');
+  assert.equal((await call('/api/vault/unlock', 'POST', { passphrase: 'wrong wrong wrong' })).status, 403);
+  assert.equal((await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' })).status, 200);
+  assert.ok((await call('/api/vault')).body.eligible.some((e) => e.key === 'network-engineer'));
+  // assign to the network engineer only
+  await call('/api/vault/secrets/' + sec.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });
+  const ne = orgIds.ne, se = orgIds.se;
+  const ask = async (agent, text) => { const n = engine.messages(agent.id).length; await call(`/api/agents/${agent.id}/messages`, 'POST', { text }); return n; };
+  const pendingSecret = async () => { let f; await until(() => (f = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'secret')), 8000); return f; };
+  const idle = (a) => until(() => engine.agents[a.id].status === 'idle' && !engine.approvals().some((x) => x.status === 'pending' && x.agentId === a.id), 8000);
+
+  // not assigned -> no approval is even offered
+  await ask(se, 'use-secret:NPM_admin please'); await idle(se);
+  assert.ok(engine.messages(se.id).some((m) => /has not been assigned to you/.test(m.text || '') || m.role === 'report'), 'unassigned agents are refused');
+  assert.equal(engine.approvals().some((a) => a.status === 'pending' && a.kind === 'secret'), false);
+  assert.ok(!engine.messages(se.id).some((m) => (m.text || '').includes(SECRET)));
+  // assigned, allow once
+  await ask(ne, 'use-secret:NPM_admin please');
+  let ap1 = await pendingSecret(); assert.equal(ap1.secret, 'NPM admin'); assert.match(ap1.detail, /to log in/);
+  await call(`/api/approvals/${ap1.id}/decide`, 'POST', { decision: 'approve', mode: 'once' });
+  await idle(ne);
+  const texts = engine.messages(ne.id).map((m) => m.text || '').join('\n');
+  assert.match(texts, /Logged in using the secret: \[secret:NPM admin\]/, 'the agent used it, and the stored chat is redacted');
+  assert.equal(texts.includes(SECRET), false); assert.equal(engine.logs(ne.id).join('\n').includes(SECRET), false);
+  assert.equal(engine.leases.size, 0, 'a one-time secret is forgotten after the task');
+  assert.equal(engine.vault.list()[0].assigned[0].grant, 'ask');
+  // deny
+  await ask(ne, 'use-secret:NPM_admin again');
+  const ap2 = await pendingSecret(); await call(`/api/approvals/${ap2.id}/decide`, 'POST', { decision: 'deny', note: 'not now' }); await idle(ne);
+  assert.ok(engine.messages(ne.id).some((m) => /did not allow use of "NPM admin": not now/.test(m.text || '')));
+  // always
+  await ask(ne, 'use-secret:NPM_admin third');
+  const ap3 = await pendingSecret(); await call(`/api/approvals/${ap3.id}/decide`, 'POST', { decision: 'approve', mode: 'always' }); await idle(ne);
+  assert.equal(engine.vault.list()[0].assigned[0].grant, 'always');
+  const before = engine.approvals().filter((a) => a.kind === 'secret').length;
+  await ask(ne, 'use-secret:NPM_admin fourth'); await idle(ne);
+  assert.equal(engine.approvals().filter((a) => a.kind === 'secret').length, before, 'an always-allowed secret does not ask again');
+  assert.ok(engine.logs(ne.id).some((l) => /using secret "NPM admin" \(always allowed\)/.test(l)));
+  // revoke back to asking
+  await call('/api/vault/secrets/' + sec.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });
+  assert.equal(engine.vault.list()[0].assigned[0].grant, 'ask');
+  // locked vault: nothing is released
+  await call('/api/vault/lock', 'POST', {});
+  await ask(ne, 'use-secret:NPM_admin fifth'); await idle(ne);
+  assert.ok(engine.messages(ne.id).some((m) => /vault is locked/.test(m.text || '')));
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  // pasting a secret into a chat does not store it either
+  await call(`/api/agents/${ne.id}/messages`, 'POST', { text: `the password is ${SECRET}` }); await idle(ne);
+  assert.equal(engine.messages(ne.id).map((m) => m.text || '').join('\n').includes(SECRET), false);
+  // nothing on disk contains it
+  engine.store.flush(); engine.memory.flush();
+  for (const f of ['state.json', 'memory.json', 'vault.json']) assert.equal(fsRead(path.join(tmp, f), 'utf8').includes(SECRET), false, `${f} has no plaintext secret`);
+  assert.equal((await call('/api/vault/secrets/' + sec.id, 'DELETE')).status, 200);
+  assert.equal((await call('/api/vault')).body.secrets.length, 0);
+}
+
+// ---- update check: download first, install on request ----
+{
+  const { Updater, cmpVer } = await import('../src/updater.js');
+  assert.equal(cmpVer('0.5.0', '0.4.9'), 1); assert.equal(cmpVer('1.0.0', '0.99.9'), 1); assert.equal(cmpVer('0.4.0', '0.4.0'), 0); assert.equal(cmpVer('v0.3.1', '0.4.0'), -1);
+  const gitc = (cwd, ...a) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...a], { cwd, encoding: 'utf8' });
+  const rem = path.join(tmp, 'upd-remote.git'), work = path.join(tmp, 'upd-work'), app = path.join(tmp, 'upd-app');
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', rem]);
+  execFileSync('git', ['clone', '-q', rem, work]);
+  const put = (v, log) => { (async () => { const fs = await import('node:fs'); fs.writeFileSync(path.join(work, 'package.json'), JSON.stringify({ name: 'x', version: v })); fs.writeFileSync(path.join(work, 'CHANGELOG.md'), `# Changelog\n\n${log}`); })(); };
+  const fsm = await import('node:fs');
+  const write = (v, log) => { fsm.writeFileSync(path.join(work, 'package.json'), JSON.stringify({ name: 'x', version: v })); fsm.writeFileSync(path.join(work, 'CHANGELOG.md'), `# Changelog\n\n${log}`); gitc(work, 'add', '-A'); gitc(work, 'commit', '-qm', v); gitc(work, 'push', '-q', 'origin', 'HEAD:main'); };
+  write('0.1.0', '## 0.1.0\n- first\n');
+  execFileSync('git', ['clone', '-q', rem, app]);
+  const up = new Updater({ dir: app, current: '0.1.0' });
+  assert.equal((await up.check()).state, 'uptodate');
+  write('0.2.0', '## 0.2.0\n- shiny new thing\n\n## 0.1.0\n- first\n');
+  const st = await up.check();
+  assert.equal(st.state, 'ready'); assert.equal(st.latest, '0.2.0'); assert.match(st.notes, /shiny new thing/); assert.doesNotMatch(st.notes, /first/);
+  assert.equal(JSON.parse(fsm.readFileSync(path.join(app, 'package.json'), 'utf8')).version, '0.1.0', 'downloading changes nothing that is running');
+  const r1 = await up.install(); assert.equal(r1.version, '0.2.0');
+  assert.equal(JSON.parse(fsm.readFileSync(path.join(app, 'package.json'), 'utf8')).version, '0.2.0');
+  assert.equal((await new Updater({ dir: app, current: '0.2.0' }).check()).state, 'uptodate');
+  await assert.rejects(() => new Updater({ dir: app, current: '0.2.0' }).install(), /no downloaded update/);
+  // a copy that is not a git checkout, and one with its own commits
+  const plain = path.join(tmp, 'upd-plain'); fsm.mkdirSync(plain);
+  assert.equal((await new Updater({ dir: plain, current: '0.1.0' }).check()).state, 'unsupported');
+  gitc(app, 'commit', '--allow-empty', '-qm', 'local'); write('0.3.0', '## 0.3.0\n- more\n\n## 0.2.0\n- shiny\n');
+  const dv = await new Updater({ dir: app, current: '0.2.0' }).check(); assert.equal(dv.state, 'error'); assert.match(dv.error, /local changes/);
+  // over HTTP: check, then install restarts the app
+  const app2 = path.join(tmp, 'upd-app2'); execFileSync('git', ['clone', '-q', rem, app2]); gitc(app2, 'reset', '-q', '--hard', 'HEAD~1');
+  let restarts = 0;
+  const up2 = new Updater({ dir: app2, current: '0.2.0' });
+  const srv2 = createServer(engine, { updater: up2, restart: () => { restarts++; } });
+  await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
+  const b2 = `http://127.0.0.1:${srv2.address().port}`;
+  const c2 = async (p, m = 'GET', body) => { const r = await fetch(b2 + p, { method: m, headers: { 'content-type': 'application/json' }, body: body && JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+  assert.equal((await c2('/api/update/install', 'POST', {})).status, 409, 'nothing downloaded yet');
+  assert.equal((await c2('/api/update/check', 'POST', {})).body.state, 'ready');
+  assert.equal((await c2('/api/update')).body.latest, '0.3.0');
+  assert.equal((await c2('/api/state')).body.update.state, 'ready');
+  const busyAgent = Object.values(engine.agents)[0]; const was = busyAgent.status; busyAgent.status = 'working';
+  const blocked = await c2('/api/update/install', 'POST', {}); assert.equal(blocked.status, 409); assert.ok(blocked.body.busy >= 1, 'asks before interrupting working agents');
+  assert.equal(restarts, 0);
+  busyAgent.status = was;
+  const done2 = await c2('/api/update/install', 'POST', {}); assert.equal(done2.body.version, '0.3.0'); assert.equal(done2.body.restarting, true);
+  await until(() => restarts === 1, 3000);
+  srv2.close();
 }
 
 // ---- LAN mode: reachable by IP with a token, still locked down ----

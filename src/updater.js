@@ -1,0 +1,92 @@
+// Update checker for installs made from GitHub (the install script clones the repo).
+//
+//   check()   fetches the newest commits from GitHub into the local git store. That is the "download":
+//             nothing in the running app is changed. If the newest version is higher than ours the
+//             state becomes "ready" and the interface shows an Install button.
+//   install() fast-forwards the checkout to what was downloaded (and refreshes dependencies if the
+//             project ever has any). The caller then restarts the app.
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { run } from './exec.js';
+
+const G = (dir, args, o = {}) => run('git', args, { cwd: dir, env: { GIT_TERMINAL_PROMPT: '0', ...(o.env || {}) }, timeout: o.timeout ?? 120000 });
+
+export function cmpVer(a, b) {
+  const p = (s) => String(s || '0').replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0);
+  const x = p(a), y = p(b);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0) ? 1 : -1;
+  return 0;
+}
+
+// The part of the changelog between the new version and the one we have.
+export function notesBetween(changelog, current) {
+  const out = [];
+  for (const block of String(changelog).split(/^## /m).slice(1)) {
+    const ver = block.split('\n')[0].trim();
+    if (cmpVer(ver, current) <= 0) break;
+    out.push(`## ${block.trim()}`);
+  }
+  return out.join('\n\n').slice(0, 4000);
+}
+
+export class Updater {
+  constructor({ dir, current, branch = 'main', authArgs = () => [] }) {
+    this.dir = dir; this.branch = branch; this.authArgs = authArgs;
+    this.s = { state: 'idle', current, latest: null, checkedAt: null, notes: '', error: '' };
+    this.busy = null;
+  }
+  get status() { return { ...this.s }; }
+
+  async _supported() {
+    const inside = await G(this.dir, ['rev-parse', '--is-inside-work-tree']);
+    if (inside.code !== 0) return 'This copy of Apiary was not installed with git, so it cannot update itself. Re-run the install command instead.';
+    const remote = await G(this.dir, ['remote', 'get-url', 'origin']);
+    if (remote.code !== 0) return 'This copy of Apiary has no GitHub remote to update from.';
+    return '';
+  }
+
+  check() {
+    if (this.busy) return this.busy;
+    this.busy = this._check().finally(() => { this.busy = null; });
+    return this.busy;
+  }
+  async _check() {
+    const s = this.s;
+    if (s.state === 'installing') return this.status;
+    const why = await this._supported();
+    if (why) { Object.assign(s, { state: 'unsupported', error: why, checkedAt: Date.now() }); return this.status; }
+    s.state = 'checking'; s.error = '';
+    const f = await G(this.dir, [...this.authArgs(), 'fetch', '--quiet', 'origin', this.branch], { timeout: 300000 });
+    s.checkedAt = Date.now();
+    if (f.code !== 0) { Object.assign(s, { state: 'error', error: `Could not reach GitHub: ${(f.stderr || f.stdout).trim().slice(-300) || 'unknown error'}` }); return this.status; }
+    const pkg = await G(this.dir, ['show', `origin/${this.branch}:package.json`]);
+    let latest; try { latest = JSON.parse(pkg.stdout).version; } catch { /* handled below */ }
+    if (!latest) { Object.assign(s, { state: 'error', error: 'Could not read the version on GitHub.' }); return this.status; }
+    s.latest = latest;
+    if (cmpVer(latest, s.current) <= 0) { Object.assign(s, { state: 'uptodate', notes: '' }); return this.status; }
+    const ff = await G(this.dir, ['merge-base', '--is-ancestor', 'HEAD', `origin/${this.branch}`]);
+    if (ff.code !== 0) { Object.assign(s, { state: 'error', error: 'This copy has local changes that GitHub does not have, so it cannot be updated automatically. Update it by hand with git.' }); return this.status; }
+    const log = await G(this.dir, ['show', `origin/${this.branch}:CHANGELOG.md`]);
+    Object.assign(s, { state: 'ready', notes: log.code === 0 ? notesBetween(log.stdout, s.current) : '' });
+    return this.status;
+  }
+
+  async install() {
+    const s = this.s;
+    if (s.state !== 'ready') throw Object.assign(new Error('There is no downloaded update to install. Check for updates first.'), { status: 409 });
+    s.state = 'installing'; s.error = '';
+    try {
+      const m = await G(this.dir, ['merge', '--ff-only', `origin/${this.branch}`], { timeout: 120000 });
+      if (m.code !== 0) throw new Error(`Could not apply the update: ${(m.stderr || m.stdout).trim().slice(-300)}`);
+      const pkg = JSON.parse(readFileSync(path.join(this.dir, 'package.json'), 'utf8'));
+      if (Object.keys(pkg.dependencies || {}).length) {
+        const n = await run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: this.dir, timeout: 600000 });
+        if (n.code !== 0) throw new Error(`npm install failed: ${(n.stderr || n.stdout).trim().slice(-300)}`);
+      }
+      return { version: pkg.version };
+    } catch (e) {
+      Object.assign(s, { state: 'ready', error: e.message });   // still downloaded; the person can retry
+      throw Object.assign(e, { status: 500 });
+    }
+  }
+}

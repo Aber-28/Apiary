@@ -36,3 +36,19 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `GET /api/memory/preview/:agentId?q=` | The MEMORY text an agent would be given |
 | `PUT /api/settings` | also accepts `memory` (true/false) |
 
+
+
+## 0.5.0 endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/api/interview` | Next interview question, or the proposed team when done |
+| POST | `/api/org` | Create the CEO and team from the interview |
+| GET/PUT | `/api/agents/:id/profile` | Read or edit an agent's Markdown profile and name |
+| GET | `/api/meetings`, `/api/meetings/:scope/:date` | List and read minutes |
+| POST | `/api/meetings/run` | Hold a meeting now |
+| GET | `/api/vault` | Vault status, secret names and eligible agents (never values) |
+| POST | `/api/vault/init`, `/unlock`, `/lock`, `/secrets` | Create, unlock, lock, add |
+| PUT/DELETE | `/api/vault/secrets/:id` | Edit, assign, delete |
+| GET | `/api/update` | Update status |
+| POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install |

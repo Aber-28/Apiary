@@ -59,17 +59,40 @@ export function inferDepartment(...texts) {
 const list = (a) => (Array.isArray(a) ? a : a ? [a] : []).map((x) => String(x).trim()).filter(Boolean).slice(0, 12);
 
 // Everything needed to create the agent, written out in full.
-export function buildProfile({ name, role, department, reason, instructions, guardrails }) {
-  const dept = DEPARTMENTS[department] ? department : inferDepartment(name, role);
+export function buildProfile({ name, title, role, department, reason, instructions, guardrails }) {
+  const dept = DEPARTMENTS[department] ? department : inferDepartment(title, name, role);
   const d = DEPARTMENTS[dept];
   const rules = [...COMMON_GUARDRAILS, ...d.guardrails, ...list(guardrails)];
   const custom = String(instructions || '').trim().slice(0, 3000);
   const text = [
-    `You are ${name}, ${role || d.label + ' specialist'}, in the ${d.label} department.`,
+    `You are ${name}${title ? `, the ${title}` : ''}${role ? ` (${role})` : ''}, in the ${d.label} department.`,
     reason ? `You were hired because: ${String(reason).trim().slice(0, 400)}` : '',
     d.work,
     custom ? `Specific instructions:\n${custom}` : '',
     `Guardrails:\n${rules.map((r) => '- ' + r).join('\n')}`,
   ].filter(Boolean).join('\n\n');
-  return { department: dept, departmentLabel: d.label, role: String(role || '').slice(0, 300), reason: String(reason || '').slice(0, 400), custom, guardrails: rules, instructions: text };
+  return { department: dept, departmentLabel: d.label, title: String(title || '').slice(0, 60), role: String(role || '').slice(0, 300), reason: String(reason || '').slice(0, 400), custom, guardrails: rules, instructions: text };
+}
+
+// ---- default names: comic-book style codenames (original, not tied to any existing character) ----
+const NAME_POOLS = {
+  leadership: ['Captain Atlas', 'Commander Vega', 'Major Meridian', 'Chief Zenith'],
+  engineering: ['Gadget Gus', 'Doctor Sprocket', 'Professor Voltage', 'Pixel Pete', 'Wrench Wanda', 'Turbo Tess'],
+  networking: ['Router Rex', 'Captain Packet', 'Bridge Bella', 'Signal Sam', 'Beacon Bea'],
+  security: ['Shadow Shield', 'Sentinel Sloane', 'Vault Vera', 'Guardian Gray', 'Lockhart Lux'],
+  research: ['Professor Quill', 'Doctor Dewey', 'Scout Sage', 'Lens Luna', 'Archive Ari'],
+  marketing: ['Buzz Beacon', 'Banner Bree', 'Echo Eddie', 'Spark Sienna', 'Mega Mabel'],
+  design: ['Palette Pia', 'Doodle Dax', 'Sketch Skye', 'Prism Paz'],
+  data: ['Cipher Cleo', 'Tally Tom', 'Matrix Mo', 'Query Quinn'],
+  product: ['Compass Cal', 'Roadmap Rae', 'Pilot Pax'],
+  operations: ['Cog Connie', 'Relay Ray', 'Steady Stan', 'Anchor Ana'],
+  finance: ['Penny Prime', 'Ledger Lou', 'Budget Bo'],
+  legal: ['Verdict Vic', 'Clause Clara', 'Gavel Gwen'],
+  general: ['Nova', 'Blaze', 'Comet', 'Ranger', 'Zephyr', 'Rocket', 'Maverick', 'Ember', 'Orbit', 'Flint'],
+};
+export function pickName(department, taken = new Set()) {
+  const used = new Set([...taken].map((n) => String(n).toLowerCase()));
+  for (const pool of [NAME_POOLS[department] || [], NAME_POOLS.general, ...Object.values(NAME_POOLS)]) for (const n of pool) if (!used.has(n.toLowerCase())) return n;
+  let i = 2; while (used.has(`nova ${i}`)) i++;
+  return `Nova ${i}`;
 }

@@ -4,7 +4,7 @@
 //   onActivity(label)  short "what is it doing now" label
 //   onLog(line)        a line for the Terminal view
 import { spawn } from 'node:child_process';
-import { accessSync, constants, writeFileSync } from 'node:fs';
+import { accessSync, constants, writeFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -203,7 +203,7 @@ const codexApi = {
 // ---------- mock: deterministic fake agent for tests and demos ----------
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
 const mock = {
-  async run({ agent, prompt, signal, onText, onActivity, onLog }) {
+  async run({ agent, prompt, system, signal, onText, onActivity, onLog }) {
     const sleep = (ms) => new Promise((r, j) => {
       const t = setTimeout(r, ms);
       signal?.addEventListener('abort', () => { clearTimeout(t); j(abortErr()); }, { once: true });
@@ -212,7 +212,33 @@ const mock = {
     const say = async (s) => { for (const w of s.split(/(?<= )/)) { onText(w); await sleep(delay); } };
     let out;
     onLog(`$ mock ${agent.name}`);
-    if (prompt.startsWith('Replies from teammates') || (agent.parentId && /Replies from teammates|Notes from Apiary:/.test(prompt))) {
+    if (/remember this:/i.test(prompt) && !prompt.startsWith('Message from')) {
+      const what = /remember this:\s*(.+)/i.exec(prompt)[1].replace(/["\\\n]/g, ' ');
+      out = 'Noted.\n\n```apiary-remember\n{"text":"' + what + '","scope":"' + (/project note/i.test(prompt) ? 'project' : /global note/i.test(prompt) ? 'global' : 'agent') + '"}\n```';
+    } else if (/what do you remember/i.test(prompt)) {
+      const mem = (system || '').includes('MEMORY:') ? (system || '').slice((system || '').indexOf('MEMORY:')) : '(nothing)';
+      out = 'I remember:\n' + mem;
+    } else if (prompt.includes('Pre-check requested by')) {
+      onActivity('Reviewing');
+      if (/wipe/i.test(prompt) && agent.name === 'Security') out = 'VERDICT: BLOCK\nREASON: Wiping the rules would expose everything.';
+      else if (/firewall/i.test(prompt) && agent.name === 'Security') out = 'VERDICT: CONDITIONS\nREASON: The current rules must be reviewed first.\nPREREQUISITE: Review and write down the current firewall rules';
+      else if (/garble/i.test(prompt) && agent.name === 'Research') out = 'Sounds fine to me.';
+      else out = 'VERDICT: GO\nREASON: Nothing in my area stands in the way.';
+    } else if (prompt.includes('Prerequisite for ') && agent.member) {
+      onActivity('Doing the prerequisite');
+      if (/failprereq/i.test(prompt)) out = 'FAILED: could not complete it.';
+      else { if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.name)}-prereq.txt`), 'prerequisite done\n'); out = 'DONE: reviewed the rules and wrote them to a file.'; }
+    } else if (prompt.startsWith('Task from ') && agent.member) {
+      onActivity('Working');
+      const sees = agent.cwd && existsSync(path.join(agent.cwd, 'security-prereq.txt'));
+      if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.name)}.txt`), `Work by ${agent.name}\n`);
+      out = `Finished the job. Sees prerequisite: ${sees ? 'yes' : 'no'}. Checks: ${(prompt.match(/^- \w+: \w+/gm) || []).join(' | ')}`;
+    } else if (!agent.parentId && agent.kind !== 'general' && !/Notes from Apiary:|^Nothing was run|^Reports from/m.test(prompt) && /\bhire\b/i.test(prompt)) {
+      out = 'I need specialists.\n\n```apiary-hire\n[{"name":"Frontend Engineer","role":"Builds the website UI","department":"engineering","reason":"The site needs a UI built and tested"},{"name":"Brand Writer","role":"Writes the site copy","department":"marketing","reason":"Copy needs a consistent voice","reportsTo":"Frontend Engineer"}]\n```';
+    } else if (agent.team && !prompt.startsWith('Reports from your sub-agents') && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && /network|research/i.test(prompt)) {
+      const to = /network/i.test(prompt) ? 'Networking' : 'Research';
+      out = 'Handing this to ' + to + '.\n\n```apiary-assign\n{"to":"' + to + '","task":"' + prompt.slice(0, 80).replace(/["\\\n]/g, ' ') + '"}\n```';
+    } else if (prompt.startsWith('Replies from teammates') || (agent.parentId && /Replies from teammates|Notes from Apiary:/.test(prompt))) {
       onActivity('Reading replies');
       out = `Teammate replied. ${prompt.split('\n').filter((l) => l.startsWith('### ')).join(' ')} | ${prompt.includes('Not sent') ? 'blocked' : 'ok'}`;
     } else if (agent.parentId && /ask-(writer|lead|nobody)/.test(prompt) && !prompt.startsWith('Message from')) {

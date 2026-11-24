@@ -16,7 +16,7 @@ export class Store {
         console.error('Could not read state file, starting fresh:', e.message);
       }
     }
-    for (const k of ['agents', 'messages', 'logs', 'defs', 'approvals']) this.data[k] ||= {};
+    for (const k of ['agents', 'messages', 'logs', 'defs', 'approvals', 'teams']) this.data[k] ||= {};
     this.data.settings ||= {};
     this._t = null;
   }

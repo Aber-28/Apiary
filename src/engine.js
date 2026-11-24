@@ -10,13 +10,15 @@
 // each turn, and the parent merges them when they report back.
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync, existsSync, statSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { providers, which } from './providers.js';
 import { HOME } from './store.js';
 import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
+import { Memory, parseRemember } from './memory.js';
+import { buildProfile, DEPARTMENTS } from './roles.js';
 
 const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
@@ -27,6 +29,8 @@ const ENV_LIMITS = {
 const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], maxPeerMessages: [0, 200] };
 const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
+const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
+const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
 const id8 = () => randomUUID().slice(0, 8);
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'agent';
@@ -44,7 +48,9 @@ export class Engine extends EventEmitter {
     this.pending = new Map();  // approvalId -> { resolve, reject }
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
+    this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
+    this.seedTeams();
     for (const r of Object.values(store.data.approvals)) if (r.status === 'pending') r.status = 'expired'; // nobody is waiting any more
   }
 
@@ -117,6 +123,22 @@ export class Engine extends EventEmitter {
     if (onboardingDone !== undefined) st.onboardingDone = !!onboardingDone;
     this.store.save();
   }
+  get memoryEnabled() { return this.store.data.settings.memory !== false; }
+  setMemoryEnabled(v) { this.store.data.settings.memory = !!v; this.store.save(); return this.memoryEnabled; }
+  _mkey(a) { return a.memKey || slug(a.name); }
+  _pkey(a) { const r = this.rootOf(a); return r.git?.repo || r.cwd || r.id; }
+  // Remember one finished task for this agent, its project, and (through the project) its teammates.
+  _record(agent, userText, from, final) {
+    if (!this.memoryEnabled || !final || !String(final).trim()) return;
+    const asked = from ? `${from.name} asked` : 'Task';
+    this.memory.add({ kind: 'episode', agent: this._mkey(agent), project: this._pkey(agent), who: agent.name, text: `${asked}: ${userText.replace(/\s+/g, ' ').slice(0, 500)} → ${String(final).replace(/\s+/g, ' ').slice(0, 800)}` });
+  }
+  memoryPreview(agentId, q = '') {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    return this.memory.context(this._mkey(a), this._pkey(a), q, { budget: 6000 });
+  }
+
   defaultModel(provider) { return provider === 'mock' ? '' : this.connections.get(provider).model || ''; }
 
   // ---------- providers ----------
@@ -159,8 +181,166 @@ export class Engine extends EventEmitter {
     this.store.save();
   }
 
+  // ---------- the general chat (not part of any project) ----------
+  async general() {
+    let a = Object.values(this.agents).find((x) => x.kind === 'general');
+    if (a) return a;
+    const provider = this.defaultProvider || this.available.find((p) => p.id !== 'mock')?.id || this.available[0]?.id;
+    if (!provider) throw httpErr(400, 'Connect an AI first (Connections).');
+    const cwd = path.join(HOME, 'workspaces', 'general');
+    mkdirSync(cwd, { recursive: true });
+    a = this._add({ id: id8(), name: 'Assistant', role: 'General assistant', provider, method: this.resolveMethod(provider), model: this.defaultModel(provider), cwd, access: 'safe', parentId: null, depth: 0, approvals: true, kind: 'general', memKey: 'assistant' });
+    return a;
+  }
+
+  // ---------- organisation chart ----------
+  org(rootId) {
+    const root = this.agents[rootId];
+    if (!root) throw httpErr(404, 'No such project');
+    const node = (a) => ({ id: a.id, name: a.name, role: a.role, department: a.department || null, departmentLabel: a.department ? DEPARTMENTS[a.department]?.label : null, status: a.status, hired: !!a.hiredAt, reason: a.profile?.reason || '', reports: [] });
+    const members = this._roster(root), byId = new Map([[root.id, node(root)], ...members.map((m) => [m.id, node(m)])]);
+    for (const m of members) { const up = byId.get(m.reportsTo) || byId.get(root.id); up.reports.push(byId.get(m.id)); }
+    byId.get(root.id).helpers = Object.values(this.agents).filter((a) => a.parentId && !a.member && this.rootOf(a).id === root.id).length;
+    return byId.get(root.id);
+  }
+
+  // ---------- project files ----------
+  _fileRoot(agentId) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    return realpathSync(this.rootOf(a).cwd);
+  }
+  _safePath(agentId, rel = '') {
+    const root = this._fileRoot(agentId);
+    const full = path.resolve(root, String(rel).replace(/^\/+/, ''));
+    if (full !== root && !full.startsWith(root + path.sep)) throw httpErr(400, 'That path is outside the project');
+    const parts = path.relative(root, full).split(path.sep);
+    if (parts.includes('.git')) throw httpErr(400, 'The .git folder is managed by Apiary');
+    // resolve symlinks on the part that exists so a link cannot lead outside
+    let probe = full; while (!existsSync(probe) && probe !== root) probe = path.dirname(probe);
+    const real = realpathSync(probe);
+    if (real !== root && !real.startsWith(root + path.sep)) throw httpErr(400, 'That path is outside the project');
+    return { root, full };
+  }
+  files(agentId, rel = '') {
+    const { root, full } = this._safePath(agentId, rel);
+    let st; try { st = statSync(full); } catch { throw httpErr(404, 'No such folder'); }
+    if (!st.isDirectory()) throw httpErr(400, 'Not a folder');
+    const items = readdirSync(full, { withFileTypes: true }).filter((e) => !['.git', 'node_modules'].includes(e.name)).map((e) => {
+      const s = statSync(path.join(full, e.name));
+      return { name: e.name, type: e.isDirectory() || s.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
+    }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+    return { path: path.relative(root, full), items };
+  }
+  readFile(agentId, rel) {
+    const { full } = this._safePath(agentId, rel);
+    let st; try { st = statSync(full); } catch { throw httpErr(404, 'No such file'); }
+    if (!st.isFile()) throw httpErr(400, 'Not a file');
+    return { full, size: st.size, name: path.basename(full) };
+  }
+  writeFile(agentId, rel, content) {
+    if (typeof content !== 'string') throw httpErr(400, 'content must be text');
+    if (Buffer.byteLength(content) > 2_000_000) throw httpErr(413, 'Files up to 2 MB can be saved here');
+    const { full, root } = this._safePath(agentId, rel);
+    if (full === root) throw httpErr(400, 'Give the file a name');
+    mkdirSync(path.dirname(full), { recursive: true });
+    writeFileSync(full, content);
+    return { path: path.relative(root, full) };
+  }
+  deleteFile(agentId, rel) {
+    const { full, root } = this._safePath(agentId, rel);
+    if (full === root) throw httpErr(400, 'Cannot delete the project folder');
+    let st; try { st = statSync(full); } catch { throw httpErr(404, 'No such file'); }
+    if (st.isDirectory()) throw httpErr(400, 'Only files can be deleted here');
+    unlinkSync(full);
+  }
+
+  // ---------- hiring ----------
+  // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
+  async _hire(proposer, hires, notes) {
+    const root = this.rootOf(proposer);
+    const roster = this._roster(root);
+    const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
+    const ok = [];
+    for (const h of hires.slice(0, 8)) {
+      const name = String(h.name).trim().slice(0, 40);
+      if (taken.has(name.toLowerCase())) { notes.push(`"${name}" is already on the team, so no one was hired for that. Use apiary-assign to give them work.`); continue; }
+      if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { notes.push(`Could not hire "${name}": the team is at its size limit.`); continue; }
+      taken.add(name.toLowerCase());
+      const provider = this.available.some((p) => p.id === h.provider) ? h.provider : root.provider;
+      const want = String(h.reportsTo || '').toLowerCase();
+      const up = [root, ...roster].find((m) => m.name.toLowerCase() === want) || ok.find((o) => o.name.toLowerCase() === want) || (proposer.member ? proposer : root);
+      ok.push({ name, provider, reportsTo: up.id || null, reportsToName: up.name, profile: buildProfile({ name, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails }) });
+    }
+    if (!ok.length) return;
+    let chosen = ok;
+    if (this._needsApproval(proposer)) {
+      this._setStatus(proposer, 'waiting');
+      this.emit('event', { type: 'activity', agentId: proposer.id, text: 'Waiting for your approval to hire' });
+      const r = await this._ask(proposer, {
+        kind: 'hire', title: `${proposer.name} suggests hiring ${ok.length} ${ok.length > 1 ? 'people' : 'person'}`,
+        items: ok.map((x) => ({ name: x.name, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails })),
+      });
+      if (r.decision === 'deny') { notes.push(`The human did not approve these hires${r.note ? ': ' + r.note : ''}. Carry on without them or propose something different.`); return; }
+      if (r.only) { const skipped = ok.length - r.only.length; chosen = ok.filter((_, i) => r.only.includes(i)); if (skipped) notes.push(`The human approved only some hires; ${skipped} were not hired.`); }
+      if (r.note) notes.push(`Human note: ${r.note}`);
+    }
+    const hired = [];
+    const made = new Map();
+    for (const x of chosen) {
+      // a manager proposed in the same batch only counts if they were actually hired
+      const boss = x.reportsTo || [...made].find(([n]) => n === x.reportsToName)?.[1] || root.id;
+      const child = await this._makeChild(root, { name: x.name, role: x.profile.role, instructions: x.profile.instructions, provider: x.provider, member: true, consult: true, memKey: slug(x.name), department: x.profile.department, profile: x.profile, reportsTo: boss, hiredAt: Date.now() });
+      made.set(x.name, child.id);
+      this._msg(root, { role: 'system', text: `Hired ${child.name} (${x.profile.departmentLabel}), reporting to ${x.reportsToName}`, agentId: child.id });
+      hired.push(`${child.name} (${x.profile.departmentLabel})`);
+    }
+    if (hired.length) notes.push(`Hired: ${hired.join(', ')}. They are now permanent team members: hand them work with apiary-assign.`);
+  }
+
+  // ---------- teams ----------
+  get teams() { return this.store.data.teams; }
+  seedTeams() {
+    if (this.store.data.settings.teamsSeeded) return;
+    this.store.data.settings.teamsSeeded = true;
+    this.saveTeam({
+      name: 'Operations team', description: 'A CEO who hands work to the right specialist, who first checks with the others.',
+      lead: { name: 'CEO', role: 'Chief executive: understands the request, picks the right specialist, and reports back', instructions: 'You decide who should do the work and never do specialist work yourself. When a report comes back, give the human a short, clear summary.' },
+      members: [
+        { name: 'Networking', role: 'Network engineer: firewalls, DNS, VPN, routing, reverse proxies', instructions: 'Make careful, reversible network changes and say how to roll back.', consult: true },
+        { name: 'Security', role: 'Security engineer: reviews risk, hardening, access, secrets, exposure', instructions: 'Review changes for security risk. If something must be fixed or checked before a change goes ahead, list it as a prerequisite. Block only changes that should not happen at all.', consult: true },
+        { name: 'Research', role: 'Researcher: finds facts, compares options, reads documentation', instructions: 'Find reliable facts and say how sure you are.', consult: true },
+      ],
+    });
+  }
+  saveTeam(f, id = null) {
+    const name = String(f.name || '').trim().slice(0, 40);
+    if (!name) throw httpErr(400, 'Give the team a name');
+    const dup = Object.values(this.teams).find((t) => t.name.toLowerCase() === name.toLowerCase() && t.id !== id);
+    if (dup) throw httpErr(409, `You already have a team called "${name}"`);
+    const person = (x, what) => {
+      const n = String(x?.name || '').trim().slice(0, 40);
+      if (!n) throw httpErr(400, `Every ${what} needs a name`);
+      if (x.provider && !['claude', 'codex', 'mock'].includes(x.provider)) throw httpErr(400, 'Unknown provider');
+      return { name: n, role: String(x.role || '').slice(0, 300), instructions: String(x.instructions || '').slice(0, 4000), provider: x.provider || '', model: String(x.model || '').slice(0, 100), consult: x.consult !== false };
+    };
+    const lead = person(f.lead, 'lead');
+    const members = (Array.isArray(f.members) ? f.members : []).map((m) => person(m, 'member'));
+    if (!members.length) throw httpErr(400, 'Add at least one team member');
+    if (members.length > 8) throw httpErr(400, 'A team can have up to 8 members');
+    const names = [lead.name, ...members.map((m) => m.name)].map((n) => n.toLowerCase());
+    if (new Set(names).size !== names.length) throw httpErr(400, 'Names within a team must be different');
+    const t = { id: id || id8(), name, description: String(f.description || '').slice(0, 300), lead, members };
+    this.teams[t.id] = t; this.store.save();
+    return t;
+  }
+  removeTeam(id) { if (!this.teams[id]) throw httpErr(404, 'No such team'); delete this.teams[id]; this.store.save(); }
+  _roster(lead) { return Object.values(this.agents).filter((a) => a.parentId === lead.id && a.member); }
+
   // ---------- public API ----------
-  async createLead({ name, provider, model, cwd, access, goal, source, base, approvals }) {
+  async createLead({ name, provider, model, cwd, access, goal, source, base, approvals, team }) {
+    const tdef = team ? this.teams[team] : null;
+    if (team && !tdef) throw httpErr(400, 'That team no longer exists');
     if (!this.available.some((p) => p.id === provider)) throw httpErr(400, `Provider "${provider}" is not available. Connect it first.`);
     const method = this.resolveMethod(provider);
     const id = id8();
@@ -197,9 +377,19 @@ export class Engine extends EventEmitter {
       fields.git = { repo, base: baseBranch, branch, slug: `${pslug}-${id}`, source: source || repo, prUrl: null };
     } else if (!fields.cwd) {
       fields.cwd = path.join(HOME, 'workspaces', `${pslug}-${id}`);
+      fields.own = true;   // a folder Apiary made for this project
     }
     mkdirSync(fields.cwd, { recursive: true });
+    if (fields.own) for (const d of ['documents', 'data']) mkdirSync(path.join(fields.cwd, d), { recursive: true });
+    if (tdef) Object.assign(fields, { role: tdef.lead.role || 'Team lead', instructions: tdef.lead.instructions, department: 'leadership', memKey: slug(tdef.lead.name), team: { id: tdef.id, name: tdef.name, leadName: tdef.lead.name } });
     const agent = this._add(fields);
+    if (tdef) {
+      for (const m of tdef.members) {
+        const prov = this.available.some((p) => p.id === m.provider) ? m.provider : provider;
+        const profile = buildProfile({ name: m.name, role: m.role, instructions: m.instructions, reason: `${tdef.name} needs a ${m.name.toLowerCase()} specialist` });
+        await this._makeChild(agent, { name: m.name, role: m.role, instructions: profile.instructions, provider: prov, model: m.model || undefined, member: true, consult: m.consult !== false, memKey: slug(m.name), department: profile.department, profile, reportsTo: agent.id, hiredAt: Date.now() });
+      }
+    }
     if (goal) this.send(agent.id, goal).catch(() => {});
     return agent;
   }
@@ -276,6 +466,7 @@ export class Engine extends EventEmitter {
   }
 
   async remove(agentId) {
+    if (this.agents[agentId]?.kind === 'general') throw httpErr(400, 'The main chat cannot be deleted');
     this.stop(agentId);
     const ids = this.tree(agentId);
     for (const id of ids) {
@@ -339,6 +530,24 @@ export class Engine extends EventEmitter {
       ? 'Your reply goes back to the agent that gave you this task, not to a human. Be concrete and concise: say what you did, what you found, and where any files are.\n'
       : 'Your replies go to the human you are working for. Be clear and concise.\n';
     s += 'If a message is marked "Message from teammate", your reply goes back to that teammate.\n';
+    if (this.memoryEnabled) s += 'You have a long-term memory, shown below as MEMORY when there is something to show. To keep something for next time, put ```apiary-remember\n{"text":"what to remember","scope":"agent"}\n``` in your reply (scope: "agent" for you alone, "project" for the whole team on this project, "global" for everyone). Save lasting facts, decisions and preferences, not chatter.\n';
+    const roster = this._roster(agent);
+    if (roster.length) {
+      s += `\nYou lead the team "${agent.team?.name || 'your team'}". Its members stay on this project, remember past work and talk to each other:\n` + roster.map((m) => `- ${m.name}: ${m.role}`).join('\n') +
+        '\n\nDo not do the specialists\' work yourself. Decide which member is best placed and hand it over with:\n\n```apiary-assign\n{"to":"Member name","task":"Complete instructions that stand alone"}\n```\n\n' +
+        'Apiary then makes that member check with the other members first. If a teammate needs something done before the work can start, it is done first; if one blocks the work, you are told why and nothing is changed. You then get the member\'s report to summarise for the human. Hand independent jobs to different members in the same reply; otherwise one at a time. If no member fits, say so or do it yourself.\n';
+    }
+    if (agent.kind === 'general') s += '\nYou are the person\'s everyday assistant: answer questions, think things through and do quick tasks here. When something is a real piece of work with its own files and goals (a website, an app, a report series), suggest they create a project for it in Projects so it gets its own space, team and documents.\n';
+    if (!agent.parentId && agent.kind !== 'general') {
+      s += '\nYou can propose permanent hires when this project needs a specialist that the team lacks. Apiary shows your proposal to the human with your reasons, writes each hire\'s profile and guardrails from its department, and adds approved people to the team (visible in the organisation chart). Propose like this:\n\n' +
+        '```apiary-hire\n{"name":"Short name","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","reportsTo":"Optional existing member name"}\n```\n\n' +
+        'Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
+    }
+    if (agent.member) {
+      const lead = this.agents[agent.parentId];
+      s += `\nYou are a standing member of the team "${lead?.team?.name || 'team'}" led by ${lead?.name || 'the lead'}. Before a teammate does a task, Apiary may ask you for a pre-check from your area. Then reply in exactly this shape and do no work yet:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first (one line per item, only with CONDITIONS)\n` +
+        'Use CONDITIONS when something in your area must be done or checked first; use BLOCK only if the task should not happen at all. If you are asked to complete a prerequisite, do it fully now and begin your reply with DONE or FAILED. Your work is on your own branch; Apiary merges it into the lead\'s.\n';
+    }
     const mates = this.tree(this.rootOf(agent).id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id);
     if (mates.length && this.limits.maxPeerMessages > 0) {
       s += '\nYou can talk to or hand work to any teammate by name. Put a block like this in your reply:\n\n' +
@@ -372,7 +581,7 @@ export class Engine extends EventEmitter {
     try {
       const runner = providers.pick(agent);
       const res = await runner.run({
-        agent, prompt, system: this._system(agent), signal: ctl.signal,
+        agent, prompt, system: this._system(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : ''), signal: ctl.signal,
         history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
         onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text }),
         onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
@@ -407,11 +616,13 @@ export class Engine extends EventEmitter {
     let prompt = from && from.id !== agent.parentId ? `Message from teammate ${from.name}:\n\n${userText}` : userText, final = '';
     try {
       for (let round = 0; round <= this.limits.maxRounds; round++) {
-        const reply = await this._exec(agent, prompt);
-        const { clean, spawns, sends, errors } = parseSpawns(reply);
+        const raw = await this._exec(agent, prompt);
+        const mem = parseRemember(raw);
+        if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: n.text, who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
+        const { clean, spawns, sends, assigns, hires, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
-        if ((!spawns.length && !sends.length && !errors.length) || round === this.limits.maxRounds) break;
+        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !errors.length) || round === this.limits.maxRounds) break;
 
         const notes = [...errors];
         let runnable = [];
@@ -435,6 +646,7 @@ export class Engine extends EventEmitter {
             if (r.note) notes.push(`Human note: ${r.note}`);
           }
         }
+        if (hires.length) await this._hire(agent, hires, notes);
         if (agent.git) await this._commit(agent, 'work before delegating');
         this._setStatus(agent, 'waiting');
 
@@ -442,6 +654,10 @@ export class Engine extends EventEmitter {
         const jobs = runnable.map((s) => this._runChild(agent, s).then((r) => ({ kind: 'report', ...r })));
         for (const m of sends) {
           const job = await this._peerJob(agent, m, notes);
+          if (job) jobs.push(job);
+        }
+        for (const a of assigns) {
+          const job = this._assignJob(agent, a, notes);
           if (job) jobs.push(job);
         }
         const results = await Promise.all(jobs);
@@ -461,6 +677,7 @@ export class Engine extends EventEmitter {
         prompt = body;
       }
       await this._commit(agent, userText);
+      this._record(agent, userText, from, final);
       this._setStatus(agent, 'idle');
       return final;
     } catch (e) {
@@ -530,16 +747,18 @@ export class Engine extends EventEmitter {
     return Object.values(this.defs).find((d) => d.name.toLowerCase() === String(name).toLowerCase());
   }
 
-  async _runChild(parent, spec) {
+  // Create an agent under `parent` (own checkout in git projects) without giving it work yet.
+  async _makeChild(parent, spec) {
     const def = spec.agent ? this._findDef(spec.agent) : null;
     const wanted = spec.provider || def?.provider;
     const provider = this.available.some((p) => p.id === wanted) ? wanted : parent.provider;
     const method = this.resolveMethod(provider);
     const fields = {
-      id: id8(), name: def?.name || spec.name, role: def?.role || spec.role, instructions: def?.instructions || '',
-      provider, method, model: def?.model || (provider === parent.provider ? parent.model : this.defaultModel(provider)),
+      id: id8(), name: def?.name || spec.name, role: def?.role || spec.role, instructions: def?.instructions || spec.instructions || '',
+      provider, method, model: def?.model || spec.model || (provider === parent.provider ? parent.model : this.defaultModel(provider)),
       cwd: parent.cwd, access: parent.access, parentId: parent.id, depth: parent.depth + 1,
     };
+    if (spec.member) Object.assign(fields, { member: true, consult: spec.consult !== false, memKey: spec.memKey, department: spec.department, profile: spec.profile, reportsTo: spec.reportsTo || parent.id, hiredAt: spec.hiredAt });
     // Each CLI agent in a git project gets its own checkout, branched from its parent.
     if (parent.git && method === 'cli') {
       const g = parent.git;
@@ -550,9 +769,13 @@ export class Engine extends EventEmitter {
         fields.cwd = wt; fields.branch = branch; fields.git = { repo: g.repo, base: g.base, branch, slug: g.slug };
       } catch (e) { this._log(parent, `! could not create a checkout for ${fields.name}: ${e.message}`); }
     }
-    const child = this._add(fields);
+    return this._add(fields);
+  }
+
+  async _runChild(parent, spec) {
+    const child = await this._makeChild(parent, spec);
     this._edge(parent.id, child.id);
-    this._msg(parent, { role: 'system', text: `Created sub-agent ${child.name} (${provider})`, agentId: child.id });
+    this._msg(parent, { role: 'system', text: `Created sub-agent ${child.name} (${child.provider})`, agentId: child.id });
     try {
       const text = await this.send(child.id, spec.task, parent);
       return { name: child.name, text: text || '(no output)', child };
@@ -561,8 +784,84 @@ export class Engine extends EventEmitter {
     } finally { this.waitingOn.get(parent.id)?.delete(child.id); }
   }
 
+  // ----- team workflow: assign -> pre-check by the others -> prerequisites -> the job -----
+  async _assignJob(lead, a, notes) {
+    const roster = this._roster(lead);
+    const want = String(a.to).trim().toLowerCase();
+    const worker = roster.find((m) => m.id === a.to || m.name.toLowerCase() === want);
+    if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => m.name).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
+    this._edge(lead.id, worker.id);
+    this._msg(lead, { role: 'system', text: `Assigned to ${worker.name}: ${a.task.slice(0, 160)}${a.task.length > 160 ? '…' : ''}`, agentId: worker.id });
+    const finish = (text) => { this.waitingOn.get(lead.id)?.delete(worker.id); return { kind: 'report', name: worker.name, text }; };
+    try {
+      // 1. The assignee checks with everyone else before it starts.
+      const advisers = roster.filter((m) => m.id !== worker.id && m.consult !== false);
+      const checks = await Promise.all(advisers.map((adv) => this._consult(worker, adv, a.task)));
+      if (this.stopped.has(lead.id)) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
+      const summary = checks.map((c) => `- ${c.adviser.name}: ${c.verdict}${c.reason ? ' — ' + c.reason : ''}${c.prerequisites.length ? ` (prerequisites: ${c.prerequisites.join('; ')})` : ''}`);
+      this._msg(lead, { role: 'system', text: `Pre-check for ${worker.name}'s task:\n${summary.join('\n') || '(no one to consult)'}` });
+      const blockers = checks.filter((c) => c.verdict === 'BLOCK');
+      if (blockers.length) return finish(`NOT STARTED. ${blockers.map((c) => `${c.adviser.name} blocked it: ${c.reason || 'no reason given'}`).join(' ')}\nNothing was changed. Pre-check results:\n${summary.join('\n')}\nDecide whether to change the plan or ask the human.`);
+
+      // 2. Whatever the others need done first happens now, by them, and is brought into the lead's branch.
+      const done = [];
+      for (const c of checks.filter((x) => x.prerequisites.length)) {
+        const adv = c.adviser;
+        this._edge(worker.id, adv.id);
+        this._msg(worker, { role: 'system', text: `Waiting for ${adv.name} to finish prerequisites first`, agentId: adv.id });
+        let r;
+        try { r = await this.send(adv.id, `Prerequisite for ${worker.name}'s task (do this now, before ${worker.name} starts):\n${c.prerequisites.map((p) => '- ' + p).join('\n')}\n\nThe task is:\n${a.task}\n\nWhen finished, begin your reply with DONE or FAILED.`, worker); }
+        catch (e) { r = `FAILED: ${e.message}`; }
+        finally { this.waitingOn.get(worker.id)?.delete(adv.id); }
+        if (!/^\W*DONE/i.test(r || '')) return finish(`NOT STARTED. ${adv.name} could not complete a prerequisite: ${clipText(r, 300)}\nNothing further was done. Pre-check results:\n${summary.join('\n')}`);
+        const note = lead.git && adv.branch ? await this._mergeChild(lead, adv, true) : '';
+        done.push(`- ${adv.name}: ${clipText(r.replace(/^\W*DONE:?\s*/i, ''), 300)}${note ? ' ' + note.trim() : ''}`);
+      }
+
+      // 3. The assignee does the job, with the prerequisites in its checkout.
+      if (lead.git && worker.branch) await this._sync(lead, worker);
+      const prompt = `Task from ${lead.name}:\n\n${a.task}\n\n` +
+        (summary.length ? `Pre-check by your teammates (already done):\n${summary.join('\n')}\n\n` : '') +
+        (done.length ? `Prerequisites already completed${lead.git ? ' and merged into your branch' : ''}:\n${done.join('\n')}\n\n` : '') +
+        'Now carry out the task. Respect any conditions above.';
+      const text = await this.send(worker.id, prompt, lead);
+      let note = '';
+      if (lead.git && worker.branch) { note = await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
+      return finish(`${text || '(no output)'}${note}\n\nPre-check results:\n${summary.join('\n') || '(none)'}${done.length ? '\nPrerequisites done first:\n' + done.join('\n') : ''}`);
+    } catch (e) {
+      this.waitingOn.get(lead.id)?.delete(worker.id);
+      if (e.name === 'AbortError') throw e;
+      return finish(`FAILED: ${e.message}`);
+    }
+  }
+
+  // The assignee asks one teammate for a verdict on the task. Unclear or missing replies are reported as such, never silently approved.
+  async _consult(worker, adv, task) {
+    const root = this.rootOf(worker).id;
+    const res = { adviser: adv, verdict: 'NO ANSWER', reason: '', prerequisites: [] };
+    if ((this.peerCounts.get(root) || 0) >= this.limits.maxPeerMessages) { res.reason = 'not consulted: the project reached its limit of agent-to-agent messages'; return res; }
+    if (this._wouldDeadlock(worker.id, adv.id)) { res.reason = `not consulted: ${adv.name} is waiting on ${worker.name}`; return res; }
+    this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
+    this._edge(worker.id, adv.id);
+    this._msg(worker, { role: 'system', text: `Asked ${adv.name} for a pre-check`, agentId: adv.id });
+    try {
+      const text = await this.send(adv.id, `Pre-check requested by ${worker.name} before they start this task:\n\n${task}\n\nLook at it from your area (${adv.role || adv.name}). Do no work yet. Reply in this shape:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first, before ${worker.name} starts (one line per item, only with CONDITIONS)`, worker);
+      Object.assign(res, parseVerdict(text));
+    } catch (e) { res.reason = `could not be consulted (${e.message})`; }
+    finally { this.waitingOn.get(worker.id)?.delete(adv.id); }
+    return res;
+  }
+
+  // Bring the lead's latest work into a member's checkout (best effort; a conflict is aborted and logged).
+  async _sync(lead, member) {
+    try {
+      const r = await git.merge(member.cwd, lead.git.branch);
+      if (!r.ok) this._log(member, `! could not bring in the lead's latest work (conflicts in ${r.conflicts.join(', ') || 'some files'})`);
+    } catch (e) { this._log(member, `! sync failed: ${e.message}`); }
+  }
+
   // Bring a child's branch into its parent's. A conflict is aborted and reported, never left half-done.
-  async _mergeChild(parent, child) {
+  async _mergeChild(parent, child, keep = false) {
     const parentBranch = parent.git.branch;
     let note, merge = true;
     if (this._needsApproval(parent)) {
@@ -583,13 +882,31 @@ export class Engine extends EventEmitter {
       else note = (note || '') + `\n\n(Apiary could NOT merge ${child.name}'s branch ${child.branch} into yours${res.conflicts.length ? `: conflicts in ${res.conflicts.join(', ')}` : ''}. Nothing was merged; the branch is kept. Resolve this yourself or ask the human.)`;
       this._log(parent, res.ok ? `✔ merged ${child.branch} into ${parentBranch}` : `! merge conflict with ${child.branch}`);
     } else this._log(parent, `✘ merge of ${child.branch} declined`);
-    await this._lock(parent.git.repo, () => git.worktreeRemove(parent.git.repo, child.cwd)).catch(() => {});
+    if (!keep) await this._lock(parent.git.repo, () => git.worktreeRemove(parent.git.repo, child.cwd)).catch(() => {});
     return note;
   }
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], errors = [];
+  reply = reply.replace(HIRE_RE, (_, body) => {
+    try {
+      for (const h of [].concat(JSON.parse(body.trim()))) {
+        if (!h || !String(h.name || '').trim()) { errors.push('An apiary-hire block needs a "name".'); continue; }
+        hires.push({ name: String(h.name), role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo });
+      }
+    } catch (err) { errors.push(`An apiary-hire block was not valid JSON (${err.message}).`); }
+    return '';
+  });
+  reply = reply.replace(ASSIGN_RE, (_, body) => {
+    try {
+      for (const s of [].concat(JSON.parse(body.trim()))) {
+        if (!s || !s.to || typeof s.task !== 'string' || !s.task.trim()) { errors.push('An apiary-assign block needs "to" and "task".'); continue; }
+        assigns.push({ to: String(s.to), task: s.task });
+      }
+    } catch (err) { errors.push(`An apiary-assign block was not valid JSON (${err.message}).`); }
+    return '';
+  });
   reply = reply.replace(SEND_RE, (_, body) => {
     try {
       for (const s of [].concat(JSON.parse(body.trim()))) {
@@ -618,7 +935,22 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, errors };
+  return { clean, spawns, sends, assigns, hires, errors };
+}
+
+const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
+
+// Reads the VERDICT / REASON / PREREQUISITE lines of a pre-check reply.
+export function parseVerdict(text) {
+  const t = String(text || '');
+  const v = /^\W*VERDICT\W*(GO|CONDITIONS?|BLOCK)\b/im.exec(t);
+  const reason = /^\W*REASON\W*(.+)$/im.exec(t)?.[1]?.trim() || '';
+  const prerequisites = [...t.matchAll(/^\W*PREREQUISITES?\W*(.+)$/gim)].map((m) => m[1].trim()).filter(Boolean);
+  if (!v) return { verdict: 'UNCLEAR', reason: clipText(t, 200) || 'no reply', prerequisites: [] };
+  let verdict = v[1].toUpperCase().replace('CONDITIONS', 'CONDITIONS');
+  if (verdict === 'CONDITION') verdict = 'CONDITIONS';
+  if (verdict === 'CONDITIONS' && !prerequisites.length) verdict = 'GO';
+  return { verdict, reason, prerequisites: verdict === 'GO' ? [] : prerequisites };
 }
 
 export function httpErr(status, message) { return Object.assign(new Error(message), { status }); }

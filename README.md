@@ -28,6 +28,9 @@ ln -sf ~/.local/share/apiary/bin/apiary.js ~/.local/bin/apiary
 * Claude and Codex together, via your CLI logins or API keys
 * Approve or deny new sub-agents and merges; review the diff first
 * Agents message each other and hand work across the team
+* A main chat for everyday questions; every project is its own space with its own files, team and organisation chart
+* Memory for every agent: tonight, yesterday, last week, last month and last year are recalled automatically
+* Teams with a CEO: work goes to the right specialist, who checks with the others first; hiring suggestions come with reasons and ready-made profiles
 * Git branch + checkout per agent, auto-commits, merges, pull requests
 * Take over any agent in your own terminal
 * Local only by default; zero dependencies

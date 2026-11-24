@@ -307,7 +307,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); return json(res, 200, { ok: true }); }
-        if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note, vb.username); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note, vb.username, { type: vb.type, host: vb.host, port: vb.port, auth: vb.auth }); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
         if ((r = m(/^\/api\/vault\/secrets\/([\w-]+)$/))) {
           if (req.method === 'PUT') return json(res, 200, v.update(r[1], vb));
           if (req.method === 'DELETE') { v.remove(r[1]); return json(res, 200, { ok: true }); }

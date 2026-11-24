@@ -19,7 +19,7 @@ import { git } from './git.js';
 import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
-import { Vault, envName, redactPairs } from './vault.js';
+import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
 import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
 import { Tasks, STATUSES as TASK_STATUSES } from './tasks.js';
@@ -39,6 +39,7 @@ const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], 
 const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
+const TYPE_LABEL = { login: 'login', ssh: 'SSH login', token: 'API key or token' };
 const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
 const PLAN_RE = /```apiary-plan\s*([\s\S]*?)```/g;
 const PROGRESS_RE = /```apiary-progress\s*([\s\S]*?)```/g;
@@ -71,6 +72,7 @@ export class Engine extends EventEmitter {
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
     this.userLeases = new Map(); // agentId -> Map(secret name -> username), same lifetime as leases
+    this.metaLeases = new Map(); // agentId -> { ENV_NAME: value } for the non-secret details of a lease (host, port, how to log in)
     this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
     this.seedTeams();
@@ -532,7 +534,7 @@ export class Engine extends EventEmitter {
   _leaseEnv(agent) {
     const mp = this.leases.get(agent.id);
     const us = this.userLeases.get(agent.id);
-    return { ...(mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {}), ...(us ? Object.fromEntries([...us].map(([name, v]) => [envName(name) + '_USER', v])) : {}) };
+    return { ...(this.metaLeases.get(agent.id) || {}), ...(mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {}), ...(us ? Object.fromEntries([...us].map(([name, v]) => [envName(name) + '_USER', v])) : {}) };
   }
   // An agent asked for secrets with apiary-secret. Needs: vault unlocked, secret assigned to this agent, and the human's yes.
   async _secrets(agent, reqs, notes) {
@@ -557,21 +559,25 @@ export class Engine extends EventEmitter {
       const uname = this.vault.user(it.id);
       if (uname) (this.userLeases.get(agent.id) || this.userLeases.set(agent.id, new Map()).get(agent.id)).set(it.name, uname);
       this._log(agent, `🔑 using secret "${it.name}"${asg.grant === 'always' ? ' (always allowed)' : ''}`);
-      notes.push(`The secret "${it.name}" is available to your commands as the environment variable $${envName(it.name)}${uname ? ` (the username is in $${envName(it.name)}_USER)` : ''} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
+      const type = typeOf(it), EV = envName(it.name), meta = this.vault.list().find((x) => x.id === it.id) || {};
+      if (type === 'ssh') { const mm = this.metaLeases.get(agent.id) || this.metaLeases.set(agent.id, {}).get(agent.id); Object.assign(mm, { [`${EV}_HOST`]: meta.host, [`${EV}_PORT`]: String(meta.port || 22), [`${EV}_AUTH`]: meta.auth || 'password' }); }
+      if (type === 'ssh') notes.push(`"${it.name}" is an SSH login for ${uname}@${meta.host}:${meta.port || 22}. To use it run: apiary-ssh "${it.name}" -- <command on the server>   (leave out "-- <command>" for a shell). Add ssh options before the "--", for example -L 8080:localhost:80. The helper handles the ${meta.auth === 'key' ? 'private key' : 'password'} and the server's fingerprint for you. Do not call ssh, sshpass or ssh-keygen yourself, and never print the secret. It is available for this task only.`);
+      else if (type === 'token') notes.push(`The secret "${it.name}" (an API key or token) is available to your commands as the environment variable $${EV} for this task only. Use it in commands, for example in an Authorization header. Never print it, write it to a file or put it in your reply.`);
+      else notes.push(`The login "${it.name}" is available to your commands as the environment variable $${EV} (the password)${uname ? ` (the username is in $${EV}_USER)` : ''} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
     }
   }
   // Tells an agent which secrets it may ask for (names only, never values) and, for a lead, who else holds which.
   _secretsNote(agent) {
     if (!this.vault.unlocked) return 'The secrets vault is locked right now. If a task needs a secret, tell the human to unlock it (Secrets page).\n';
     const key = this._mkey(agent), items = this.vault.list(), holds = (x, k) => (x.assigned || []).some((a) => a.key === k), mine = items.filter((x) => holds(x, key));
-    let n = mine.length ? `Secrets assigned to you (ask for them by exactly this name): ${mine.map((x) => `"${x.name}"`).join(', ')}.\n` : 'No secret is assigned to you yet.\n';
+    let n = mine.length ? `Secrets assigned to you (ask for them by exactly this name): ${mine.map((x) => `"${x.name}" (${TYPE_LABEL[typeOf(x)]})`).join(', ')}.\n` : 'No secret is assigned to you yet.\n';
     if (agent.kind === 'general' || !agent.parentId) {
       const others = this.eligibleAgents().filter((e) => e.key !== key).map((e) => ({ e, names: items.filter((x) => holds(x, e.key)).map((x) => `"${x.name}"`) })).filter((o) => o.names.length);
       if (others.length) n += `Secrets assigned to your teammates: ${others.map((o) => `${o.e.label}: ${o.names.join(', ')}`).join('; ')}. Hand the job to the teammate who holds the secret; they ask for it themselves.\n`;
     }
     return n;
   }
-  _clearLease(id) { this.leases.delete(id); this.userLeases.delete(id); }
+  _clearLease(id) { this.leases.delete(id); this.userLeases.delete(id); this.metaLeases.delete(id); }
   // Who can be given a secret: the CEO, project leads and standing team members, by role (so renaming does not break access).
   _agentLabel(a) {
     const t = a.title && a.title !== a.name ? a.title : '';

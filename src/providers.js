@@ -7,6 +7,8 @@ import { spawn } from 'node:child_process';
 import { accessSync, constants, writeFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const HELPERS = fileURLToPath(new URL('../bin', import.meta.url));
 
 export function which(bin) {
   // ~/.local/bin is where the AI tools are installed for the current user; a service may not have it on its PATH
@@ -38,6 +40,7 @@ function logOutput(onLog, text) {
 // plus only the secrets that were approved for this turn.
 export function childEnv(extra = {}) {
   const env = { ...process.env }; delete env.APIARY_TOKEN;
+  env.PATH = [HELPERS, env.PATH].filter(Boolean).join(path.delimiter);   // apiary-ssh and friends
   return { ...env, ...extra };
 }
 // Codex hides variables with KEY, SECRET or TOKEN in the name from its shell unless told not to,

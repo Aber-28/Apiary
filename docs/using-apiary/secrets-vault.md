@@ -25,3 +25,23 @@ It cannot open the vault, and it never gets the passphrase. Only **you** unlock 
 4. Agents never see the value in the conversation: it is hidden in what is shown and saved.
 
 If the vault is locked, agents are told so and nothing is handed out. Apiary's own access token is never passed to agents.
+
+## Kinds of secret
+
+When you add a secret you choose what it is. Agents you give access to can use all three.
+
+| Kind | You enter | What the agent can do with it |
+| --- | --- | --- |
+| **SSH login** | Server, port, username, and a password **or** a private key | Log in with `apiary-ssh "Name" -- command`. Apiary handles the password or key and never shows it to the agent. |
+| **Login** | Username and password | Gets both as environment variables for one task, for websites, databases, routers and so on. |
+| **API key or long-lived token** | The key or token | Gets it as an environment variable for one task, for example in an `Authorization` header. |
+
+### SSH logins
+
+* For a **private key**, press **Choose the key file** and pick it (for example `~/.ssh/id_ed25519`). The key is read by your browser and sent to the vault. It is never displayed. You can paste it instead.
+* Keys must **not** have a passphrase. Make a dedicated key for Apiary with `ssh-keygen -t ed25519 -N "" -f ~/apiary_key` and add the public half to the server.
+* The agent runs, for example, `apiary-ssh "Lab server" -- uptime`. Ssh options go before the `--`, for example `-L 8080:localhost:80`. Leave out the command for a shell.
+* Passwords are given to ssh through its own password prompt mechanism, and keys through a short-lived `ssh-agent`. Neither is written to a file or put on a command line.
+* The first time you connect to a server, its fingerprint is remembered in Apiary's own `known_hosts` file (`~/.apiary/known_hosts`). If the server's key later changes, ssh refuses to connect and the agent is told, which protects you from impostors.
+* Agents with **Safe** access, and Codex's default sandbox, may not be allowed network access. Use **Full access** for projects that need to reach servers.
+* The OpenSSH client (`ssh`, `ssh-agent`, `ssh-add`) must be installed. It is on most Linux desktops. Otherwise: `sudo apt install openssh-client`.

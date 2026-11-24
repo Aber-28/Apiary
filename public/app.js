@@ -50,13 +50,15 @@ async function api(path, method = 'GET', body) {
 }
 const guard = (fn) => async (...a) => { try { await fn(...a); } catch (e) { toast(e.message, true); } };
 // A secret is never typed into the browser's plain prompt (it shows the text). This dialog hides it.
-const askSecret = (title, label) => new Promise((resolve) => {
-  const inp = h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', 'aria-label': label });
-  const show = h('input', { type: 'checkbox', onchange: () => { inp.type = show.checked ? 'text' : 'password'; } });
+// For a private key you can choose the key file instead of pasting it, so it is never displayed at all.
+const askSecret = (title, label, { key = false } = {}) => new Promise((resolve) => {
+  const inp = key ? h('textarea', { rows: '5', class: 'masked', spellcheck: 'false', autocomplete: 'off', 'aria-label': label }) : h('input', { type: 'password', autocomplete: 'new-password', spellcheck: 'false', 'aria-label': label });
+  const file = key ? h('input', { type: 'file', 'aria-label': 'Choose the private key file', onchange: async (e) => { const f = e.target.files[0]; if (f) inp.value = await f.text(); } }) : null;
+  const show = h('input', { type: 'checkbox', onchange: () => { if (key) inp.classList.toggle('masked', !show.checked); else inp.type = show.checked ? 'text' : 'password'; } });
   const ok = h('button', { class: 'btn primary', type: 'submit', value: 'ok' }, 'Save');
-  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), h('label', { class: 'f' }, label, inp), h('label', { class: 'check' }, show, ' Show what I type'), h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', type: 'submit', value: 'cancel' }, 'Cancel'), ok)));
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), key ? h('label', { class: 'f' }, 'Choose the key file (best)', file) : null, h('label', { class: 'f' }, key ? 'or paste the key' : label, inp), h('label', { class: 'check' }, show, ' Show what I type'), h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', type: 'submit', value: 'cancel' }, 'Cancel'), ok)));
   dlg.addEventListener('close', () => { const v = dlg.returnValue === 'ok' ? inp.value : null; inp.value = ''; dlg.remove(); resolve(v || null); });
-  document.body.append(dlg); dlg.showModal(); inp.focus();
+  document.body.append(dlg); dlg.showModal(); (key ? file : inp).focus();
 });
 const copy = (text) => navigator.clipboard?.writeText(text).then(() => toast('Copied'), () => toast('Copy failed', true));
 const cmdBox = (text) => h('div', { class: 'cmd mono' }, h('code', {}, text), h('button', { type: 'button', onclick: () => copy(text) }, 'Copy'));
@@ -581,6 +583,34 @@ function pageMeetings() {
 }
 
 // ---------- secrets vault ----------
+const SECRET_TYPES = { ssh: 'SSH login', login: 'Login', token: 'API key or token' };
+// The "Add a secret" card. Each kind asks for what it needs, and agents can use all of them.
+function secretForm(draw) {
+  const I = (ph, label, extra = {}) => h('input', { type: 'text', autocomplete: 'off', placeholder: ph, 'aria-label': label, ...extra });
+  const nm = I('Name, e.g. Router or GitHub token', 'Secret name'), note = I('What is it for? (optional)', 'Note'), usr = I('Username', 'Username');
+  const host = I('Server, e.g. 10.0.0.5 or server.example.com', 'Server'), port = I('Port', 'Port', { value: '22', inputmode: 'numeric' });
+  const type = h('select', { 'aria-label': 'Kind of secret', onchange: () => drawF() }, [['ssh', 'SSH login (log in to a server)'], ['login', 'Login (username and password)'], ['token', 'API key or long-lived token']].map(([k, t]) => h('option', { value: k }, t)));
+  const auth = h('select', { 'aria-label': 'Log in with', onchange: () => drawF() }, [['password', 'Password'], ['key', 'Private key']].map(([k, t]) => h('option', { value: k }, t)));
+  const pw = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Password', 'aria-label': 'Password' });
+  const tok = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'API key or token', 'aria-label': 'API key or token' });
+  const key = h('textarea', { rows: '4', class: 'masked', spellcheck: 'false', autocomplete: 'off', placeholder: 'or paste the private key here', 'aria-label': 'Private key' });
+  const keyFile = h('input', { type: 'file', 'aria-label': 'Choose the private key file', onchange: async (e) => { const f = e.target.files[0]; if (f) { key.value = await f.text(); toast('Key loaded. It is not shown.'); } } });
+  const fields = h('div', { class: 'secret-fields' });
+  const row = (...c) => h('div', { class: 'formrow', style: 'margin-top:8px' }, ...c);
+  const hints = { ssh: 'Agents log in with the built-in apiary-ssh command. They never see the password or key. Keys must not have a passphrase.', login: 'Agents get the password and username as environment variables for one task, after you approve.', token: 'Agents get it as an environment variable for one task, after you approve.' };
+  function drawF() {
+    const t = type.value;
+    fields.replaceChildren(...(t === 'ssh' ? [row(host, port), row(usr, auth), auth.value === 'key' ? h('div', { style: 'margin-top:8px' }, h('label', { class: 'f' }, 'Choose the key file (best, it is never shown)', keyFile), key) : row(pw)] : t === 'login' ? [row(usr, pw)] : [row(tok)]), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, hints[t]));
+  }
+  const save = guard(async () => {
+    const t = type.value, value = t === 'ssh' ? (auth.value === 'key' ? key.value : pw.value) : t === 'login' ? pw.value : tok.value;
+    await api('/api/vault/secrets', 'POST', { name: nm.value, value, note: note.value, type: t, username: t === 'token' ? '' : usr.value, host: host.value, port: port.value, auth: auth.value });
+    for (const x of [pw, tok, key]) x.value = '';
+    draw();
+  });
+  drawF();
+  return h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), row(type), row(nm, note), fields, h('div', { style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: save }, 'Save to vault')));
+}
 function pageSecrets() {
   crumbs('Settings', 'Secrets vault');
   const draw = async () => {
@@ -597,7 +627,7 @@ function pageSecrets() {
       const go = guard(async () => { await api('/api/vault/unlock', 'POST', { passphrase: a.value }); draw(); });
       view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'The vault is locked'), h('p', { class: 'hint' }, 'It locks whenever Apiary restarts. Agents cannot use secrets while it is locked.'), h('label', { class: 'f' }, 'Passphrase', a), h('button', { class: 'btn primary', onclick: go }, 'Unlock'))); return;
     }
-    const nm = h('input', { type: 'text', placeholder: 'Name, e.g. Router login', 'aria-label': 'Secret name' }), usr = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Username (optional)', 'aria-label': 'Username, optional' }), val = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Password, token or key', 'aria-label': 'Password, token or key' }), note = h('input', { type: 'text', placeholder: 'What is it for? (optional)', 'aria-label': 'Note' });
+    const addCard = secretForm(draw);
     const rows = v.secrets.map((x) => {
       const asg = Object.fromEntries((x.assigned || []).map((a) => [a.key, a]));   // the server sends a list; this is the same thing by key
       // Agents that already have access are listed (change or remove); everyone else is added from one drop-down.
@@ -615,11 +645,21 @@ function pageSecrets() {
       const add = h('div', { class: 'kv', style: 'margin-top:8px;gap:8px;flex-wrap:wrap' }, who, how,
         h('button', { class: 'btn primary', onclick: () => { const ag = without.find((q) => q.key === who.value); if (!ag) return toast('Choose an agent first.', true); save({ ...asg, [ag.key]: { label: ag.label, grant: how.value } }); } }, 'Add'));
       const picks = [current.length ? current : h('p', { class: 'hint' }, 'No agent can use this yet.'), without.length ? add : (v.eligible.length ? h('p', { class: 'hint' }, 'Every agent already has access.') : h('p', { class: 'hint' }, 'No agents yet.'))];
-      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), x.username ? h('small', { style: 'display:block' }, `Username: ${x.username}`) : null, x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null, h('small', { class: 'hint mono', style: 'display:block' }, `Agents get it as $APIARY_SECRET_${x.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')}${x.hasUsername ? ' and …_USER' : ''}`)),
-        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name} (leave empty for none)`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username'), h('button', { class: 'btn', onclick: guard(async () => { const nv = await askSecret(`Replace ${x.name}`, 'New password, token or key'); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
+      const EV = 'APIARY_SECRET_' + x.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+      const usage = x.type === 'ssh' ? `Agents use it with: apiary-ssh "${x.name}" -- command` : x.type === 'login' ? `Agents get it as $${EV} and $${EV}_USER` : `Agents get it as $${EV}`;
+      const detail = x.type === 'ssh' ? `${x.username || '?'}@${x.host}:${x.port} · ${x.auth === 'key' ? 'private key' : 'password'}` : x.type === 'login' && x.username ? `Username: ${x.username}` : '';
+      const editConn = () => {
+        const host = h('input', { type: 'text', value: x.host, 'aria-label': 'Server' }), port = h('input', { type: 'text', value: String(x.port), inputmode: 'numeric', 'aria-label': 'Port' }), usr = h('input', { type: 'text', value: x.username, 'aria-label': 'Username' });
+        const au = h('select', { 'aria-label': 'Log in with' }, [['password', 'Password'], ['key', 'Private key']].map(([k, t]) => h('option', { value: k, selected: x.auth === k }, t)));
+        const d = dlgOpen(`Connection: ${x.name}`, h('label', { class: 'f' }, 'Server (name or IP address)', host), h('label', { class: 'f' }, 'Port', port), h('label', { class: 'f' }, 'Username', usr), h('label', { class: 'f' }, 'Log in with', au), h('p', { class: 'hint' }, 'Switching between password and key also needs the new password or key: use Replace secret afterwards.'),
+          h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'x' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api(`/api/vault/secrets/${x.id}`, 'PUT', { host: host.value, port: port.value, username: usr.value, auth: au.value }); d.close(); draw(); })(); } }, 'Save')));
+      };
+      const replaceLabel = x.type === 'ssh' ? (x.auth === 'key' ? 'New private key' : 'New password') : x.type === 'login' ? 'New password' : 'New token or key';
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), ' ', h('span', { class: 'chip' }, SECRET_TYPES[x.type] || 'Secret'), detail ? h('small', { style: 'display:block' }, detail) : null, x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null, h('small', { class: 'hint mono', style: 'display:block' }, usage)),
+        h('div', { class: 'kv' }, x.type === 'ssh' ? h('button', { class: 'btn', onclick: editConn }, 'Edit connection') : null, x.type === 'login' ? h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name}`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username') : null, h('button', { class: 'btn', onclick: guard(async () => { const nv = await askSecret(`Replace ${x.name}`, replaceLabel, { key: x.type === 'ssh' && x.auth === 'key' }); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
         h('details', { open: Object.keys(asg).length > 0 }, h('summary', {}, 'Who may use it'), picks));
     });
-    view.replaceChildren(head, h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), h('div', { class: 'formrow' }, nm, usr), h('div', { class: 'formrow', style: 'margin-top:8px' }, val, note, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/vault/secrets', 'POST', { name: nm.value, value: val.value, note: note.value, username: usr.value }); draw(); }) }, 'Save to vault')), h('small', { class: 'hint' }, 'A token or key only needs the last field. A login needs a username too.')), rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
+    view.replaceChildren(head, addCard, rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
   };
   draw(); page = { shows: () => true };
 }

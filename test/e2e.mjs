@@ -1217,5 +1217,56 @@ let orgIds;
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Responsible: \$\{ownerOf\(a\)/);
 }
 
+// ---- 0.12.0: kinds of secret (login, SSH login, API key / token) ----
+{
+  const { ceo, ne } = orgIds;
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  const mk = async (b) => (await call('/api/vault/secrets', 'POST', b));
+  // validation
+  assert.equal((await mk({ name: 'S1', value: 'pw', type: 'ssh', username: 'root', host: 'bad host' })).status, 400);
+  assert.equal((await mk({ name: 'S1', value: 'pw', type: 'ssh', username: 'root', host: '10.0.0.5', port: '99999' })).status, 400);
+  assert.equal((await mk({ name: 'S1', value: 'pw', type: 'ssh', host: '10.0.0.5' })).status, 400, 'needs a username');
+  assert.equal((await mk({ name: 'S1', value: 'not a key', type: 'ssh', username: 'root', host: 'h', auth: 'key' })).status, 400);
+  const ssh = (await mk({ name: 'Lab server', value: 'hunter2-pass', type: 'ssh', username: 'root', host: '10.0.0.5', port: 2222 })).body;
+  assert.deepEqual([ssh.type, ssh.host, ssh.port, ssh.auth], ['ssh', '10.0.0.5', 2222, 'password']);
+  const KEY = '-----BEGIN OPENSSH PRIVATE KEY-----\r\nAAAA-key-body-BBBB\r\n-----END OPENSSH PRIVATE KEY-----';
+  const keyed = (await mk({ name: 'Key server', value: KEY, type: 'ssh', username: 'deploy', host: 'srv.example.com', auth: 'key' })).body;
+  assert.equal(keyed.auth, 'key'); assert.equal(engine.vault.value(keyed.id), KEY.replace(/\r\n/g, '\n') + '\n', 'line endings fixed, trailing newline added');
+  const tok = (await mk({ name: 'Cloud token', value: 'tok-abcdef-123456', type: 'token', username: 'ignored' })).body; assert.equal(tok.type, 'token'); assert.equal(tok.username, '');
+  const lg = (await mk({ name: 'Old style', value: 'p', username: 'me' })).body; assert.equal(lg.type, 'login', 'no type given: a username makes it a login');
+  assert.equal((await call('/api/vault')).body.secrets.find((x) => x.id === ssh.id).host, '10.0.0.5');
+  assert.ok(!JSON.stringify((await call('/api/vault')).body).includes('hunter2-pass') && !JSON.stringify((await call('/api/vault')).body).includes('AAAA-key-body'), 'values never leave the server');
+  // edit the connection; changing between password and key needs the new secret
+  assert.equal((await call('/api/vault/secrets/' + ssh.id, 'PUT', { host: 'lab.example.com', port: '22', username: 'admin' })).body.host, 'lab.example.com');
+  assert.equal((await call('/api/vault/secrets/' + ssh.id, 'PUT', { auth: 'key' })).status, 400);
+  assert.equal((await call('/api/vault/secrets/' + ssh.id, 'PUT', { auth: 'key', value: KEY })).status, 200);
+  assert.equal((await call('/api/vault/secrets/' + ssh.id, 'PUT', { auth: 'password', value: 'hunter2-pass' })).body.auth, 'password');
+  // leasing: an SSH login also hands over host, port and how to log in, and the agent is told how to use it
+  const grant = (id) => call('/api/vault/secrets/' + id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'always' }] });
+  for (const x of [ssh, keyed, tok, lg]) await grant(x.id);
+  const notes = []; await engine._secrets(ne, [{ name: 'Lab server' }, { name: 'Key server' }, { name: 'Cloud token' }, { name: 'Old style' }], notes);
+  const env = engine._leaseEnv(ne);
+  assert.equal(env.APIARY_SECRET_LAB_SERVER, 'hunter2-pass'); assert.equal(env.APIARY_SECRET_LAB_SERVER_USER, 'admin'); assert.equal(env.APIARY_SECRET_LAB_SERVER_HOST, 'lab.example.com'); assert.equal(env.APIARY_SECRET_LAB_SERVER_PORT, '22'); assert.equal(env.APIARY_SECRET_LAB_SERVER_AUTH, 'password');
+  assert.equal(env.APIARY_SECRET_KEY_SERVER_AUTH, 'key'); assert.equal(env.APIARY_SECRET_KEY_SERVER_HOST, 'srv.example.com'); assert.equal(env.APIARY_SECRET_CLOUD_TOKEN, 'tok-abcdef-123456'); assert.equal(env.APIARY_SECRET_CLOUD_TOKEN_HOST, undefined);
+  assert.ok(notes.some((n) => /apiary-ssh "Lab server" -- /.test(n) && /admin@lab\.example\.com:22/.test(n)), 'SSH note');
+  assert.ok(notes.some((n) => /API key or token\) is available to your commands as the environment variable/.test(n) && /Authorization header/.test(n)), 'token note'); assert.ok(notes.some((n) => /The login "Old style"/.test(n)), 'login note');
+  assert.ok(!notes.join('\n').includes('hunter2-pass') && !notes.join('\n').includes('AAAA-key-body'), 'notes never contain values');
+  engine._clearLease(ne.id); assert.deepEqual(engine._leaseEnv(ne), {});
+  assert.match(engine._system(ne), /"Lab server" \(SSH login\)/); assert.match(engine._system(ne), /"Cloud token" \(API key or token\)/);
+  // the helper builds the right ssh command and never puts a secret on it
+  const { spawnSync } = await import('node:child_process'); const helper = path.resolve('bin/apiary-ssh');
+  const run = (extra, args) => spawnSync(process.execPath, [helper, ...args], { env: { ...process.env, APIARY_HOME: path.join(tmp, 'ah'), APIARY_SSH_DRYRUN: '1', ...extra }, encoding: 'utf8' });
+  const r1 = run({ ...env }, ['Lab server', '-L', '80:localhost:80', '--', 'uptime', '-a']); assert.equal(r1.status, 0, r1.stderr);
+  const a1 = JSON.parse(r1.stdout); assert.equal(a1.auth, 'password'); assert.deepEqual(a1.args.slice(-5), ['-L', '80:localhost:80', 'admin@lab.example.com', 'uptime', '-a']);
+  assert.ok(a1.args.includes('StrictHostKeyChecking=accept-new') && a1.args.includes('PubkeyAuthentication=no') && a1.args.includes('-p') && !r1.stdout.includes('hunter2-pass'));
+  assert.ok(a1.args.some((x) => /ah\/known_hosts$/.test(x)), 'its own known_hosts, not the user\'s');
+  const r2 = run({ ...env }, ['Key server']); assert.equal(JSON.parse(r2.stdout).auth, 'key'); assert.ok(JSON.parse(r2.stdout).args.includes('PasswordAuthentication=no') && !r2.stdout.includes('AAAA-key-body'));
+  const r3 = run({}, ['Lab server']); assert.equal(r3.status, 2); assert.match(r3.stderr, /not available to you/);
+  const ask = spawnSync(process.execPath, [helper, "admin@lab's password: "], { env: { ...process.env, APIARY_ASKPASS_VAR: 'APIARY_SECRET_LAB_SERVER', APIARY_SECRET_LAB_SERVER: 'hunter2-pass' }, encoding: 'utf8' }); assert.equal(ask.stdout.trim(), 'hunter2-pass', 'ssh asks this same file for the password');
+  const { childEnv } = await import('../src/providers.js'); assert.ok(childEnv().PATH.split(path.delimiter)[0].endsWith('bin'), 'agents find apiary-ssh');
+  assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
+  await call('/api/vault/lock', 'POST', {});
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

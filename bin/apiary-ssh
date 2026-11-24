@@ -1,0 +1,59 @@
+#!/usr/bin/env node
+// apiary-ssh: log in to a server with an SSH login from the Apiary vault, without ever showing the
+// password or key. Agents run it after Apiary has approved the secret for them.
+//
+//   apiary-ssh "Secret name" [ssh options] [-- command to run on the server]
+//
+// Passwords are handed to ssh through its own askpass mechanism, and private keys through a temporary
+// ssh-agent, so neither is written to a file or put on a command line.
+import { spawn, spawnSync } from 'node:child_process';
+import { mkdirSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const envName = (name) => 'APIARY_SECRET_' + String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
+const die = (msg, code = 2) => { console.error(`apiary-ssh: ${msg}`); process.exit(code); };
+
+// ssh calls this same file to ask for the password.
+if (process.env.APIARY_ASKPASS_VAR) {
+  console.log(process.env[process.env.APIARY_ASKPASS_VAR] ?? '');
+  process.exit(0);
+}
+
+const [name, ...rest] = process.argv.slice(2);
+if (!name || name === '-h' || name === '--help') die('usage: apiary-ssh "Secret name" [ssh options] [-- command]');
+const base = envName(name), e = process.env;
+const secret = e[base], user = e[`${base}_USER`], host = e[`${base}_HOST`], port = e[`${base}_PORT`] || '22', auth = e[`${base}_AUTH`] || 'password';
+if (!secret || !host || !user) die(`"${name}" is not available to you. It must be an SSH login that is assigned to you and approved for this task. Ask for it with an apiary-secret block first.`);
+
+const home = e.APIARY_HOME || path.join(os.homedir(), '.apiary');
+mkdirSync(home, { recursive: true, mode: 0o700 });
+const common = ['-o', 'StrictHostKeyChecking=accept-new', '-o', `UserKnownHostsFile=${path.join(home, 'known_hosts')}`, '-o', 'NumberOfPasswordPrompts=1', '-p', port];
+const method = auth === 'key' ? ['-o', 'IdentitiesOnly=yes', '-o', 'PasswordAuthentication=no', '-o', 'KbdInteractiveAuthentication=no'] : ['-o', 'PreferredAuthentications=password,keyboard-interactive', '-o', 'PubkeyAuthentication=no'];
+// "--" separates ssh options from the remote command; ssh needs the target in between.
+const dash = rest.indexOf('--');
+const opts = dash === -1 ? rest : rest.slice(0, dash), cmd = dash === -1 ? [] : rest.slice(dash + 1);
+const finalArgs = [...common, ...method, ...opts, `${user}@${host}`, ...cmd];
+
+if (e.APIARY_SSH_DRYRUN === '1') { console.log(JSON.stringify({ auth, args: finalArgs })); process.exit(0); }
+
+let agentPid = '', env = { ...e };
+for (const k of Object.keys(env)) if (k.startsWith('APIARY_SECRET_') && k !== base) delete env[k];   // ssh only needs this one
+const cleanup = () => { if (agentPid) spawnSync('ssh-agent', ['-k'], { env: { ...env, SSH_AGENT_PID: agentPid }, stdio: 'ignore' }); agentPid = ''; };
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(130); });
+
+if (auth === 'key') {
+  const ag = spawnSync('ssh-agent', ['-s'], { encoding: 'utf8' });
+  if (ag.error || ag.status !== 0) die('ssh-agent is not installed. Install the OpenSSH client (sudo apt install openssh-client).');
+  const sock = /SSH_AUTH_SOCK=([^;]+);/.exec(ag.stdout)?.[1], pid = /SSH_AGENT_PID=(\d+);/.exec(ag.stdout)?.[1];
+  if (!sock || !pid) die('could not start ssh-agent');
+  agentPid = pid; env.SSH_AUTH_SOCK = sock;
+  const add = spawnSync('ssh-add', ['-'], { input: secret, env, encoding: 'utf8' });
+  if (add.status !== 0) { cleanup(); die('the private key was not accepted (is it protected by a passphrase? Only keys without a passphrase are supported).'); }
+} else {
+  env.SSH_ASKPASS = path.resolve(process.argv[1]); env.SSH_ASKPASS_REQUIRE = 'force'; env.APIARY_ASKPASS_VAR = base; env.DISPLAY ||= 'apiary:0';
+}
+
+const child = spawn('ssh', finalArgs, { env, stdio: 'inherit' });
+child.on('error', (err) => { cleanup(); die(err.code === 'ENOENT' ? 'ssh is not installed. Install the OpenSSH client (sudo apt install openssh-client).' : err.message); });
+child.on('exit', (code, sig) => { cleanup(); process.exit(code ?? (sig ? 128 : 1)); });

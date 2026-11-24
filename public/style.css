@@ -212,3 +212,5 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .mention-pop[hidden]{display:none}
 .mention-opt{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;font:inherit;padding:8px 10px;border-radius:7px;cursor:pointer}
 .mention-opt[aria-selected="true"],.mention-opt:hover{background:var(--hover,rgba(245,184,61,.16))}
+.masked{-webkit-text-security:disc;text-security:disc;font-family:var(--mono,monospace)}
+.secret-fields input[type=file]{padding:6px}

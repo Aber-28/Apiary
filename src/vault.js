@@ -35,6 +35,22 @@ function unpack(plain) {
   if (plain.startsWith('{"apiary":1')) { try { const o = JSON.parse(plain); return { value: String(o.v ?? ''), user: String(o.u ?? '') }; } catch { /* plain text that looks like JSON */ } }
   return { value: plain, user: '' };
 }
+// Kinds of secret: a login (username + password), an SSH login (host + user + password or private key), or a token / API key.
+export const TYPES = ['login', 'ssh', 'token'];
+export const typeOf = (i) => (TYPES.includes(i.type) ? i.type : i.hasUser ? 'login' : 'token');
+function connection(type, { host, port, auth, username }, value) {
+  if (type !== 'ssh') return {};
+  host = String(host || '').trim();
+  if (!/^[A-Za-z0-9]([A-Za-z0-9.:_-]{0,251}[A-Za-z0-9])?$|^\[[0-9a-fA-F:]+\]$/.test(host)) throw err(400, 'Enter the server name or IP address, for example 10.0.0.5 or server.example.com');
+  const p = port === undefined || port === '' ? 22 : Number(port);
+  if (!Number.isInteger(p) || p < 1 || p > 65535) throw err(400, 'The port must be a number from 1 to 65535');
+  if (!String(username || '').trim()) throw err(400, 'Enter the username to log in as');
+  if (/[\s@]/.test(String(username).trim())) throw err(400, 'The username cannot contain spaces or @');
+  auth = auth === 'key' ? 'key' : 'password';
+  if (auth === 'key' && value !== undefined && !/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(value)) throw err(400, 'That does not look like a private key. It should start with -----BEGIN … PRIVATE KEY-----');
+  return { host, port: p, auth };
+}
+const cleanKey = (v) => String(v).replace(/\r\n?/g, '\n').trim() + '\n';
 export const envName = (name) => 'APIARY_SECRET_' + String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 
 export class Vault {
@@ -74,24 +90,35 @@ export class Vault {
 
   _need() { if (!this.exists) throw err(409, 'Create the vault first'); if (!this.unlocked) throw err(423, 'The vault is locked. Unlock it first.'); }
   list() {
-    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, name: i.name, note: i.note || '', createdAt: i.createdAt, username: this.users.get(i.id) || '', hasUsername: !!i.hasUser, assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
+    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, name: i.name, note: i.note || '', createdAt: i.createdAt, username: this.users.get(i.id) || '', hasUsername: !!i.hasUser, type: typeOf(i), host: i.host || '', port: i.port || 0, auth: i.auth || '', assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
   }
   byName(name) { return Object.values(this.data?.items || {}).find((i) => i.name.toLowerCase() === String(name).trim().toLowerCase()); }
-  add(name, value, note = '', username = '') {
+  add(name, value, note = '', username = '', meta = {}) {
     this._need();
     name = String(name || '').trim().slice(0, 60);
     if (!name) throw err(400, 'Give the secret a name');
     if (!String(value || '')) throw err(400, 'Enter the secret value');
     if (String(value).length > 20000) throw err(400, 'That value is too large');
     if (this.byName(name)) throw err(409, `You already have a secret called "${name}"`);
-    const id = randomUUID().slice(0, 8), user = String(username || '').trim().slice(0, 200);
-    this.data.items[id] = { id, name, note: String(note).slice(0, 300), createdAt: Date.now(), assigned: {}, hasUser: !!user, ...seal(this.key, pack(String(value), user), id) };
+    const type = TYPES.includes(meta.type) ? meta.type : String(username || '').trim() ? 'login' : 'token';
+    const id = randomUUID().slice(0, 8), user = type === 'token' ? '' : String(username || '').trim().slice(0, 200);
+    const conn = connection(type, { ...meta, username: user }, type === 'ssh' && meta.auth === 'key' ? String(value) : undefined);
+    if (conn.auth === 'key') value = cleanKey(value);
+    this.data.items[id] = { id, name, note: String(note).slice(0, 300), createdAt: Date.now(), assigned: {}, hasUser: !!user, type, ...conn, ...seal(this.key, pack(String(value), user), id) };
     this.values.set(id, String(value)); if (user) this.users.set(id, user); this._save();
     return this.list().find((i) => i.id === id);
   }
-  update(id, { value, username, note, assigned }) {
+  update(id, { value, username, note, assigned, host, port, auth }) {
     const it = this.data?.items[id];
     if (!it) throw err(404, 'No such secret');
+    if (typeOf(it) === 'ssh' && (host !== undefined || port !== undefined || auth !== undefined)) {
+      const u = username !== undefined ? username : this.users.get(id) || '';
+      const nextAuth = auth !== undefined ? auth : it.auth;
+      const c = connection('ssh', { host: host ?? it.host, port: port ?? it.port, auth: nextAuth, username: u }, nextAuth === 'key' && value ? String(value) : undefined);
+      if (c.auth !== it.auth && !(value !== undefined && value !== '')) throw err(400, `Changing to ${c.auth === 'key' ? 'a private key' : 'a password'} needs the new ${c.auth === 'key' ? 'key' : 'password'} too. Use Replace secret.`);
+      Object.assign(it, c);
+    }
+    if (typeOf(it) === 'ssh' && it.auth === 'key' && value !== undefined && value !== '') { if (!/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(String(value))) throw err(400, 'That does not look like a private key. It should start with -----BEGIN … PRIVATE KEY-----'); value = cleanKey(value); }
     if ((value !== undefined && value !== '') || username !== undefined) {
       this._need();
       const val = value !== undefined && value !== '' ? String(value) : this.values.get(id);

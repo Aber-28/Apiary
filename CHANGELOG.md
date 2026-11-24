@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.12.0
+
+* **Kinds of secret.** Add an **SSH login** (server, port, username, password or private key), a **Login** (username and password) or an **API key or long-lived token**. Agents you give access to can use all of them.
+* **`apiary-ssh`.** Agents log in to servers with `apiary-ssh "Name" -- command`. Apiary handles the password or key itself, so the agent never sees it: passwords go through ssh's own prompt mechanism and keys through a short-lived ssh-agent, never a file. Server fingerprints are remembered in Apiary's own `known_hosts`.
+* Private keys can be chosen from a file, so they are never displayed. Existing secrets keep working: one with a username becomes a Login, one without becomes an API key or token.
+
 ## 0.11.4
 
 * **Responsible agent for projects.** Every project shows who is responsible (the CEO by default) in its header and on its card, and you can change it. The responsible agent and the project lead can now message each other, which teams could not do before.

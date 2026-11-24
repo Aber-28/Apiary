@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.30.0
+
+- **Agents talk freely in any direction.** A message to a teammate no longer holds the sender's chat until the teammate has finished. The message is delivered, and the reply comes back as a new message in the sender's own chat. Before, Bruce's chat sat at "waiting for Neo" until Neo's turn ended, and anything you sent to Bruce queued behind it. A child agent is no longer refused for asking its parent.
+
 ## 0.27.0
 
 - **Choose how much an agent may do without asking.** When an agent wants to run a shell command, the Approvals page now offers: Allow once, Always allow this exact command, Always allow any command that runs the same program, Always allow read-only commands, Allow everything for this agent (asks you to confirm), and Deny.

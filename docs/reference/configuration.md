@@ -8,7 +8,7 @@ Apiary needs no config file. Everything is set in the interface or with environm
 | --- | --- | --- |
 | `APIARY_PORT` | `7777` | Port to listen on |
 | `APIARY_HOST` | `127.0.0.1` | Address to listen on. Anything other than local **requires** `APIARY_TOKEN` |
-| `APIARY_TOKEN` | none | Secret needed to use the app |
+| `APIARY_TOKEN` | none | Secret needed to use the app. `apiary start --lan` creates one for you (`~/.apiary/token`) |
 | `APIARY_ALLOWED_HOSTS` | none | Extra host names accepted (comma separated) |
 | `APIARY_HOME` | `~/.apiary` | Where Apiary stores everything |
 | `APIARY_MAX_DEPTH` / `_AGENTS` / `_ROUNDS` / `_PEER_MESSAGES` | 2 / 12 / 4 / 30 | Default [delegation limits](../using-apiary/rules.md) |

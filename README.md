@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | ba
 apiary
 ```
 
-Open <http://127.0.0.1:7777>, go to **Connections**, and connect Claude, Codex and GitHub through your terminal or the web.
+Open <http://127.0.0.1:7777> (on a VM or server? run `apiary start --lan` and open the link it prints from your own computer), go to **Connections**, and connect Claude, Codex and GitHub through your terminal or the web.
 
 Prefer to do it by hand?
 

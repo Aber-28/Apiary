@@ -14,7 +14,7 @@ Agents can run commands on your computer, so Apiary is strict by default.
 
 ## Using it beyond your own computer
 
-Set `APIARY_TOKEN` and `APIARY_ALLOWED_HOSTS`, and put it behind HTTPS. Do **not** expose it directly to the internet: anyone with the token can run commands as your user.
+Start it with `apiary start --lan`. This enables an access token and accepts requests addressed to an IP address (which cannot be used for DNS rebinding). Host names must be listed in `APIARY_ALLOWED_HOSTS`. Put it behind HTTPS or a VPN if it leaves a network you trust. Do **not** expose it directly to the internet: anyone with the token can run commands as your user.
 
 ## Reporting a problem
 

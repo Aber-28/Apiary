@@ -40,7 +40,9 @@ export function createServer(engine) {
   function guard(req, url) {
     // Stops other websites (CSRF) and DNS-rebinding from driving a local agent runner.
     const hostName = (req.headers.host || '').replace(/:\d+$/, '');
-    if (!LOOPBACK.has(hostName) && !EXTRA_HOSTS.has(hostName)) return [403, 'Host not allowed (set APIARY_ALLOWED_HOSTS)'];
+    // A bare IP address cannot be used for DNS rebinding, so with a token set it is safe to accept (LAN use).
+    const ipHost = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostName) || /^\[[0-9a-fA-F:]+\]$/.test(hostName);
+    if (!LOOPBACK.has(hostName) && !EXTRA_HOSTS.has(hostName) && !(TOKEN && ipHost)) return [403, TOKEN ? 'Host not allowed. Use the server\'s IP address, or set APIARY_ALLOWED_HOSTS=<name>' : 'Host not allowed. To open Apiary from another device, start it with: apiary start --lan'];
     if (req.headers.origin) {
       let o; try { o = new URL(req.headers.origin).host; } catch { return [403, 'Bad origin']; }
       if (o !== req.headers.host) return [403, 'Cross-origin request blocked'];
@@ -60,6 +62,10 @@ export function createServer(engine) {
     const url = new URL(req.url, 'http://x');
     try {
       const bad = guard(req, url);
+      if (bad && bad[0] === 401 && req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
+        return res.end('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Apiary</title><body style="font:16px system-ui;max-width:34em;margin:15vh auto;padding:0 1em"><h1>Apiary needs its access link</h1><p>This Apiary is protected. Open the full link printed in the terminal where it was started (it ends with <code>/?token=…</code>), or run <code>apiary token</code> on that machine.</p>');
+      }
       if (bad) return json(res, bad[0], { error: bad[1] });
       if (url.searchParams.get('token') && TOKEN && req.method === 'GET' && url.pathname === '/') {
         res.setHeader('set-cookie', `apiary_token=${encodeURIComponent(TOKEN)}; HttpOnly; SameSite=Strict; Path=/`);
@@ -167,7 +173,7 @@ export function createServer(engine) {
   });
 }
 
-export function main() {
+export function main(links = []) {
   if (!LOOPBACK.has(HOST) && !TOKEN) {
     console.error('Refusing to listen on a non-local address without APIARY_TOKEN set.');
     process.exit(1);
@@ -179,6 +185,7 @@ export function main() {
   server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set APIARY_PORT to another port.` : e.message); process.exit(1); });
   server.listen(PORT, HOST, () => {
     console.log(`Apiary ${VERSION} running at http://${HOST}:${PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
+    if (links.length) { console.log('\nOpen it from another device on your network with:'); for (const l of links) console.log('  ' + l); console.log('Keep these links private: anyone who has one can run commands as you.\n'); }
     console.log('Connected:', engine.available.map((p) => `${p.id} (${p.method})`).join(', ') || 'nothing yet');
   });
   const bye = () => { store.flush(); process.exit(0); };

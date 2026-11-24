@@ -1,7 +1,8 @@
 # The apiary command
 
 ```text
-apiary [start]                     Start Apiary
+apiary [start] [--lan] [--port N]  Start Apiary. --lan: reachable from other devices, with a token
+apiary token                       Print the access link used with --lan
 apiary status                      Show connections, projects and agents
 apiary connect <claude|codex|github> [--method cli|api|token] [--model NAME]
 apiary attach <agent-name>         Follow an agent's terminal log (read-only)
@@ -39,3 +40,11 @@ apiary attach researcher
 Matches by name (or id) and prints new log lines as they arrive. Read-only.
 
 `status`, `connect` and `attach` talk to a running Apiary. If you use a non-default port or token, set `APIARY_PORT` / `APIARY_TOKEN` for the command too.
+
+## start --lan
+
+```bash
+apiary start --lan
+```
+
+Listens on all network addresses and protects Apiary with an access token (created once, stored in `~/.apiary/token`, readable only by you). It prints a ready-to-open link for each address of the machine. `apiary token` prints the link again. See [Run it as a service](../getting-started/service.md#using-it-from-another-device-vm-server-phone).

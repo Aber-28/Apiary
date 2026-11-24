@@ -225,5 +225,32 @@ store.flush();
 const engine2 = new Engine(new Store(path.join(tmp, 'state.json')));
 assert.ok(engine2.agents[lead2.id]);
 
+// ---- LAN mode: reachable by IP with a token, still locked down ----
+{
+  const { spawn } = await import('node:child_process');
+  const http = await import('node:http');
+  const ip = Object.values(os.networkInterfaces()).flat().find((i) => i && i.family === 'IPv4' && !i.internal)?.address;
+  const port = 7800 + Math.floor(Math.random() * 150);
+  const home = path.join(tmp, 'lan');
+  const child = spawn(process.execPath, [path.join(process.cwd(), 'bin/apiary.js'), 'start', '--lan', '--port', String(port)], { env: { ...process.env, APIARY_HOME: home }, stdio: ['ignore', 'pipe', 'pipe'] });
+  let out = ''; child.stdout.on('data', (d) => (out += d)); child.stderr.on('data', (d) => (out += d));
+  await until(() => /running at/.test(out), 6000);
+  const token = (await import('node:fs')).readFileSync(path.join(home, 'token'), 'utf8').trim();
+  assert.match(token, /^[0-9a-f]{48}$/);
+  assert.equal(((await import('node:fs')).statSync(path.join(home, 'token')).mode & 0o777), 0o600, 'token file is private');
+  const get = (host, p, headers = {}) => new Promise((resolve) => http.get({ host: '127.0.0.1', port, path: p, headers: { host, ...headers } }, (r) => { let b = ''; r.on('data', (d) => (b += d)); r.on('end', () => resolve({ status: r.statusCode, body: b })); }));
+  const target = ip || '127.0.0.1';
+  assert.equal((await get(`${target}:${port}`, '/api/state')).status, 401, 'token required');
+  const page = await get(`${target}:${port}`, '/', { accept: 'text/html' });
+  assert.equal(page.status, 401); assert.match(page.body, /access link/, 'friendly page, not JSON');
+  assert.equal((await get(`${target}:${port}`, '/api/state', { 'x-apiary-token': token })).status, 200, 'IP address + token works');
+  assert.equal((await get(`${target}:${port}`, `/?token=${token}`)).status, 200);
+  assert.equal((await get(`evil.example:${port}`, '/api/state', { 'x-apiary-token': token })).status, 403, 'unknown host names still blocked');
+  if (ip) assert.ok(out.includes(`http://${ip}:${port}/?token=${token}`), 'prints the link for this machine');
+  child.kill('SIGTERM');
+  // default mode: not reachable by other host names or IPs
+  assert.equal((await new Promise((resolve) => http.get({ host: '127.0.0.1', port: server.address().port, path: '/api/state', headers: { host: '192.168.1.50:7777' } }, (r) => { r.resume(); resolve(r.statusCode); }))), 403);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

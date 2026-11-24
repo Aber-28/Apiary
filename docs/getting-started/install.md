@@ -2,8 +2,6 @@
 
 Apiary has **no dependencies** beyond Node.js. You install it by pulling it from GitHub.
 
-> Replace `OWNER` below with the GitHub account or organisation that hosts the repository (for example `your-name/apiary`).
-
 ## Requirements
 
 | Needed | Why | Check |
@@ -38,7 +36,7 @@ sudo pacman -S nodejs npm git
 ## Option 1: one-line installer (recommended)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/OWNER/apiary/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash
 ```
 
 The script checks Node and git, clones Apiary to `~/.local/share/apiary`, and links the `apiary` command into `~/.local/bin`. Read it first if you like: it is short.
@@ -46,7 +44,7 @@ The script checks Node and git, clones Apiary to `~/.local/share/apiary`, and li
 ## Option 2: clone it yourself
 
 ```bash
-git clone https://github.com/OWNER/apiary.git ~/.local/share/apiary
+git clone https://github.com/Aber-28/Apiary.git ~/.local/share/apiary
 cd ~/.local/share/apiary
 mkdir -p ~/.local/bin
 ln -sf "$PWD/bin/apiary.js" ~/.local/bin/apiary
@@ -64,7 +62,7 @@ If the repository is private, sign in first and clone with the GitHub CLI:
 
 ```bash
 gh auth login
-gh repo clone OWNER/apiary ~/.local/share/apiary
+gh repo clone Aber-28/Apiary ~/.local/share/apiary
 ```
 
 ## Start it

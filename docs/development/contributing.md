@@ -1,7 +1,7 @@
 # Contributing and tests
 
 ```bash
-git clone https://github.com/OWNER/apiary.git
+git clone https://github.com/Aber-28/Apiary.git
 cd apiary
 npm test                         # end-to-end tests with the mock AI
 APIARY_MOCK=1 npm start          # run the UI with a fake AI, no accounts needed

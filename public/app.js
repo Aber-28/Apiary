@@ -156,7 +156,7 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
   renderUpdateChip();
   updateBadge();
 }
@@ -649,12 +649,12 @@ function pageUpdates() {
       catch (e) { if (/working right now/i.test(e.message) && confirm(`${e.message}\n\nInstall anyway? Running agents will be stopped.`)) await api('/api/update/install', 'POST', { force: true }); else throw e; }
       updateOverlay(S.version);
     }) }, `Install ${u.latest}`) : null;
-    const auto = h('input', { type: 'checkbox', checked: S.autoUpdate, 'aria-label': 'Check for updates automatically', onchange: guard(async (e) => { await api('/api/settings', 'PUT', { autoUpdate: e.target.checked }); S.autoUpdate = e.target.checked; }) });
+    const auto = h('select', { 'aria-label': 'How often to check for updates', onchange: guard(async (e) => { const r = await api('/api/settings', 'PUT', { updateCheck: e.target.value }); S.updateCheck = r.updateCheck; S.autoUpdate = r.autoUpdate; toast(e.target.value === 'manual' ? 'Apiary will only check when you press the button' : `Apiary will check ${e.target.value}`); }) }, [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['manual', 'Only when I press the button']].map(([v, l]) => h('option', { value: v, selected: S.updateCheck === v }, l)));
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Updates'), h('p', { class: 'sub-title' }, 'Apiary checks GitHub for a new version and downloads it without installing. You decide when to install; it then restarts and your browser refreshes.'))),
       h('div', { class: 'card' }, h('p', {}, h('b', {}, `Installed: ${S.version}`), u.latest && u.state === 'ready' ? ` · Available: ${u.latest}` : ''), h('p', {}, msg), u.checkedAt ? h('p', { class: 'hint' }, `Last checked ${new Date(u.checkedAt).toLocaleString()}`) : null,
         u.notes?.length ? h('details', { open: true }, h('summary', {}, 'What is new'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, [].concat(u.notes).join('\n'))) : null,
         h('div', { class: 'kv', style: 'margin-top:12px' }, check, install), busy,
-        h('label', { class: 'check', style: 'margin-top:12px' }, auto, ' Check automatically every few hours')));
+        h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))));
   };
   draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };
 }
@@ -898,9 +898,29 @@ const debounce = (fn, ms = 700) => { let t; return (...a) => { clearTimeout(t); 
 const dlgOpen = (title, ...body) => { const d = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), ...body)); document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal(); return d; };
 
 // ---------- usage numbers shown next to the connections ----------
-async function loadUsage() { try { S.usage = await api('/api/usage?days=14'); renderSide(); } catch { /* not ready */ } }
+async function loadUsage() { try { S.usage = await api('/api/usage?days=14'); const l = await api('/api/provider-usage'); S.reported = l.limits; if (l.pending?.length) setTimeout(loadUsage, 4000); renderSide(); } catch { /* not ready */ } }
 setInterval(() => { if (!document.hidden) loadUsage(); }, 60000);
+const untilText = (iso) => { const m = Math.round((Date.parse(iso) - Date.now()) / 60000); if (!(m > 0)) return 'resets soon'; if (m < 90) return `resets in ${m} min`; if (m < 2880) return `resets in ${Math.round(m / 60)} h`; return `resets in ${Math.round(m / 1440)} days`; };
+const refreshBtn = (id) => h('button', { type: 'button', class: 'icon-btn' + (S.refreshing?.has(id) ? ' spin' : ''), 'aria-label': `Refresh ${PNAME[id] || id} usage`, title: 'Refresh usage now', disabled: S.refreshing?.has(id) || null, onclick: async () => {
+  (S.refreshing ||= new Set()).add(id); renderSide();
+  try { const l = await api('/api/provider-usage/refresh', 'POST', { id }); S.reported = l.limits; } catch (e) { toast(e.message, true); }
+  S.refreshing.delete(id); renderSide(); if (cur() === '#/usage') pageUsage();
+} }, '↻');
+function reportedLine(id, R) {
+  const old = R.source === 'last-session';
+  return h('div', { class: 'ulines' },
+    ...R.windows.map((w) => { const tone = w.pct >= 100 ? 'err' : w.pct >= 80 ? 'warn' : 'ok';
+      return h('div', { class: 'uwin' },
+        h('div', { class: 'urow' }, h('small', {}, w.label, w.resetsAt && !w.reset ? h('span', { class: 'hint' }, ` · ${untilText(w.resetsAt)}`) : w.reset ? h('span', { class: 'hint' }, ' · reset since') : null), h('small', { class: tone === 'ok' ? '' : tone }, `${Math.round(w.pct)}%`)),
+        h('div', { class: 'ubar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(w.pct)), 'aria-label': `${PNAME[id] || id} ${w.label} usage` }, h('span', { class: tone, style: `width:${Math.min(100, w.pct)}%` })),
+      ); }),
+    h('div', { class: 'uscale', 'aria-hidden': 'true' }, h('span', {}, '0%'), h('span', {}, '100%')),
+    h('div', { class: 'urow' }, h('small', { class: 'hint' }, old ? `From ${PNAME[id]}'s own records, ${ago(Date.parse(R.asOf))}` : `From ${PNAME[id]}${R.plan ? ` (${R.plan})` : ''}, ${ago(R.fetchedAt)}`), refreshBtn(id)),
+    old && R.note ? h('small', { class: 'hint' }, R.note) : null);
+}
 function usageLine(id) {
+  const R = S.reported?.[id];
+  if (R?.ok) return reportedLine(id, R);
   if (!S.usage) return null;
   const p = S.usage.providers.find((x) => x.id === id) || { id, today: 0, week: 0 };
   const pct = p.pctDay ?? p.pctWeek, lim = p.pctDay != null ? p.daily : p.weekly, used = p.pctDay != null ? p.today : p.week;
@@ -908,7 +928,8 @@ function usageLine(id) {
   return h('div', { class: 'ulines' },
     h('div', { class: 'ubar' + (pct == null ? ' nolimit' : ''), role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct == null ? 0 : Math.min(100, Math.round(pct * 100))), 'aria-label': `${PNAME[id] || id} usage, 0 to 100 percent` }, h('span', { class: tone, style: `width:${pct == null ? 0 : Math.min(100, Math.round(pct * 100))}%` })),
     h('div', { class: 'uscale', 'aria-hidden': 'true' }, h('span', {}, '0%'), h('span', {}, pct == null ? '' : `${Math.min(100, Math.round(pct * 100))}%`), h('span', {}, '100%')),
-    h('small', { class: tone === 'ok' ? '' : tone }, p.hitAt ? 'Limit reached. Wait a while.' : pct != null ? `${fmtTok(used)} of ${fmtTok(lim)} ${p.pctDay != null ? 'today' : 'this week'}${pct >= 0.8 ? ' · nearly full' : ''}` : `${fmtTok(p.today)} today${p.estimated ? ' (estimated)' : ''}. ` , h('a', { href: '#/usage', style: 'text-decoration:underline' }, 'Set a limit to see the %')));
+    h('small', { class: tone === 'ok' ? '' : tone }, p.hitAt ? 'Limit reached. Wait a while.' : pct != null ? `${fmtTok(used)} of ${fmtTok(lim)} ${p.pctDay != null ? 'today' : 'this week'}${pct >= 0.8 ? ' · nearly full' : ''}` : `${fmtTok(p.today)} today${p.estimated ? ' (estimated)' : ''}. ` , h('a', { href: '#/usage', style: 'text-decoration:underline' }, 'Set a limit to see the %')),
+    h('div', { class: 'urow' }, h('small', { class: 'hint' }, R?.error ? `Not the provider's number: ${R.error}` : 'Counted by Apiary only. Checking with the provider…'), refreshBtn(id)));
 }
 
 // ---------- usage page: tokens per agent ----------

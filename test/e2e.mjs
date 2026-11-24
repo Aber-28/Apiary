@@ -955,5 +955,71 @@ let orgIds;
   const noHdr = await fetch(`${base}/api/import`, { method: 'POST', headers: { 'content-type': 'application/gzip' }, body: 'nope' }); assert.equal(noHdr.status, 415);
 }
 
+// ---- 0.9.0: usage reported by the AI itself, update check schedule ----
+{
+  const { Limits } = await import('../src/limits.js');
+  const http = await import('node:http');
+  const { mkdirSync: mk, writeFileSync: wf } = await import('node:fs');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-lim-')), cdir = path.join(dir, 'claude'), xdir = path.join(dir, 'codex');
+  mk(cdir, { recursive: true }); mk(path.join(xdir, 'sessions', '2026', '11', '24'), { recursive: true });
+  const seen = [];
+  let mode = 'ok';
+  const fake = http.createServer((req, res) => {
+    seen.push({ url: req.url, auth: req.headers.authorization, beta: req.headers['anthropic-beta'], acct: req.headers['chatgpt-account-id'] });
+    if (mode === '401') { res.writeHead(401); return res.end('{}'); }
+    res.setHeader('content-type', 'application/json');
+    if (req.url.startsWith('/claude')) return res.end(JSON.stringify({ five_hour: { utilization: 42.5, resets_at: new Date(Date.now() + 3600e3).toISOString() }, seven_day: { utilization: 81, resets_at: new Date(Date.now() + 86400e3).toISOString() }, seven_day_opus: null }));
+    res.end(JSON.stringify({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 12, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 600 }, secondary_window: { used_percent: 55, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 86400 } } }));
+  });
+  await new Promise((r) => fake.listen(0, '127.0.0.1', r));
+  const port = fake.address().port;
+  process.env.APIARY_CLAUDE_USAGE_URL = `http://127.0.0.1:${port}/claude`; process.env.APIARY_CODEX_USAGE_URL = `http://127.0.0.1:${port}/codex`;
+  const L = new Limits({ claudeDir: cdir, codexDir: xdir });
+
+  // no login: honest message, no numbers
+  let r = await L.refresh('claude', { force: true }); assert.equal(r.ok, false); assert.equal(r.reason, 'no-login'); assert.equal(r.windows.length, 0);
+  // with a login: the provider's own numbers
+  wf(path.join(cdir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-claude-xyz', expiresAt: Date.now() + 3600e3, subscriptionType: 'max' } }));
+  r = await L.refresh('claude', { force: true });
+  assert.equal(r.ok, true); assert.equal(r.source, 'provider'); assert.equal(r.windows.length, 2); assert.equal(r.windows[0].pct, 42.5); assert.equal(r.windows[1].label, 'Weekly'); assert.equal(r.plan, 'max');
+  assert.equal(seen.at(-1).auth, 'Bearer tok-claude-xyz'); assert.equal(seen.at(-1).beta, 'oauth-2025-04-20');
+  assert.equal(JSON.stringify(r).includes('tok-claude-xyz'), false, 'the token is never part of the result');
+  // refreshing too quickly returns the cached answer, force asks again
+  const n = seen.length; await L.refresh('claude'); assert.equal(seen.length, n); await L.refresh('claude', { force: true }); assert.equal(seen.length, n + 1);
+  // rejected login
+  mode = '401'; r = await L.refresh('claude', { force: true }); assert.equal(r.ok, false); assert.equal(r.reason, 'auth'); mode = 'ok';
+  // expired login
+  wf(path.join(cdir, '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'old', expiresAt: Date.now() - 3600e3 } }));
+  r = await L.refresh('claude', { force: true }); assert.equal(r.reason, 'expired');
+
+  // codex: provider first
+  wf(path.join(xdir, 'auth.json'), JSON.stringify({ tokens: { access_token: 'tok-codex', account_id: 'acct-1' } }));
+  r = await L.refresh('codex', { force: true });
+  assert.equal(r.source, 'provider'); assert.deepEqual(r.windows.map((w) => [w.label, w.pct]), [['5-hour', 12], ['Weekly', 55]]); assert.equal(seen.at(-1).acct, 'acct-1');
+  // codex: provider down, falls back to its own session records and says so
+  mode = '401';
+  const stamp = new Date().toISOString();
+  wf(path.join(xdir, 'sessions', '2026', '11', '24', 'rollout-a.jsonl'), [JSON.stringify({ type: 'session_meta' }), JSON.stringify({ timestamp: stamp, type: 'event_msg', payload: { type: 'token_count', rate_limits: { primary: { used_percent: 33, window_minutes: 300, resets_at: Math.floor(Date.now() / 1000) + 900 }, secondary: { used_percent: 70, window_minutes: 10080, resets_at: Math.floor(Date.now() / 1000) - 5 } } } }), '{"partial'].join('\n'));
+  r = await L.refresh('codex', { force: true });
+  assert.equal(r.source, 'last-session'); assert.equal(r.ok, true); assert.match(r.note, /last recorded/); assert.equal(r.windows[0].pct, 33);
+  assert.equal(r.windows[1].pct, 0, 'a window that has reset since is shown as reset'); assert.equal(r.windows[1].reset, true);
+  mode = 'ok'; fake.close();
+
+  // through the engine and the API
+  engine.providerLimits.claudeDir = cdir; engine.providerLimits.codexDir = xdir;
+  const v = (await call('/api/provider-usage')).body; assert.ok(typeof v.limits === 'object' && Array.isArray(v.pending));
+  const rr = await call('/api/provider-usage/refresh', 'POST', {}); assert.equal(rr.status, 200);
+
+  // how often to look for updates: the person chooses
+  assert.equal(engine.updateCheck, 'daily'); assert.equal(engine.autoUpdate, true);
+  for (const c of ['weekly', 'monthly', 'manual', 'daily']) assert.equal((await call('/api/settings', 'PUT', { updateCheck: c })).body.updateCheck, c);
+  assert.equal((await call('/api/settings', 'PUT', { updateCheck: 'hourly' })).status, 400);
+  await call('/api/settings', 'PUT', { updateCheck: 'weekly' });
+  engine.store.data.settings.lastUpdateCheck = Date.now() - 2 * 86400000; assert.equal(engine.updateDue(), false, 'weekly: not yet after 2 days');
+  engine.store.data.settings.lastUpdateCheck = Date.now() - 8 * 86400000; assert.equal(engine.updateDue(), true);
+  await call('/api/settings', 'PUT', { updateCheck: 'manual' }); assert.equal(engine.updateDue(), false, 'manual never checks by itself'); assert.equal(engine.autoUpdate, false);
+  await call('/api/settings', 'PUT', { autoUpdate: true }); assert.equal(engine.updateCheck, 'daily', 'the old on/off switch still works');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

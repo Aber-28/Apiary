@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.16.0
+
+* **Automatic backups** (Settings > Backups). Choose daily or weekly and a time, and Apiary makes the same export you can make by hand, saves it in a folder, and keeps the newest few (7 by default). Each file is opened and checked right after it is written, so a broken backup is reported at once. Choose whether to include the Secrets vault (it stays encrypted) and project folders. A second folder, such as a network share, gets a copy, because a backup on the same disk does not survive the disk. There is **Back up now**, and each backup can be downloaded. Restore one with Export and import.
+* **Machine usage in the top bar.** A very small strip shows CPU, memory and disk of the computer Apiary runs on, refreshed every 5 seconds from Linux. It turns amber when high and red when nearly full; hover for details.
+
 ## 0.15.1
 
 * **Factory reset** (Settings > Factory reset). Deletes everything Apiary holds (projects, chats, tasks, agents, the CEO and team, memory, the infrastructure map, the vault and its auto-unlock key, connections and settings) and restarts into the setup wizard. It takes three checks: type YES, type YES again, then answer a simple sum. A wrong answer cancels everything, and the checks are enforced by the server, not just the page. Your access link and sign-in account are kept (tick a box to remove the account too), and folders on your computer that a project only pointed at are never touched.

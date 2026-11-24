@@ -95,3 +95,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 ## Factory reset
 
 `POST /api/reset` `{action:"start"}` begins; then `{id, answer}` answers each check in order (YES, YES, a sum). `{action:"cancel"}` cancels. `removeAccount:true` on the last answer also removes the sign-in account.
+
+## Backups and machine usage
+
+* `GET /api/backups` shows settings, status and saved backups. `PUT /api/backups` changes settings. `POST /api/backups/run` makes one now. `GET /api/backups/<file>` downloads one.
+* `GET /api/system` returns CPU, memory and disk figures for the local machine.

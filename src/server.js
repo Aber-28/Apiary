@@ -20,6 +20,8 @@ import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
 import { TYPES } from './infra.js';
 import { ResetGate, factoryReset } from './reset.js';
+import { snapshot as systemSnapshot } from './system.js';
+import { createReadStream } from 'node:fs';
 import { EVERY } from './limits.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
@@ -32,6 +34,7 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const EXTRA_HOSTS = new Set((process.env.APIARY_ALLOWED_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean));
 
 export function createServer(engine, { updater = null, restart = () => {}, auth = new Auth(path.join(HOME, 'auth.json')) } = {}) {
+  engine.backups.version = VERSION;
   const clients = new Set();
   const resetGate = new ResetGate();
   engine.on('event', (ev) => {
@@ -360,6 +363,17 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         engine.runMeeting(root.id).catch((e) => engine._log(root, `! team meeting failed: ${e.message}`));
         return json(res, 202, { started: true });
       }
+      // ----- machine usage (top bar) -----
+      if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
+      // ----- automatic backups -----
+      if (url.pathname === '/api/backups' && req.method === 'GET') return json(res, 200, { config: engine.backups.config, status: engine.backups.status, files: engine.backups.list(), vaultExists: engine.vault.exists });
+      if (url.pathname === '/api/backups' && req.method === 'PUT') { const config = engine.backups.setConfig(await readBody(req)); return json(res, 200, { config, status: engine.backups.status, files: engine.backups.list() }); }
+      if (url.pathname === '/api/backups/run' && req.method === 'POST') { await readBody(req); const r = await engine.backups.run('manual'); return json(res, 200, { ...r, files: engine.backups.list(), status: engine.backups.status }); }
+      if (req.method === 'GET' && (r = m(/^\/api\/backups\/(apiary-backup-[\d-]+\.tgz)$/))) {
+        const f = engine.backups.file(r[1]);
+        res.writeHead(200, { 'content-type': 'application/gzip', 'content-disposition': `attachment; filename="${r[1]}"`, 'cache-control': 'no-store' });
+        return createReadStream(f).pipe(res);
+      }
       // ----- infrastructure map -----
       if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
       if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
@@ -482,6 +496,7 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setInterval(() => engine.backups.tick().catch(() => {}), 60000).unref();
   setTimeout(() => engine.refreshLimits().catch(() => {}), 8000).unref();
   setInterval(() => engine.refreshLimits().catch(() => {}), EVERY).unref();   // once an hour
   if (process.env.APIARY_NO_UPDATE_CHECK !== '1') {

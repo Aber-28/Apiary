@@ -20,6 +20,8 @@
 * [Project stages](using-apiary/project-stages.md)
 * [Call an agent with @](using-apiary/mentions.md)
 * [Export and import](using-apiary/export-import.md)
+* [Automatic backups](using-apiary/backups.md)
+* [Machine usage in the top bar](using-apiary/machine-usage.md)
 * [Factory reset](using-apiary/factory-reset.md)
 * [Tasks](using-apiary/tasks.md)
 * [Live activity](using-apiary/live-activity.md)

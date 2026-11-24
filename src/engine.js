@@ -20,6 +20,7 @@ import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Infra } from './infra.js';
+import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
 import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
@@ -67,6 +68,7 @@ export class Engine extends EventEmitter {
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
+    this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);

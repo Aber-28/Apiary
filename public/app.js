@@ -102,7 +102,7 @@ const NAV = [
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -144,6 +144,7 @@ const ROUTES = [
   [/^#\/infrastructure$/, () => pageInfra('devices')],
   [/^#\/infrastructure\/map$/, () => pageInfra('map')],
   [/^#\/signin$/, () => pageSignin()],
+  [/^#\/backups$/, () => pageBackups()],
   [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
@@ -1289,6 +1290,58 @@ function pageActivity() {
     if (ev.type === 'log') (tails[ev.agentId] ||= []).push(ev.line);
     if (!queued) queued = setTimeout(() => { queued = 0; if (cur() === '#/activity') load(); }, 400);
   } };
+}
+
+// ---------- machine usage in the top bar ----------
+const GB = (b) => (b >= 1073741824 ? (b >= 10737418240 ? Math.round(b / 1073741824) : Math.round(b / 107374182.4) / 10) + ' GB' : b >= 1048576 ? Math.round(b / 104857.6) / 10 + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+async function pollSystem() {
+  const el = document.getElementById('sys');
+  if (!el || document.hidden) return;
+  try {
+    const s = await api('/api/system');
+    const part = (label, pct, tip) => h('span', { class: pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : '', title: tip }, label + ' ', h('b', {}, pct == null ? '–' : pct + '%'));
+    const mp = s.mem ? Math.round(100 * s.mem.used / s.mem.total) : null, dp = s.disk ? Math.round(100 * s.disk.used / s.disk.total) : null;
+    el.replaceChildren(part('CPU', s.cpu, `${s.cores} cores. Load ${s.load.join(' / ')} (1, 5, 15 minutes)`), part('RAM', mp, s.mem ? `${GB(s.mem.used)} used of ${GB(s.mem.total)}` : ''), part('Disk', dp, s.disk ? `${GB(s.disk.total - s.disk.used)} free of ${GB(s.disk.total)}` : ''));
+    el.hidden = false;
+  } catch { /* the page is about to redirect or the server is restarting */ }
+}
+setInterval(pollSystem, 5000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
+
+// ---------- backups ----------
+async function pageBackups() {
+  crumbs('Settings', 'Backups');
+  const draw = async () => {
+    let d; try { d = await api('/api/backups'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const c = d.config, st = d.status;
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const on = h('input', { type: 'checkbox', checked: c.enabled });
+    const every = h('select', {}, [['daily', 'Every day'], ['weekly', 'Every week']].map(([k, t]) => h('option', { value: k, selected: c.every === k }, t)));
+    const day = h('select', { 'aria-label': 'Day of the week' }, days.map((n, i) => h('option', { value: i, selected: c.weekday === i }, n)));
+    const time = h('input', { type: 'time', value: c.time, 'aria-label': 'Time' });
+    const keep = h('input', { type: 'number', min: '1', max: '60', value: c.keep, 'aria-label': 'How many to keep' });
+    const vault = h('input', { type: 'checkbox', checked: c.vault }), files = h('input', { type: 'checkbox', checked: c.files });
+    const dir = h('input', { type: 'text', value: c.dir, spellcheck: 'false', autocapitalize: 'none', 'aria-label': 'Backup folder' });
+    const dir2 = h('input', { type: 'text', value: c.dir2, placeholder: 'Optional, for example /mnt/nas/apiary-backups', spellcheck: 'false', autocapitalize: 'none', 'aria-label': 'Second folder' });
+    const sync = () => { day.style.display = every.value === 'weekly' ? '' : 'none'; }; every.onchange = sync; sync();
+    const save = guard(async () => { await api('/api/backups', 'PUT', { enabled: on.checked, every: every.value, weekday: Number(day.value), time: time.value, keep: Number(keep.value), vault: vault.checked, files: files.checked, dir: dir.value, dir2: dir2.value }); toast('Saved'); draw(); });
+    const run = guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Backing up…'; try { const r = await api('/api/backups/run', 'POST', {}); toast(`Backup saved (${GB(r.size)})`); } finally { draw(); } });
+    const when = (t) => (t ? new Date(t).toLocaleString() : 'never');
+    view.replaceChildren(h('h1', {}, 'Backups'), h('p', { class: 'sub-title' }, 'A copy of everything, made for you on a schedule. Restore one with Export and import.'),
+      h('div', { class: 'card', style: 'max-width:680px' },
+        h('p', {}, st.lastError ? h('span', { class: 'pill err' }, 'Last backup failed') : st.lastOk ? h('span', { class: 'pill ok' }, 'Last backup worked') : h('span', { class: 'pill' }, 'No backup yet'), ' ', st.lastOk ? `${when(st.lastOk)} (${GB(st.lastSize)}, checked after saving)` : ''),
+        st.lastError ? h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' }, st.lastError) : null, st.lastCopyError ? h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' }, st.lastCopyError) : null,
+        h('label', { class: 'check' }, on, ' Back up automatically'),
+        h('div', { class: 'formrow', style: 'margin:10px 0' }, every, day, time, h('label', { class: 'hint' }, 'Keep the newest ', keep)),
+        h('label', { class: 'check' }, vault, ' Include the Secrets vault', d.vaultExists ? '' : ' (none yet)'), h('p', { class: 'hint', style: 'margin:2px 0 8px 24px' }, 'It stays encrypted. Restoring it needs your passphrase, and without the passphrase the backup copy of the vault is useless.'),
+        h('label', { class: 'check' }, files, ' Include project folders and repositories'), h('p', { class: 'hint', style: 'margin:2px 0 8px 24px' }, 'Bigger backups, but everything comes back. Turn off to save only settings, chats, agents and the map.'),
+        h('label', { class: 'f' }, 'Save to this folder', dir), h('label', { class: 'f' }, 'Also copy to (a second place, such as a network share)', dir2),
+        h('p', { class: 'hint' }, 'A backup on the same disk does not help if the disk fails, so a second place is recommended.'),
+        h('div', { class: 'formrow' }, h('button', { class: 'btn primary', onclick: save }, 'Save settings'), h('button', { class: 'btn', onclick: run }, 'Back up now'))),
+      h('div', { class: 'card', style: 'max-width:680px;margin-top:12px' }, h('h2', {}, 'Saved backups'),
+        d.files.length ? d.files.map((f) => h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;margin:4px 0' }, h('span', {}, `${new Date(f.at).toLocaleString()} · ${GB(f.size)}`), h('a', { class: 'btn', href: `/api/backups/${f.name}`, download: f.name }, 'Download'))) : h('p', { class: 'hint' }, 'None yet.'),
+        h('p', { class: 'hint', style: 'margin-top:8px' }, 'To restore: Settings > Export and import > Import, and choose a downloaded file. A factory reset does not delete these backups.')));
+  };
+  await draw(); page = { shows: () => true, update: (ev) => ev.type === 'backup' && !document.querySelector('dialog[open]') && draw() };
 }
 
 // ---------- infrastructure: devices and the map ----------

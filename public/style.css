@@ -215,3 +215,8 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .masked{-webkit-text-security:disc;text-security:disc;font-family:var(--mono,monospace)}
 .secret-fields input[type=file]{padding:6px}
 .stack{display:flex;flex-direction:column;gap:12px}
+
+.sys{display:inline-flex;gap:10px;align-items:center;font-size:10.5px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+.sys b{font-weight:600;color:var(--text)}.sys .warn b{color:#b8741a}.sys .bad b{color:var(--err)}
+.sys[hidden]{display:none}
+@media (max-width:760px){.sys{display:none}}

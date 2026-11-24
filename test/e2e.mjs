@@ -1493,5 +1493,48 @@ let orgIds;
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(appjs, /Start factory reset/); assert.match(appjs, /pageActivity/); assert.match(appjs, /Working now/);
 }
 
+// ---- automatic backups and machine usage ----
+{
+  const { lastDue } = await import('../src/backup.js');
+  const at = (y, mo, d, h, mi) => new Date(y, mo - 1, d, h, mi);
+  assert.equal(+lastDue({ every: 'daily', time: '02:00' }, at(2026, 11, 24, 10, 0)), +at(2026, 11, 24, 2, 0));
+  assert.equal(+lastDue({ every: 'daily', time: '02:00' }, at(2026, 11, 24, 1, 0)), +at(2026, 11, 23, 2, 0));
+  assert.equal(+lastDue({ every: 'weekly', time: '03:30', weekday: 1 }, at(2026, 11, 24, 10, 0)), +at(2026, 11, 23, 3, 30), 'the Monday before Tuesday 24 Nov 2026');
+  const bdir = path.join(tmp, 'bk1'), bdir2 = path.join(tmp, 'bk2');
+  assert.equal((await call('/api/backups', 'PUT', { dir: 'relative/dir' })).status, 400);
+  assert.equal((await call('/api/backups', 'PUT', { dir: '/' })).status, 400);
+  assert.equal((await call('/api/backups', 'PUT', { keep: 0 })).status, 400);
+  assert.equal((await call('/api/backups', 'PUT', { time: '25:99' })).status, 400);
+  assert.equal((await call('/api/backups', 'PUT', { dir: bdir, dir2: bdir })).status, 400, 'two different places');
+  const cfg = (await call('/api/backups', 'PUT', { dir: bdir, dir2: bdir2, keep: 2, vault: false, files: false })).body.config;
+  assert.equal(cfg.dir, bdir); assert.equal(cfg.keep, 2);
+  // a backup is made, checked, private, and the vault stays out when unticked
+  const r1 = (await call('/api/backups/run', 'POST', {})).body; assert.match(r1.name, /^apiary-backup-\d{8}-\d{6}\.tgz$/);
+  assert.equal(fsStat(path.join(bdir, r1.name)).mode & 0o777, 0o600); assert.ok(fsExists(path.join(bdir2, r1.name)), 'copied to the second place');
+  const listing = (await import('node:child_process')).execFileSync('tar', ['-tzf', path.join(bdir, r1.name)], { encoding: 'utf8' }).split('\n');
+  assert.ok(listing.includes('state.json')); assert.ok(!listing.includes('vault.json'), 'no vault in this backup'); assert.ok(!listing.some((n) => n.startsWith('workspaces')), 'no project files when unticked');
+  assert.ok(!listing.some((n) => n.includes('backups')), 'backups are not backed up inside backups');
+  await call('/api/backups/run', 'POST', {}); await call('/api/backups/run', 'POST', {});
+  const l = (await call('/api/backups')).body; assert.equal(l.files.length, 2, 'only the newest two are kept'); assert.equal(l.status.lastError, ''); assert.ok(l.status.lastOk > 0);
+  assert.equal((await import('node:fs')).readdirSync(bdir2).filter((n) => n.endsWith('.tgz')).length, 2, 'the second place is pruned too');
+  // download works for real backups only
+  const dl = await fetch(base + '/api/backups/' + l.files[0].name); assert.equal(dl.status, 200); assert.equal(dl.headers.get('content-type'), 'application/gzip'); assert.equal((await dl.arrayBuffer()).byteLength, l.files[0].size);
+  assert.equal((await fetch(base + '/api/backups/apiary-backup-19990101-000000.tgz')).status, 404); assert.equal((await fetch(base + '/api/backups/..%2Fstate.json')).status, 404);
+  // a failing second place is reported but the backup itself still counts
+  const blocker = path.join(tmp, 'blocker'); (await import('node:fs')).writeFileSync(blocker, 'x');
+  await call('/api/backups', 'PUT', { dir2: path.join(blocker, 'sub') });
+  const r4 = (await call('/api/backups/run', 'POST', {})).body; assert.match(r4.copyError, /copy to .* failed/);
+  // the schedule: not due when a backup is recent, due when it is old; off means never
+  await call('/api/backups', 'PUT', { enabled: true, dir2: '', every: 'daily', time: '02:00' });
+  const eng = engine.backups, now = new Date();
+  eng.st.lastRun = Date.now(); assert.equal(await eng.tick(now), null, 'recent backup, nothing due');
+  eng.st.lastRun = +lastDue(eng.config, now) - 1000; const ran = await eng.tick(now); assert.ok(ran && ran.reason === 'schedule', 'overdue, so it runs');
+  await call('/api/backups', 'PUT', { enabled: false }); eng.st.lastRun = 0; assert.equal(await eng.tick(now), null, 'switched off');
+  // machine usage
+  await call('/api/system'); await new Promise((r) => setTimeout(r, 2100));
+  const sys = (await call('/api/system')).body; assert.ok(sys.cpu >= 0 && sys.cpu <= 100); assert.ok(sys.mem.total > 0 && sys.mem.used <= sys.mem.total); assert.ok(sys.disk.total > 0);
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(appjs, /Back up now/); assert.match(appjs, /pollSystem/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

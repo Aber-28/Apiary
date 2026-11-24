@@ -64,14 +64,15 @@ function runProc(cmd, args, { cwd, input, signal, onLine, env }) {
 
 // ---------- terminal (CLI) providers ----------
 const claudeCli = {
-  async run({ agent, prompt, system, env, signal, onText, onActivity, onLog }) {
+  async run({ agent, prompt, system, env, dirs = [], signal, onText, onActivity, onLog }) {
     const full = agent.access === 'full';
     const args = ['-p', '--output-format', 'stream-json', '--verbose',
       '--permission-mode', full ? 'bypassPermissions' : 'acceptEdits',
       '--append-system-prompt', system];
     if (agent.model) args.push('--model', agent.model);
+    for (const d of dirs) args.push('--add-dir', d);
     if (agent.sessionId) args.push('--resume', agent.sessionId);
-    let sessionId = agent.sessionId, streamed = '', final = null, isError = false;
+    let sessionId = agent.sessionId, streamed = '', final = null, isError = false, usage = null;
     const { code, stderr } = await runProc('claude', args, {
       cwd: agent.cwd, input: prompt, signal, env,
       onLine: (line) => {
@@ -92,12 +93,12 @@ const claudeCli = {
               logOutput(onLog, t);
             }
           }
-        } else if (ev.type === 'result') { final = ev.result; isError = !!ev.is_error; }
+        } else if (ev.type === 'result') { final = ev.result; isError = !!ev.is_error; const u = ev.usage; if (u) usage = { input: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), output: u.output_tokens || 0 }; }
       },
     });
     if (isError) throw new Error(final || 'Claude reported an error');
     if (final == null && code !== 0) throw new Error(stderr.trim() || `claude exited with code ${code}`);
-    return { text: (final ?? streamed).trim(), sessionId };
+    return { text: (final ?? streamed).trim(), sessionId, usage };
   },
 };
 
@@ -115,7 +116,7 @@ const codexCli = {
     const flags = ['--json', '--skip-git-repo-check', '--sandbox', full ? 'danger-full-access' : 'workspace-write'];
     if (agent.model) flags.push('-m', agent.model);
     const args = agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'];
-    let sessionId = agent.sessionId, last = '', err = null;
+    let sessionId = agent.sessionId, last = '', err = null, usage = null;
     const { code, stderr } = await runProc('codex', args, {
       cwd: agent.cwd, input, signal, env,
       onLine: (line) => {
@@ -128,13 +129,15 @@ const codexCli = {
           onActivity(`Running: ${String(it.command).slice(0, 80)}`); onLog(`$ ${clip(String(it.command), 300)}`);
         } else if (ev.type === 'item.completed' && it?.type === 'command_execution') {
           logOutput(onLog, it.aggregated_output);
-        } else if (ev.type === 'turn.failed') err = ev.error?.message || 'Codex turn failed';
+        } else if (ev.type === 'turn.completed' && ev.usage) usage = { input: Math.max(0, (ev.usage.input_tokens || 0) - (ev.usage.cached_input_tokens || 0)), output: ev.usage.output_tokens || 0 };
+        else if (ev.type === 'turn.completed' && ev.usage) usage = { input: Math.max(0, (ev.usage.input_tokens || 0) - (ev.usage.cached_input_tokens || 0)), output: ev.usage.output_tokens || 0 };
+        else if (ev.type === 'turn.failed') err = ev.error?.message || 'Codex turn failed';
         else if (ev.type === 'error') err = ev.message || err;
       },
     });
     if (err && !last) throw new Error(err);
     if (!last && code !== 0) throw new Error(stderr.trim() || `codex exited with code ${code}`);
-    return { text: last.trim(), sessionId };
+    return { text: last.trim(), sessionId, usage };
   },
 };
 
@@ -164,14 +167,16 @@ const claudeApi = {
     });
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const log = lineLogger(onLog);
-    let text = '';
+    let text = '', uin = 0, uout = 0;
     for await (const data of sseData(res)) {
       let ev; try { ev = JSON.parse(data); } catch { continue; }
+      if (ev.type === 'message_start') uin = (ev.message?.usage?.input_tokens || 0) + (ev.message?.usage?.cache_creation_input_tokens || 0);
+      else if (ev.type === 'message_delta' && ev.usage?.output_tokens) uout = ev.usage.output_tokens;
       if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { text += ev.delta.text; onText(ev.delta.text); log.push(ev.delta.text); }
       else if (ev.type === 'error') throw new Error(ev.error?.message || 'Anthropic API error');
     }
     log.flush();
-    return { text: text.trim(), sessionId: null };
+    return { text: text.trim(), sessionId: null, usage: uin || uout ? { input: uin, output: uout } : null };
   },
 };
 
@@ -184,19 +189,20 @@ const codexApi = {
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST', signal,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${conn.apiKey}` },
-      body: JSON.stringify({ model, stream: true, messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: prompt }] }),
     });
     if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const log = lineLogger(onLog);
-    let text = '';
+    let text = '', usage = null;
     for await (const data of sseData(res)) {
       if (data === '[DONE]') break;
       let ev; try { ev = JSON.parse(data); } catch { continue; }
+      if (ev.usage) usage = { input: ev.usage.prompt_tokens || 0, output: ev.usage.completion_tokens || 0 };
       const d = ev.choices?.[0]?.delta?.content;
       if (d) { text += d; onText(d); log.push(d); }
     }
     log.flush();
-    return { text: text.trim(), sessionId: null };
+    return { text: text.trim(), sessionId: null, usage };
   },
 };
 
@@ -218,6 +224,12 @@ const mock = {
       else out = JSON.stringify({ done: true, overview: 'They run a home network and a website.', team: /network|server/i.test(prompt)
         ? [{ title: 'Network Engineer', department: 'networking', role: 'Looks after the network', reason: 'They run a home network' }, { title: 'Security Engineer', department: 'security', role: 'Reviews risk', reason: 'Network changes need review' }]
         : [{ title: 'Web Developer', department: 'engineering', role: 'Builds the site', reason: 'They run a website' }, { title: 'Researcher', department: 'research', role: 'Finds facts', reason: 'Decisions need facts' }] });
+    } else if (prompt.startsWith('Support ticket #')) {
+      onActivity('Looking into the ticket');
+      out = /unfixable/i.test(prompt) && !/New message from the human/.test(prompt) ? 'NEEDS HUMAN: Which server should I check?' : `RESOLVED: I looked into it and fixed it. ${/New message from the human/.test(prompt) ? '(after your reply)' : ''}`;
+    } else if (/make-task:/i.test(prompt) && !prompt.startsWith('Message from')) {
+      const t = /make-task:(\S+)/i.exec(prompt)[1].replace(/_/g, ' ');
+      out = 'Added it to the board.\n\n```apiary-task\n{"title":"' + t + '","notes":"from chat","status":"backburner"}\n```';
     } else if (prompt.startsWith('TEAM MEETING, update round')) {
       out = `Did my part of the work. Nothing blocked. (${agent.name})`;
     } else if (prompt.startsWith("TEAM MEETING, everyone's updates")) {
@@ -250,7 +262,7 @@ const mock = {
       if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.title || agent.name)}.txt`), `Work by ${agent.name}\n`);
       out = `Finished the job. Sees prerequisite: ${sees ? 'yes' : 'no'}. Checks: ${(prompt.match(/^- \w+: \w+/gm) || []).join(' | ')}`;
     } else if (!agent.parentId && agent.kind !== 'general' && !/Notes from Apiary:|^Nothing was run|^Reports from/m.test(prompt) && /\bhire\b/i.test(prompt)) {
-      out = 'I need specialists.\n\n```apiary-hire\n[{"name":"Frontend Engineer","role":"Builds the website UI","department":"engineering","reason":"The site needs a UI built and tested"},{"name":"Brand Writer","role":"Writes the site copy","department":"marketing","reason":"Copy needs a consistent voice","reportsTo":"Frontend Engineer"}]\n```';
+      out = 'I need specialists.\n\n```apiary-hire\n[{"name":"Frontend Engineer","role":"Builds the website UI","department":"engineering","complexity":"hard","reason":"The site needs a UI built and tested"},{"name":"Brand Writer","role":"Writes the site copy","department":"marketing","reason":"Copy needs a consistent voice","reportsTo":"Frontend Engineer"}]\n```';
     } else if (agent.team && !prompt.startsWith('Reports from your sub-agents') && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && /network|research|assign-to:/i.test(prompt)) {
       const at = /assign-to:(\S+)/i.exec(prompt);
       const to = at ? at[1].replace(/_/g, ' ') : /network/i.test(prompt) ? 'Networking' : 'Research';

@@ -52,3 +52,19 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | PUT/DELETE | `/api/vault/secrets/:id` | Edit, assign, delete |
 | GET | `/api/update` | Update status |
 | POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install |
+
+
+## 0.6.0 endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET/POST | `/api/tasks` | List the board, add a task (to do or back burner) |
+| PUT/DELETE | `/api/tasks/:id` | Move, edit, delete |
+| GET | `/api/usage?days=` | Tokens per day, per agent and per AI |
+| PUT | `/api/usage/limits` | Set limits per AI |
+| GET/POST | `/api/repos` | List, add a repository |
+| PUT/DELETE | `/api/repos/:id`, POST `/sync` | Edit who may read, remove, update |
+| GET/POST | `/api/tickets` | List, open a ticket |
+| POST | `/api/tickets/:id/comment`, `/status` | Reply, close or reopen |
+| GET | `/api/agents/:id/model-advice` | Suggested model |
+| PUT | `/api/agents/:id/model` | Change the model |

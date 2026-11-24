@@ -21,6 +21,11 @@ import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Vault, envName, redactPairs } from './vault.js';
 import * as orgfiles from './orgfiles.js';
+import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
+import { Tasks, STATUSES as TASK_STATUSES } from './tasks.js';
+import { Tickets } from './tickets.js';
+import { Repos } from './repos.js';
+import { suggestModel } from './models.js';
 
 const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
@@ -33,6 +38,7 @@ const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
 const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
+const TASK_RE = /```apiary-task\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
 const id8 = () => randomUUID().slice(0, 8);
@@ -53,6 +59,10 @@ export class Engine extends EventEmitter {
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'));
+    this.usage = new Usage(store);
+    this.tasks = new Tasks(store);
+    this.tickets = new Tickets(store);
+    this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
     this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
     this.seedTeams();
@@ -107,7 +117,7 @@ export class Engine extends EventEmitter {
     this.store.save();
     return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
   }
-  decide(id, { decision, note, only, names, mode } = {}) {
+  decide(id, { decision, note, only, names, mode, models } = {}) {
     const rec = this.store.data.approvals[id];
     if (!rec) throw httpErr(404, 'No such approval');
     if (rec.status !== 'pending' || !this.pending.has(id)) throw httpErr(409, 'This request was already answered or has expired');
@@ -121,11 +131,15 @@ export class Engine extends EventEmitter {
       rec.names = {};
       for (const [i, n] of Object.entries(names)) { const t = String(n || '').trim().slice(0, 40); if (t && rec.items?.[Number(i)]) rec.names[Number(i)] = t; }
     }
+    if (decision === 'approve' && rec.kind === 'hire' && models && typeof models === 'object') {
+      rec.models = {};
+      for (const [i, m] of Object.entries(models)) if (rec.items?.[Number(i)]) rec.models[Number(i)] = String(m || '').trim().slice(0, 80);
+    }
     rec.decidedAt = Date.now();
     const p = this.pending.get(id); this.pending.delete(id);
     this.emit('event', { type: 'approval', approval: rec });
     this.store.save();
-    p.resolve({ decision, note: rec.note, only: rec.only, names: rec.names, mode: rec.mode });
+    p.resolve({ decision, note: rec.note, only: rec.only, names: rec.names, mode: rec.mode, models: rec.models });
     return rec;
   }
 
@@ -143,8 +157,11 @@ export class Engine extends EventEmitter {
     this.store.data.settings.meeting = m; this.store.save();
     return this.meeting;
   }
-  setSettings({ defaultProvider, onboardingDone, autoUpdate, meeting }) {
+  get plainEnglish() { return this.store.data.settings.plainEnglish !== false; }
+  setSettings({ defaultProvider, onboardingDone, autoUpdate, meeting, plainEnglish, usageLimits }) {
     if (autoUpdate !== undefined) this.store.data.settings.autoUpdate = !!autoUpdate;
+    if (plainEnglish !== undefined) this.store.data.settings.plainEnglish = !!plainEnglish;
+    if (usageLimits) this.usage.setLimits(usageLimits);
     if (meeting) this.setMeeting(meeting);
     const st = this.store.data.settings;
     if (defaultProvider !== undefined) { if (defaultProvider && !['claude', 'codex'].includes(defaultProvider)) throw httpErr(400, 'Unknown provider'); st.defaultProvider = defaultProvider; }
@@ -323,27 +340,29 @@ export class Engine extends EventEmitter {
       const want = String(h.reportsTo || '').toLowerCase();
       const same = (m) => m.name.toLowerCase() === want || (m.title || '').toLowerCase() === want;
       const up = [root, ...roster].find(same) || ok.find((o) => o.name.toLowerCase() === want || o.title.toLowerCase() === want) || (proposer.member ? proposer : root);
-      ok.push({ title, name, provider, spec: { ...h, title, department: dept }, reportsTo: up.id || null, reportsToName: up.name, profile: buildProfile({ name, title, role: h.role, department: dept, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails }) });
+      const advice = suggestModel({ provider, department: dept, role: h.role, complexity: h.complexity, models: this._modelList(provider) });
+      ok.push({ title, name, provider, advice, spec: { ...h, title, department: dept }, reportsTo: up.id || null, reportsToName: up.name, profile: buildProfile({ name, title, role: h.role, department: dept, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails }) });
     }
     if (!ok.length) return;
-    let chosen = ok.map((x, i) => ({ x, i })), names = {};
+    let chosen = ok.map((x, i) => ({ x, i })), names = {}, models = {};
     if (this._needsApproval(proposer)) {
       this._setStatus(proposer, 'waiting');
       this.emit('event', { type: 'activity', agentId: proposer.id, text: 'Waiting for your approval to hire' });
       const r = await this._ask(proposer, {
         kind: 'hire', title: `${proposer.name} suggests hiring ${ok.length} ${ok.length > 1 ? 'people' : 'person'}`,
-        items: ok.map((x) => ({ name: x.name, title: x.title, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails })),
+        items: ok.map((x) => ({ name: x.name, title: x.title, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails, suggestedModel: x.advice.model, modelWhy: x.advice.why, modelOptions: this._modelList(x.provider).map((m) => m.id) })),
       });
       if (r.decision === 'deny') { notes.push(`The human did not approve these hires${r.note ? ': ' + r.note : ''}. Carry on without them or propose something different.`); return; }
       if (r.only) { const skipped = ok.length - r.only.length; chosen = chosen.filter(({ i }) => r.only.includes(i)); if (skipped) notes.push(`The human approved only some hires; ${skipped} were not hired.`); }
-      names = r.names || {};
+      names = r.names || {}; models = r.models || {};
       if (r.note) notes.push(`Human note: ${r.note}`);
     }
     const hired = [], made = new Map();
     for (const { x, i } of chosen) {
       // a manager proposed in the same batch only counts if they were actually hired
       const boss = x.reportsTo || made.get(x.reportsToName) || root.id;
-      const child = await this._makeMember(root, { ...x.spec, name: names[i] || x.name, provider: x.provider, reportsTo: boss });
+      const pickedModel = i in models ? models[i] : x.advice.model;
+      const child = await this._makeMember(root, { ...x.spec, name: names[i] || x.name, provider: x.provider, model: x.provider === 'mock' ? '' : pickedModel, reportsTo: boss });
       made.set(x.name, child.id);
       this._msg(root, { role: 'system', text: `Hired ${child.name}, ${x.title} (${x.profile.departmentLabel}), reporting to ${x.reportsToName}`, agentId: child.id });
       hired.push(`${child.name} (${x.title})`);
@@ -395,6 +414,7 @@ export class Engine extends EventEmitter {
     const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 180000);
     try {
       const res = await providers.pick(agent).run({ agent, prompt, system, signal: ctl.signal, history: [], conn: agent.method === 'api' ? this.connections.get(provider) : null, onText() {}, onActivity() {}, onLog() {} });
+      this._usage(agent, res, system, prompt);
       return res.text;
     } finally { clearTimeout(timer); }
   }
@@ -758,6 +778,7 @@ export class Engine extends EventEmitter {
   _system(agent) {
     const names = this.available.filter((p) => p.id !== 'mock').map((p) => p.id).join(', ') || agent.provider;
     let s = `You are "${agent.name}" (${agent.role}), one agent in a small team coordinated by Apiary. Work in your current directory unless told otherwise.\n`;
+    if (this.plainEnglish) s += '\nWRITING STYLE: Write in plain, simple English by default. Short sentences, everyday words, no jargon or buzzwords. If a technical term is needed, explain it in a few words the first time. Say what you did and what happens next. Code, commands and file contents stay exact.\n';
     const standing = this._standing(agent);
     if (standing) s += `\nStanding instructions for you:\n${standing}\n`;
     if (agent.method === 'api') s += 'You are connected through a web API: you cannot read files or run commands. Answer in text only.\n';
@@ -777,9 +798,10 @@ export class Engine extends EventEmitter {
     else if (agent.kind === 'general') s += '\nYou are the person\'s everyday assistant: answer questions, think things through and do quick tasks here. When something is a real piece of work with its own files and goals (a website, an app, a report series), suggest they create a project for it in Projects so it gets its own space, team and documents.\n';
     if (!agent.parentId) {
       s += '\nYou can propose permanent hires when this project needs a specialist that the team lacks. Apiary shows your proposal to the human with your reasons, writes each hire\'s profile and guardrails from its department, and adds approved people to the team (visible in the organisation chart). Propose like this:\n\n' +
-        '```apiary-hire\n{"title":"Job title","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","reportsTo":"Optional existing member name or title"}\n```\n\n' +
-        'Every hire automatically gets a comic-book style codename (the human can change it), so give a job title, not a name. Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
+        '```apiary-hire\n{"title":"Job title","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","complexity":"simple|normal|hard","reportsTo":"Optional existing member name or title"}\n```\n\n' +
+        'Every hire automatically gets a comic-book style codename (the human can change it), so give a job title, not a name. Say how hard the work is ("complexity"): Apiary then suggests the right AI model for the role. Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
     }
+    s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if (agent.member) {
       const lead = this.agents[agent.parentId];
@@ -818,25 +840,91 @@ export class Engine extends EventEmitter {
     this._log(agent, `── ${new Date().toLocaleTimeString()} ${agent.name} (${agent.provider}, ${agent.method === 'api' ? 'web' : 'terminal'}) ──`);
     try {
       const runner = providers.pick(agent);
+      const system = this._system(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
       const res = await runner.run({
-        agent, prompt, system: this._system(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : ''), signal: ctl.signal,
+        agent, prompt, system, dirs: this.repos.dirsFor(agent), signal: ctl.signal,
         history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
         onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }),
         onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
         onLog: (line) => this._log(agent, line), env: this._leaseEnv(agent),
       });
+      this._usage(agent, res, system, prompt);
       if (res.sessionId) agent.sessionId = res.sessionId;
       if (agent.method === 'api') {
         agent.history = [...(agent.history || []), { role: 'user', content: prompt }, { role: 'assistant', content: res.text }].slice(-40);
       }
       return res.text;
     } catch (e) {
-      if (e.name !== 'AbortError') this._log(agent, `! ${e.message}`);
+      if (e.name !== 'AbortError') { this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
       throw e;
     } finally {
       this.ctls.delete(agent.id);
       this.emit('event', { type: 'activity', agentId: agent.id, text: '' });
     }
+  }
+
+  _usage(agent, res, system, prompt) {
+    const u = res.usage;
+    if (u && (u.input || u.output)) this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: u.input, output: u.output });
+    else this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: estimateTokens(system, prompt), output: estimateTokens(res.text), estimated: true });
+  }
+
+  // ----- task board, tickets, model advice -----
+  _modelList(provider) { return this.connections.known(provider); }
+  adviseModel(agentId) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    const adv = suggestModel({ provider: a.provider, department: a.department || '', role: a.role, models: this._modelList(a.provider) });
+    return { ...adv, current: a.model || '', differs: !!adv.model && adv.model !== (a.model || '') && a.provider !== 'mock', options: this._modelList(a.provider) };
+  }
+  setModel(agentId, model) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    a.model = String(model || '').trim().slice(0, 80); a.sessionId = null; // a different model starts a fresh conversation
+    this.emit('event', { type: 'agent', agent: a }); this.store.save();
+    return a;
+  }
+  _agentTasks(agent, list) {
+    const project = this.rootOf(agent).id;
+    for (const t of list.slice(0, 10)) {
+      const status = TASK_STATUSES.includes(t.status) ? t.status : null;
+      const same = this.tasks.list.find((x) => x.title.toLowerCase() === t.title.trim().toLowerCase() && (x.project === project || x.project == null));
+      try {
+        if (same) this.tasks.update(same.id, { ...(status ? { status } : {}), ...(t.notes ? { notes: t.notes } : {}) }, agent.name);
+        else this.tasks.add({ title: t.title, notes: t.notes, status: status || 'todo', assignee: { id: agent.id, name: agent.name }, project, source: agent.name });
+      } catch { /* ignore a bad task from an agent */ }
+    }
+  }
+  tasksView() { return this.tasks.list.map((t) => ({ ...t, projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
+
+  // A ticket goes to the chosen agent, or to the CEO (who can pass it to the right specialist).
+  ticketHandler(t) {
+    const given = t.assignee && this.agents[t.assignee];
+    if (given) return given;
+    return Object.values(this.agents).find((a) => a.kind === 'general');
+  }
+  async runTicket(id, extra = '') {
+    const t = this.tickets.get(id);
+    const agent = this.ticketHandler(t);
+    if (!agent) throw httpErr(409, 'There is no agent to handle this yet. Set up your CEO first.');
+    if (t.status === 'working') throw httpErr(409, 'An agent is already working on this ticket');
+    this.tickets.setStatus(id, 'working');
+    let task = this.tasks.byRef(`ticket:${id}`);
+    if (!task) task = this.tasks.add({ title: `Ticket #${t.num}: ${t.title}`, notes: t.description, status: 'inprogress', assignee: { id: agent.id, name: agent.name }, source: 'ticket', ref: `ticket:${id}`, labels: ['ticket'] });
+    else this.tasks.update(task.id, { status: 'inprogress' }, 'Apiary');
+    const thread = t.comments.map((c) => `${c.who}: ${c.text}`).join('\n\n');
+    const prompt = `Support ticket #${t.num} (priority ${t.priority}): ${t.title}\n\n${t.description || '(no more detail given)'}\n${thread ? `\nConversation so far:\n${thread}\n` : ''}${extra ? `\nNew message from the human:\n${extra}\n` : ''}\nWork on this now. Fix what you can yourself, or hand it to the right team member. Reply in plain, simple English. Begin your reply with RESOLVED: (what you did and what the human should check) or NEEDS HUMAN: (the one thing you need from the human).`;
+    const done = this.send(agent.id, prompt, null).then((text) => {
+      const resolved = /^\W*RESOLVED/i.test(text || '');
+      this.tickets.comment(id, agent.name, String(text || '(no reply)').replace(/^\W*(RESOLVED|NEEDS HUMAN):?\s*/i, ''), resolved ? 'resolution' : 'question');
+      this.tickets.setStatus(id, resolved ? 'resolved' : 'open');
+      this.tasks.update(task.id, { status: resolved ? 'done' : 'blocked', reason: resolved ? '' : 'Waiting for your answer' }, agent.name);
+    }).catch((e) => {
+      this.tickets.comment(id, 'Apiary', `The agent could not finish: ${e.message}`, 'error');
+      this.tickets.setStatus(id, 'open');
+      this.tasks.update(task.id, { status: 'blocked', reason: e.message }, 'Apiary');
+    });
+    return { started: true, agent: agent.name, done };
   }
 
   async _commit(agent, label) {
@@ -857,9 +945,10 @@ export class Engine extends EventEmitter {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, secrets, errors } = parseSpawns(mem.clean);
+        const { clean, spawns, sends, assigns, hires, secrets, tasks, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
+        if (tasks.length) this._agentTasks(agent, tasks);
         if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !errors.length) || round === this.limits.maxRounds) break;
 
         const notes = [...errors];
@@ -1033,7 +1122,13 @@ export class Engine extends EventEmitter {
     if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => `${m.name} (${m.title || m.role})`).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
     this._edge(lead.id, worker.id);
     this._msg(lead, { role: 'system', text: `Assigned to ${worker.name}: ${a.task.slice(0, 160)}${a.task.length > 160 ? '…' : ''}`, agentId: worker.id });
-    const finish = (text) => { this.waitingOn.get(lead.id)?.delete(worker.id); return { kind: 'report', name: worker.name, text }; };
+    const task = this.tasks.add({ title: clipText(a.task, 100), notes: a.task, status: 'inprogress', assignee: { id: worker.id, name: worker.name }, project: this.rootOf(lead).id, source: 'system', labels: [worker.department || 'team'] });
+    const finish = (text) => {
+      this.waitingOn.get(lead.id)?.delete(worker.id);
+      const ok = !/^\W*(NOT STARTED|FAILED)/i.test(text || '');
+      try { this.tasks.update(task.id, { status: ok ? 'done' : 'blocked', reason: ok ? '' : clipText(text, 160) }, 'Apiary'); } catch { /* task removed meanwhile */ }
+      return { kind: 'report', name: worker.name, text };
+    };
     try {
       // 1. The assignee checks with everyone else before it starts.
       const advisers = roster.filter((m) => m.id !== worker.id && m.consult !== false);
@@ -1129,7 +1224,12 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], errors = [];
+  reply = reply.replace(TASK_RE, (_, body) => {
+    try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || !String(x.title || '').trim()) { errors.push('An apiary-task block needs a "title".'); continue; } tasks.push({ title: String(x.title), notes: String(x.notes || ''), status: x.status }); } }
+    catch (err) { errors.push(`An apiary-task block was not valid JSON (${err.message}).`); }
+    return '';
+  });
   reply = reply.replace(SECRET_RE, (_, body) => {
     try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || !String(x.name || '').trim()) { errors.push('An apiary-secret block needs a "name".'); continue; } secrets.push({ name: String(x.name), why: String(x.why || '').slice(0, 300) }); } }
     catch (err) { errors.push(`An apiary-secret block was not valid JSON (${err.message}).`); }
@@ -1139,7 +1239,7 @@ export function parseSpawns(reply) {
     try {
       for (const h of [].concat(JSON.parse(body.trim()))) {
         if (!h || !String(h.title || h.name || '').trim()) { errors.push('An apiary-hire block needs a "title".'); continue; }
-        hires.push({ name: String(h.name || h.title), title: h.title, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo });
+        hires.push({ name: String(h.name || h.title), title: h.title, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo, complexity: h.complexity });
       }
     } catch (err) { errors.push(`An apiary-hire block was not valid JSON (${err.message}).`); }
     return '';
@@ -1181,7 +1281,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, secrets, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, tasks, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };

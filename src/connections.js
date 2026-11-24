@@ -86,6 +86,9 @@ export class Connections {
     } catch (e) { return { ok: false, error: e.message }; }
   }
 
+  // Models known right now without asking anyone (last list from the provider, else the suggestions).
+  known(id) { return this._known?.[id] || PRESETS[id] || []; }
+
   // Models to offer as the default. Asks the provider when an API key is saved, else falls back to suggestions.
   async models(id) {
     if (!DEFAULTS[id] || id === 'github') throw Object.assign(new Error('Unknown connection'), { status: 404 });
@@ -99,7 +102,7 @@ export class Connections {
           const list = ((await res.json()).data || []).map((m) => ({ id: m.id, label: m.display_name ? `${m.display_name}` : m.id }))
             .filter((m) => id === 'claude' || !/embed|whisper|tts|dall-e|moderation|image|audio|realtime|transcribe/i.test(m.id))
             .sort((a, b) => a.id.localeCompare(b.id));
-          if (list.length) return { source: 'provider', models: list };
+          if (list.length) { (this._known ||= {})[id] = list; return { source: 'provider', models: list }; }
         }
       } catch { /* fall through to suggestions */ }
     }

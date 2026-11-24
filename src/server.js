@@ -89,19 +89,57 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish });
         if (req.method === 'PUT') {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
           if (b.memory !== undefined) engine.setMemoryEnabled(b.memory);
           engine.setSettings(b);
-          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate });
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish });
         }
       }
+      // ----- task board -----
+      if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, { tasks: engine.tasksView(), counts: engine.tasks.counts() });
+      if (url.pathname === '/api/tasks' && req.method === 'POST') { const b = await readBody(req); return json(res, 201, engine.tasks.add({ title: b.title, notes: b.notes, status: ['todo', 'backburner'].includes(b.status) ? b.status : 'todo', labels: b.labels, project: b.project || null, assignee: b.assignee ? { id: b.assignee, name: engine.agents[b.assignee]?.name || '' } : null })); }
+      if ((r = m(/^\/api\/tasks\/([\w-]+)$/))) {
+        if (req.method === 'PUT') { const b = await readBody(req); if (b.assignee !== undefined) b.assignee = b.assignee ? { id: b.assignee, name: engine.agents[b.assignee]?.name || '' } : null; return json(res, 200, engine.tasks.update(r[1], b)); }
+        if (req.method === 'DELETE') { engine.tasks.remove(r[1]); return json(res, 200, { ok: true }); }
+      }
+      // ----- usage -----
+      if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, 200, engine.usage.summary(Number(url.searchParams.get('days')) || 14));
+      if (url.pathname === '/api/usage/limits' && req.method === 'PUT') { engine.usage.setLimits((await readBody(req)).limits || {}); return json(res, 200, engine.usage.summary()); }
+      // ----- repositories -----
+      if (url.pathname === '/api/repos' && req.method === 'GET') return json(res, 200, engine.repos.list);
+      if (url.pathname === '/api/repos' && req.method === 'POST') return json(res, 201, await engine.repos.add(await readBody(req)));
+      if ((r = m(/^\/api\/repos\/([\w-]+)$/))) {
+        if (req.method === 'PUT') return json(res, 200, engine.repos.update(r[1], await readBody(req)));
+        if (req.method === 'DELETE') { engine.repos.remove(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if ((r = m(/^\/api\/repos\/([\w-]+)\/sync$/)) && req.method === 'POST') return json(res, 200, await engine.repos.sync(r[1]));
+      // ----- support tickets -----
+      if (url.pathname === '/api/tickets' && req.method === 'GET') return json(res, 200, { tickets: engine.tickets.list, handler: engine.ticketHandler({})?.name || null });
+      if (url.pathname === '/api/tickets' && req.method === 'POST') {
+        const b = await readBody(req), t = engine.tickets.add({ title: b.title, description: b.description, priority: b.priority, assignee: b.assignee || null });
+        if (b.run !== false) { const j = await engine.runTicket(t.id).catch((e) => { engine.tickets.comment(t.id, 'Apiary', e.message, 'error'); return null; }); j?.done.catch(() => {}); }
+        return json(res, 201, engine.tickets.get(t.id));
+      }
+      if ((r = m(/^\/api\/tickets\/([\w-]+)$/))) {
+        if (req.method === 'PUT') return json(res, 200, engine.tickets.update(r[1], await readBody(req)));
+        if (req.method === 'DELETE') { engine.tickets.remove(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if ((r = m(/^\/api\/tickets\/([\w-]+)\/comment$/)) && req.method === 'POST') {
+        const b = await readBody(req); engine.tickets.comment(r[1], 'You', b.text, 'human');
+        if (b.run !== false) { const j = await engine.runTicket(r[1], b.text); j.done.catch(() => {}); }
+        return json(res, 200, engine.tickets.get(r[1]));
+      }
+      if ((r = m(/^\/api\/tickets\/([\w-]+)\/status$/)) && req.method === 'POST') return json(res, 200, engine.tickets.setStatus(r[1], (await readBody(req)).status));
+      // ----- model advice -----
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/model-advice$/)) && req.method === 'GET') return json(res, 200, engine.adviseModel(r[1]));
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/model$/)) && req.method === 'PUT') return json(res, 200, engine.setModel(r[1], (await readBody(req)).model));
       if (req.method === 'GET' && url.pathname === '/api/approvals') return json(res, 200, engine.approvals());
       if ((r = m(/^\/api\/approvals\/([\w-]+)\/decide$/)) && req.method === 'POST') return json(res, 200, engine.decide(r[1], await readBody(req)));
       if (req.method === 'GET' && url.pathname === '/api/connections') {

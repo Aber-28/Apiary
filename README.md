@@ -46,4 +46,4 @@ npm test
 APIARY_MOCK=1 npm start
 ```
 
-MIT licensed.
+Free to use, not open for modification: see [LICENSE](LICENSE). Documentation: https://aber-28.gitbook.io/aber-28-docs/

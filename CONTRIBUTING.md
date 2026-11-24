@@ -1,11 +1,10 @@
 # Contributing
 
-Thanks for helping make Apiary better.
+Apiary is **use-only**: the code is not open for outside changes, and pull requests are not accepted.
 
-1. Fork and clone, then `npm test` (needs Node.js 20+ and git).
-2. Run the UI with a fake AI: `APIARY_MOCK=1 npm start`.
-3. Keep it **dependency-free** and **build-step-free**. Render dynamic text with `textContent` only.
-4. Add a test in `test/e2e.mjs` for every behaviour change, and update `docs/` if users will notice.
-5. Open a pull request with a short description of what and why. CI must pass.
+- Found a bug or have an idea? Open an **issue** (see the issue templates), or use the in-app **Support tickets**.
+- Found a security problem? Use *Security → Report a vulnerability* on GitHub, not a public issue. See [SECURITY.md](SECURITY.md).
 
-See [docs/development](docs/development/contributing.md) for the architecture.
+Only the owner can change the code. Updates reach your install through *Settings → Updates*.
+
+For how it works, see [docs/development](docs/development/contributing.md).

@@ -691,6 +691,93 @@ let orgIds;
   srv2.close();
 }
 
+// ---- task board, usage, model advice, repositories, tickets, plain English ----
+{
+  const { suggestModel } = await import('../src/models.js');
+  const { looksLikeLimit, estimateTokens } = await import('../src/usage.js');
+  // task board
+  const t1 = (await call('/api/tasks', 'POST', { title: 'Renew the domain', status: 'todo', labels: 'Admin, Money' })).body;
+  const t2 = (await call('/api/tasks', 'POST', { title: 'Idea: smart garden', notes: 'add details later', status: 'backburner' })).body;
+  assert.equal(t1.status, 'todo'); assert.deepEqual(t1.labels, ['admin', 'money']); assert.equal(t2.status, 'backburner');
+  assert.equal((await call('/api/tasks', 'POST', { title: 'Sneaky', status: 'done' })).body.status, 'todo', 'people create to do or back burner items');
+  assert.equal((await call('/api/tasks', 'POST', { title: '  ' })).status, 400);
+  assert.equal((await call(`/api/tasks/${t2.id}`, 'PUT', { status: 'todo' })).body.status, 'todo', 'an idea can be promoted');
+  assert.equal((await call(`/api/tasks/${t1.id}`, 'PUT', { status: 'nonsense' })).status, 400);
+  const moved = (await call(`/api/tasks/${t1.id}`, 'PUT', { status: 'inprogress' })).body; assert.ok(moved.log.some((l) => /In progress/.test(l.text)));
+  assert.equal((await call(`/api/tasks/${t1.id}`, 'PUT', { status: 'done' })).body.status, 'done'); assert.ok(engine.tasks.get(t1.id).doneAt);
+  const board = (await call('/api/tasks')).body; assert.ok(board.counts.done >= 1 && Object.keys(board.counts).length === 5);
+  assert.ok(board.tasks.some((t) => t.source === 'system' && t.status === 'done' && t.assignee?.name === 'Rex Router'), 'finished team jobs are marked done');
+  assert.ok(board.tasks.some((t) => t.source === 'system' && t.status === 'blocked'), 'jobs that could not start are marked blocked');
+  await call(`/api/agents/${orgIds.ceo.id}/messages`, 'POST', { text: 'make-task:Order_a_new_router' });
+  await until(() => engine.agents[orgIds.ceo.id].status === 'idle' && engine.tasks.list.some((t) => t.title === 'Order a new router'));
+  const agentTask = engine.tasks.list.find((t) => t.title === 'Order a new router'); assert.equal(agentTask.status, 'backburner'); assert.equal(agentTask.source, orgIds.ceo.name);
+  await call(`/api/tasks/${t2.id}`, 'DELETE'); assert.equal((await call(`/api/tasks/${t2.id}`, 'PUT', {})).status, 404);
+
+  // usage per agent and per AI, with limits
+  const u = (await call('/api/usage?days=7')).body;
+  assert.equal(u.series.length, 7); assert.ok(u.agents.length >= 2 && u.agents[0].total >= u.agents.at(-1).total, 'agents sorted by use');
+  assert.ok(u.series.at(-1).total > 0); const mp = u.providers.find((p) => p.id === 'mock'); assert.ok(mp.today > 0 && mp.estimated === true);
+  assert.equal(mp.pctDay, null);
+  const lim = (await call('/api/usage/limits', 'PUT', { limits: { mock: { daily: mp.today * 2, weekly: 0 } } })).body.providers.find((p) => p.id === 'mock');
+  assert.ok(lim.pctDay > 0.3 && lim.pctDay < 1.1 && lim.pctWeek === null);
+  assert.ok(looksLikeLimit('Claude usage limit reached') && looksLikeLimit('429 Too Many Requests') && !looksLikeLimit('file not found'));
+  engine.usage.markLimit('mock'); assert.ok((await call('/api/usage')).body.providers.find((p) => p.id === 'mock').hitAt > 0);
+  assert.ok(estimateTokens('x'.repeat(400)) === 100);
+
+  // plain English by default, and it can be turned off
+  assert.equal(engine.plainEnglish, true); assert.match(engine._system(orgIds.ne), /plain, simple English/);
+  await call('/api/settings', 'PUT', { plainEnglish: false }); assert.doesNotMatch(engine._system(orgIds.ne), /plain, simple English/);
+  await call('/api/settings', 'PUT', { plainEnglish: true }); assert.match(engine._system(orgIds.ne), /plain, simple English/);
+  assert.equal((await call('/api/state')).body.plainEnglish, true);
+
+  // model advice by role and difficulty
+  const models = [{ id: 'claude-sonnet-5-5' }, { id: 'claude-opus-5-5' }, { id: 'claude-haiku-5-5' }];
+  assert.equal(suggestModel({ provider: 'claude', department: 'security', models }).model, 'claude-opus-5-5');
+  assert.equal(suggestModel({ provider: 'claude', department: 'operations', models }).model, 'claude-haiku-5-5');
+  assert.equal(suggestModel({ provider: 'claude', department: 'engineering', models }).model, 'claude-sonnet-5-5');
+  assert.equal(suggestModel({ provider: 'claude', department: 'operations', complexity: 'hard', models }).model, 'claude-opus-5-5', 'stated difficulty wins');
+  assert.match(suggestModel({ provider: 'claude', department: 'security', models }).why, /high-stakes/);
+  const adv = (await call(`/api/agents/${orgIds.se.id}/model-advice`)).body; assert.equal(adv.tier, 'heavy'); assert.ok(adv.why);
+  assert.equal((await call(`/api/agents/${orgIds.se.id}/model`, 'PUT', { model: 'claude-opus-5-5' })).body.model, 'claude-opus-5-5');
+  await call(`/api/agents/${orgIds.se.id}/model`, 'PUT', { model: '' });
+  assert.match(engine._system(orgIds.ceo), /complexity/); assert.match(engine._system(orgIds.ceo), /apiary-task/);
+
+  // repositories the agents may read from
+  const repoDir = path.join(tmp, 'ref-repo'); (await import('node:fs')).mkdirSync(repoDir);
+  (await import('node:fs')).writeFileSync(path.join(repoDir, 'README.md'), '# Home lab notes\nVLAN layout lives here.\n');
+  sh(repoDir, 'init', '-q', '-b', 'main'); sh(repoDir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'add', '-A'); sh(repoDir, '-c', 'user.email=t@t', '-c', 'user.name=t', 'commit', '-qm', 'notes');
+  assert.equal((await call('/api/repos', 'POST', { source: 'https://user:pw@github.com/a/b.git' })).status, 400, 'no secrets in addresses');
+  assert.equal((await call('/api/repos', 'POST', { source: '/no/such/folder' })).status, 400);
+  const repo = (await call('/api/repos', 'POST', { source: repoDir, name: 'Lab notes', notes: 'Network layout and VLANs' })).body;
+  assert.equal(repo.kind, 'local'); assert.match(repo.overview, /Home lab notes/); assert.match(repo.overview, /Latest commit: .* notes/);
+  assert.equal(engine.repos.contextFor(orgIds.ne), '', 'not assigned yet');
+  await call(`/api/repos/${repo.id}`, 'PUT', { agents: [orgIds.ne.id] });
+  assert.match(engine._system(orgIds.ne) + engine.repos.contextFor(orgIds.ne), /REFERENCE REPOSITORIES[\s\S]*Lab notes[\s\S]*Network layout/);
+  assert.equal(engine.repos.contextFor(orgIds.se), ''); assert.deepEqual(engine.repos.dirsFor(orgIds.ne), [repoDir]);
+  await call(`/api/repos/${repo.id}`, 'PUT', { agents: [], everyone: true }); assert.match(engine.repos.contextFor(orgIds.se), /Lab notes/);
+  assert.equal((await call(`/api/repos/${repo.id}/sync`, 'POST')).status, 200);
+  assert.equal((await call(`/api/repos/${repo.id}`, 'DELETE')).status, 200); assert.ok(fsExists(path.join(repoDir, 'README.md')), 'a local folder is never deleted');
+
+  // support tickets: an agent works on it and answers
+  assert.equal((await call('/api/tickets', 'POST', { title: '' })).status, 400);
+  const k1 = (await call('/api/tickets', 'POST', { title: 'Backups are failing', description: 'Last night nothing was saved', priority: 'high' })).body;
+  assert.equal(k1.num, 1);
+  await until(() => engine.tickets.get(k1.id).status === 'resolved', 8000);
+  const done1 = engine.tickets.get(k1.id); assert.ok(done1.comments.some((c) => c.kind === 'resolution' && /fixed it/.test(c.text) && c.who === orgIds.ceo.name));
+  assert.ok(engine.messages(orgIds.ceo.id).some((m) => /Support ticket #1/.test(m.text || '')));
+  assert.equal(engine.tasks.byRef(`ticket:${k1.id}`).status, 'done', 'a ticket shows on the board');
+  const k2 = (await call('/api/tickets', 'POST', { title: 'An unfixable thing', description: 'unfixable' })).body;
+  await until(() => engine.tickets.get(k2.id).comments.some((c) => c.kind === 'question'), 8000);
+  assert.equal(engine.tickets.get(k2.id).status, 'open'); assert.equal(engine.tasks.byRef(`ticket:${k2.id}`).status, 'blocked');
+  await call(`/api/tickets/${k2.id}/comment`, 'POST', { text: 'The NAS in the garage' });
+  await until(() => engine.tickets.get(k2.id).comments.some((c) => c.kind === 'resolution' && /after your reply/.test(c.text)), 8000);
+  assert.ok(engine.tickets.get(k2.id).comments.some((c) => c.kind === 'human'));
+  assert.equal((await call(`/api/tickets/${k2.id}/status`, 'POST', { status: 'closed' })).body.status, 'closed');
+  assert.equal((await call(`/api/tickets/${k2.id}/status`, 'POST', { status: 'weird' })).status, 400);
+  assert.equal((await call('/api/tickets')).body.tickets.length, 2);
+  assert.equal((await call(`/api/tickets/${k2.id}`, 'DELETE')).status, 200);
+}
+
 // ---- LAN mode: reachable by IP with a token, still locked down ----
 {
   const { spawn } = await import('node:child_process');

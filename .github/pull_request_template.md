@@ -1,6 +1,2 @@
-## What and why
-
-## Checklist
-- [ ] `npm test` passes
-- [ ] Tests added or updated
-- [ ] Docs updated (if user-visible)
+Thank you, but Apiary does not accept outside code changes (see CONTRIBUTING.md).
+Please open an issue instead. This pull request will be closed.

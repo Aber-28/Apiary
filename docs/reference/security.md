@@ -24,3 +24,8 @@ Open a private security advisory on the GitHub repository.
 ## Secrets
 
 Secrets live only in the encrypted vault (AES-256-GCM, key derived with scrypt from your passphrase, which is never stored). Agents can use a secret only when it is assigned to them and you approve (once or always). Values reach only the running command and are redacted from chat, logs, memory and meeting minutes.
+
+
+## The code itself
+
+Apiary installs and updates from the official GitHub repository, so that repository is protected: only the owner can change the main branch or the release tags, history cannot be rewritten, and outside pull requests are not accepted. Report problems through private vulnerability reporting.

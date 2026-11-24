@@ -75,10 +75,11 @@ $('#menu').onclick = () => $('#side').classList.toggle('open');
 applyTheme(document.documentElement.className || 'dark');
 
 // ---------- sidebar ----------
+const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
-  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
-  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
+  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
@@ -88,19 +89,20 @@ function renderSide() {
   const newBtn = h('button', { class: 'btn primary big', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project');
   const groups = NAV.map((g) => {
     const has = g.items.some(([href]) => isActive(href));
-    const open = S.open[g.id] ?? has;
+    const open = S.openGroup === undefined ? has : S.openGroup === g.id;
     return h('div', { class: `nav-group${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
-      h('button', { 'aria-expanded': String(open), onclick: () => { S.open[g.id] = !open; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
+      h('button', { 'aria-expanded': String(open), onclick: () => { S.openGroup = open ? null : g.id; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
       h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null))));
   });
   const conn = (S.conns || []).map((c) => {
     const ok = c.id === 'github' ? c.status?.ok : c.ready;
     const way = c.method === 'cli' ? 'Terminal' : c.method === 'api' ? 'Web · API' : 'Web · token';
-    return h('div', { class: 'conn-row' }, h('span', { class: 'dot ' + (ok ? 'ok' : 'err') }), h('span', {}, c.id === 'claude' ? 'Claude Code' : c.id === 'codex' ? 'Codex' : 'GitHub'), h('small', {}, ok ? way : 'Not connected'));
+    return h('div', { class: 'conn-row' }, h('span', { class: 'dot ' + (ok ? 'ok' : 'err') }), h('span', {}, c.id === 'claude' ? 'Claude Code' : c.id === 'codex' ? 'Codex' : 'GitHub'), h('small', {}, ok ? way : 'Not connected'), c.id !== 'github' && ok ? usageLine(c.id) : null);
   });
   side.replaceChildren(
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
     newBtn, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
+    h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
     h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
 }
 function crumbs(...parts) {
@@ -112,6 +114,10 @@ const ROUTES = [
   [/^#\/chat$/, () => pageChat()],
   [/^#\/organisation$/, () => { S.nextTab = 'org'; pageChat(); }],
   [/^#\/meetings$/, () => pageMeetings()],
+  [/^#\/tasks$/, () => pageTasks()],
+  [/^#\/tickets$/, () => pageTickets()],
+  [/^#\/repositories$/, () => pageRepos()],
+  [/^#\/usage$/, () => pageUsage()],
   [/^#\/secrets$/, () => pageSecrets()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/teams$/, () => pageTeams()],
@@ -136,6 +142,7 @@ function route() {
   view.className = 'view'; page = null;
   const r = ROUTES.find(([re]) => re.test(hash));
   if (!r) { location.hash = '#/chat'; return; }
+  S.openGroup = NAV.find((g) => g.items.some(([href]) => isActive(href)))?.id ?? S.openGroup; // only one submenu stays open
   renderSide();
   r[1](r[0].exec(hash));
 }
@@ -145,7 +152,7 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, vault: st.vault || { exists: false, unlocked: false }, update: st.update || null });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
   renderUpdateChip();
   updateBadge();
 }
@@ -191,9 +198,11 @@ function approvalCard(ap) {
   const note = h('input', { type: 'text', placeholder: 'Optional note to the agent', 'aria-label': 'Note to the agent' });
   const checks = (ap.items || []).map((it, i) => h('input', { type: 'checkbox', checked: true, 'aria-label': `${ap.kind === 'hire' ? 'Hire' : 'Create'} ${it.name}`, 'data-i': i }));
   const nameIn = (ap.kind === 'hire' ? ap.items : []).map((it) => h('input', { type: 'text', value: it.name, 'aria-label': `Name for the ${it.title || it.role}` }));
+  const modelIn = (ap.kind === 'hire' ? ap.items : []).map((it) => it.suggestedModel ? h('select', { 'aria-label': `AI model for ${it.title || it.name}` }, h('option', { value: it.suggestedModel }, `Suggested: ${it.suggestedModel}`), h('option', { value: '' }, 'Default model'), (it.modelOptions || []).filter((m) => m !== it.suggestedModel).map((m) => h('option', { value: m }, m))) : null);
   const decide = (decision, mode) => guard(async () => {
     const body = { decision, note: note.value };
     if (mode) body.mode = mode;
+    if (decision === 'approve' && modelIn.some(Boolean)) { body.models = {}; modelIn.forEach((m, i) => { if (m) body.models[i] = m.value; }); }
     if (decision === 'approve' && nameIn.length) { const names = {}; nameIn.forEach((n, i) => { if (n.value.trim() && n.value.trim() !== ap.items[i].name) names[i] = n.value.trim(); }); if (Object.keys(names).length) body.names = names; }
     if (decision === 'approve' && checks.length) { const only = checks.filter((c) => c.checked).map((c) => Number(c.dataset.i)); if (!only.length) { toast('Select at least one, or choose Deny', true); return; } if (only.length < checks.length) body.only = only; }
     await api(`/api/approvals/${ap.id}/decide`, 'POST', body);
@@ -202,7 +211,7 @@ function approvalCard(ap) {
   return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
     h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
     ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
-    ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
+    ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
     ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
     ap.diff ? diffView(ap.diff) : null,
     isPending && ap.kind === 'secret' ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve', 'once') }, 'Allow once'), h('button', { class: 'btn', onclick: decide('approve', 'always') }, 'Allow always'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
@@ -421,9 +430,11 @@ async function openProfile(agent) {
   try { p = await api(`/api/agents/${agent.id}/profile`); } catch (e) { toast(e.message, true); return; }
   const name = h('input', { type: 'text', value: p.name || agent.name, 'aria-label': 'Name' });
   const text = h('textarea', { rows: '16', style: 'font-family:var(--mono,monospace)', 'aria-label': 'Profile in Markdown' }); text.value = p.text || '';
+  let adv = null; if (agent.provider !== 'mock') { try { adv = await api(`/api/agents/${agent.id}/model-advice`); } catch { /* none */ } }
+  const advBox = adv ? h('div', { class: 'card', style: 'margin:8px 0' }, h('b', {}, 'Which AI model?'), h('p', { class: 'hint', style: 'margin:4px 0' }, adv.why), h('div', { class: 'kv' }, h('span', {}, `Now: ${adv.current || 'default'}`), adv.differs ? h('button', { class: 'btn', onclick: (e) => { e.preventDefault(); guard(async () => { await api(`/api/agents/${agent.id}/model`, 'PUT', { model: adv.model }); toast(`Now using ${adv.model}`); advBox.querySelector('.kv').replaceChildren(`Now: ${adv.model}`); })(); } }, `Use ${adv.model}`) : h('span', { class: 'pill ok' }, 'Already a good fit'))) : null;
   const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, `Profile: ${agent.title || agent.name}`),
     h('p', { class: 'hint' }, p.file ? `Saved as a Markdown file: ${p.file}` : 'Saved as a Markdown file.'),
-    h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Standing instructions and guardrails (Markdown)', text), err,
+    advBox, h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Standing instructions and guardrails (Markdown)', text), err,
     h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), h('button', { class: 'btn primary', value: 'save', onclick: (e) => { e.preventDefault(); guard(async () => { await api(`/api/agents/${agent.id}/profile`, 'PUT', { name: name.value, text: text.value }); dlg.close(); await loadState(); route(); toast('Profile saved'); })(); } }, 'Save'))));
   document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
 }
@@ -746,11 +757,155 @@ function pageConnection(id) {
   refreshConns().then(() => view.replaceChildren(h('h1', {}, CINFO[id].title), h('p', { class: 'sub-title' }, 'Choose how Apiary reaches it.'), h('div', { style: 'max-width:640px' }, connCard(S.conns.find((c) => c.id === id)))));
 }
 
+// ---------- shared helpers for the 0.6.0 pages ----------
+const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(n || 0));
+const debounce = (fn, ms = 700) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
+const dlgOpen = (title, ...body) => { const d = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), ...body)); document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal(); return d; };
+
+// ---------- usage numbers shown next to the connections ----------
+async function loadUsage() { try { S.usage = await api('/api/usage?days=14'); renderSide(); } catch { /* not ready */ } }
+setInterval(() => { if (!document.hidden) loadUsage(); }, 60000);
+function usageLine(id) {
+  const p = S.usage?.providers.find((x) => x.id === id);
+  if (!p) return null;
+  const pct = p.pctDay ?? p.pctWeek, lim = p.pctDay != null ? p.daily : p.weekly, used = p.pctDay != null ? p.today : p.week;
+  const tone = p.hitAt || (pct != null && pct >= 1) ? 'err' : pct != null && pct >= 0.8 ? 'warn' : 'ok';
+  return h('div', { class: 'ulines' },
+    pct != null ? h('div', { class: 'ubar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.min(100, Math.round(pct * 100))), 'aria-label': `${PNAME[id] || id} usage` }, h('span', { class: tone, style: `width:${Math.min(100, Math.round(pct * 100))}%` })) : null,
+    h('small', { class: tone === 'ok' ? '' : tone }, p.hitAt ? 'Limit reached. Wait a while.' : pct != null ? `${fmtTok(used)} of ${fmtTok(lim)} ${p.pctDay != null ? 'today' : 'this week'}${pct >= 0.8 ? ' · nearly full' : ''}` : `${fmtTok(p.today)} today${p.estimated ? ' (estimated)' : ''}`));
+}
+
+// ---------- usage page: tokens per agent ----------
+const PALETTE = ['#f6b73c', '#3b82f6', '#10b981', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+function pageUsage() {
+  crumbs('Connections', 'Usage');
+  const draw = async () => {
+    const u = await api('/api/usage?days=14'); S.usage = u; renderSide();
+    const top = u.agents.slice(0, 7), colorOf = new Map(top.map((a, i) => [a.id, PALETTE[i]]));
+    const W = 760, H = 240, L = 44, B = 28, T = 10, bw = (W - L - 8) / u.series.length;
+    const max = Math.max(1, ...u.series.map((d) => d.total)), nice = (() => { const e = Math.pow(10, Math.floor(Math.log10(max))); return Math.ceil(max / e) * e; })();
+    const NS = 'http://www.w3.org/2000/svg', el = (t, a = {}, ...kids) => { const n = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) n.setAttribute(k, v); kids.forEach((c) => n.append(c)); return n; };
+    const chart = el('svg', { viewBox: `0 0 ${W} ${H}`, role: 'img', 'aria-label': 'Tokens used per day, split by agent', style: 'width:100%;height:auto' });
+    for (let i = 0; i <= 4; i++) { const y = T + (H - B - T) * (1 - i / 4); chart.append(el('line', { x1: L, x2: W, y1: y, y2: y, stroke: 'currentColor', 'stroke-opacity': '.12' }), el('text', { x: L - 6, y: y + 4, 'text-anchor': 'end', 'font-size': '11', fill: 'currentColor', 'fill-opacity': '.65' }, fmtTok(Math.round(nice * i / 4)))); }
+    u.series.forEach((d, i) => {
+      let y = H - B; const x = L + i * bw + 3, sc = (H - B - T) / nice;
+      const parts = [...top.map((a) => [a, d.byAgent[a.id] || 0]), [{ name: 'Others' }, d.total - top.reduce((s, a) => s + (d.byAgent[a.id] || 0), 0)]];
+      for (const [a, v] of parts) { if (v <= 0) continue; const hh = Math.max(1, v * sc); y -= hh; chart.append(el('rect', { x, y, width: Math.max(2, bw - 6), height: hh, fill: colorOf.get(a.id) || '#94a3b8', rx: 2 }, el('title', {}, `${d.date}: ${a.name} ${fmtTok(v)}`))); }
+      if (i % 2 === 0 || u.series.length < 9) chart.append(el('text', { x: x + (bw - 6) / 2, y: H - 8, 'text-anchor': 'middle', 'font-size': '11', fill: 'currentColor', 'fill-opacity': '.65' }, d.date.slice(5)));
+    });
+    const total = u.agents.reduce((s, a) => s + a.total, 0);
+    const lim = {};
+    const rows = u.providers.map((p) => {
+      const d = h('input', { type: 'number', min: '0', step: '1000', value: p.daily || '', placeholder: 'No limit', 'aria-label': `${PNAME[p.id] || p.id} daily limit in tokens`, style: 'width:130px' }), w = h('input', { type: 'number', min: '0', step: '1000', value: p.weekly || '', placeholder: 'No limit', 'aria-label': `${PNAME[p.id] || p.id} weekly limit in tokens`, style: 'width:130px' });
+      lim[p.id] = [d, w];
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, PNAME[p.id] || p.id), h('span', { class: 'hint' }, `${fmtTok(p.today)} today · ${fmtTok(p.week)} this 7 days${p.estimated ? ' · partly estimated' : ''}`)), usageLine(p.id) || h('span'),
+        p.hitAt ? h('p', { class: 'hint', style: 'color:var(--err)' }, `The AI said its limit was reached ${ago(p.hitAt)}.`) : null,
+        h('div', { class: 'kv', style: 'margin-top:8px' }, h('label', { class: 'f', style: 'margin:0' }, 'Stay under per day', d), h('label', { class: 'f', style: 'margin:0' }, 'Stay under per week', w)));
+    });
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Usage'), h('p', { class: 'sub-title' }, 'How many tokens each agent has used in the last 14 days. A token is a small piece of text, roughly three-quarters of a word.'))),
+      h('div', { class: 'card' }, h('h2', {}, 'Tokens per day'), total ? chart : h('p', { class: 'hint' }, 'Nothing has been used yet.'),
+        h('div', { class: 'legend' }, [...top.map((a) => [a.name, colorOf.get(a.id)]), ...(u.agents.length > 7 ? [['Others', '#94a3b8']] : [])].map(([n, c]) => h('span', {}, h('i', { style: `background:${c}` }), n)))),
+      h('div', { class: 'card', style: 'margin-top:16px' }, h('h2', {}, 'By agent'), u.agents.length ? h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Agent', 'AI', 'In', 'Out', 'Total', 'Share'].map((x) => h('th', {}, x)))), h('tbody', {}, u.agents.map((a) => h('tr', {}, h('td', {}, a.name), h('td', {}, PNAME[a.provider] || a.provider), h('td', {}, fmtTok(a.input)), h('td', {}, fmtTok(a.output)), h('td', {}, h('b', {}, fmtTok(a.total))), h('td', {}, `${Math.round((a.total / total) * 100)}%`))))) : h('p', { class: 'hint' }, 'No agent has worked yet.')),
+      h('h2', { style: 'margin-top:24px' }, 'Limits'), h('p', { class: 'hint' }, 'Apiary cannot see your plan\'s real limit, so set the number you want to stay under. Each AI\'s bar in the sidebar fills as you get close, and Apiary also notices when the AI itself says its limit is reached.'),
+      rows.length ? rows : h('div', { class: 'card empty' }, 'No usage yet.'),
+      rows.length ? h('button', { class: 'btn primary', onclick: guard(async () => { const limits = {}; for (const [id, [d, w]] of Object.entries(lim)) limits[id] = { daily: d.value, weekly: w.value }; await api('/api/usage/limits', 'PUT', { limits }); toast('Limits saved'); draw(); }) }, 'Save limits') : null,
+      h('p', { class: 'hint', style: 'margin-top:16px' }, 'Numbers come from the AI when it reports them. Otherwise Apiary estimates (about 4 characters per token) and marks them as estimated. Cached input is not counted.'));
+  };
+  draw().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (ev.type === 'agent' && ev.agent.status === 'idle') draw().catch(() => {}); }, 1500) };
+}
+
+// ---------- task board ----------
+const TASK_COLS = [['todo', 'To do', 'Will be done soon'], ['backburner', 'Back burner', 'Ideas that need more detail'], ['inprogress', 'In progress', 'Someone is on it'], ['blocked', 'Blocked', 'Stuck. Needs a decision'], ['done', 'Done', 'Finished']];
+function pageTasks() {
+  crumbs('Workspace', 'Tasks');
+  let tasks = [], showAllDone = false;
+  const load = async () => { tasks = (await api('/api/tasks')).tasks; draw(); };
+  const edit = (t) => {
+    const title = h('input', { type: 'text', value: t.title, 'aria-label': 'Title' }), notes = h('textarea', { rows: '5', 'aria-label': 'Details' }); notes.value = t.notes || '';
+    const labels = h('input', { type: 'text', value: t.labels.join(', '), 'aria-label': 'Labels' }), st = h('select', { 'aria-label': 'Status' }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n)));
+    const d = dlgOpen('Edit task', h('label', { class: 'f' }, 'Title', title), h('label', { class: 'f' }, 'Details', notes), h('label', { class: 'f' }, 'Labels (comma separated)', labels), h('label', { class: 'f' }, 'Status', st),
+      t.log?.length ? h('details', {}, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null,
+      h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
+        h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value }); d.close(); load(); })(); } }, 'Save')));
+  };
+  const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, t.title), t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
+    h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
+    h('small', { class: 'hint' }, [t.assignee?.name ? `For ${t.assignee.name}` : '', t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
+    h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
+  const draw = () => {
+    const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });
+    const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'todo' }, 'To do (soon)'), h('option', { value: 'backburner' }, 'Back burner (just an idea)'));
+    const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value }); load(); }) }, 'Add');
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "To do" will be done soon, "Back burner" is an idea you will fill in later.'))),
+      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, add)),
+      h('div', { class: 'board' }, TASK_COLS.map(([k, name, sub]) => {
+        let list = tasks.filter((t) => t.status === k); const more = k === 'done' && !showAllDone && list.length > 12; if (more) list = list.slice(0, 12);
+        return h('section', { class: 'col', 'aria-label': name }, h('h3', {}, name, h('span', { class: 'count' }, String(tasks.filter((t) => t.status === k).length))), h('small', { class: 'hint' }, sub), list.length ? list.map(card) : h('p', { class: 'hint empty-col' }, 'Nothing here'), more ? h('button', { class: 'btn', onclick: () => { showAllDone = true; draw(); } }, 'Show all') : null);
+      })));
+  };
+  load().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (['agent', 'message'].includes(ev.type)) load().catch(() => {}); }) };
+}
+
+// ---------- repositories ----------
+function pageRepos() {
+  crumbs('Agents', 'Repositories');
+  const draw = async () => {
+    const [repos, st] = await Promise.all([api('/api/repos'), api('/api/state').catch(() => null)]);
+    const who = S.agents.filter((a) => a.member || !a.parentId).map((a) => ({ id: a.id, label: a.title ? `${a.name} (${a.title})` : a.kind === 'general' ? `${a.name} (CEO)` : `${a.name} (project lead)` }));
+    const src = h('input', { type: 'text', placeholder: 'owner/name, https://github.com/…, or a folder on this computer', 'aria-label': 'Repository address or folder' }), nm = h('input', { type: 'text', placeholder: 'Name (optional)', 'aria-label': 'Name' }), br = h('input', { type: 'text', placeholder: 'Branch (optional)', 'aria-label': 'Branch' }), nt = h('input', { type: 'text', placeholder: 'What should agents use it for?', 'aria-label': 'What it is for' });
+    const btn = h('button', { class: 'btn primary', onclick: guard(async () => { btn.disabled = true; btn.textContent = 'Adding…'; try { await api('/api/repos', 'POST', { source: src.value, name: nm.value, branch: br.value, notes: nt.value }); } finally { btn.disabled = false; btn.textContent = 'Add repository'; } draw(); }) }, 'Add repository');
+    const card = (r) => {
+      const save = guard(async (p) => { await api('/api/repos/' + r.id, 'PUT', p); });
+      return h('div', { class: 'card', style: 'margin-bottom:12px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', {}, r.name), h('small', { class: 'hint mono', style: 'display:block' }, `${r.kind === 'local' ? 'Folder' : 'Copy'}: ${r.path}${r.branch ? ' · ' + r.branch : ''}`)),
+        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/repos/${r.id}/sync`, 'POST', {}); toast('Up to date'); draw(); }) }, r.kind === 'clone' ? 'Update from GitHub' : 'Refresh'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${r.name}"? ${r.kind === 'local' ? 'Your folder is not touched.' : 'The downloaded copy is deleted.'}`)) return; await api('/api/repos/' + r.id, 'DELETE'); draw(); }) }, 'Remove'))),
+        r.notes ? h('p', { style: 'margin:6px 0' }, r.notes) : null, r.overview ? h('details', {}, h('summary', {}, 'What is in it'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, r.overview)) : null,
+        h('fieldset', { class: 'who' }, h('legend', {}, 'Who may read from it'),
+          h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: r.everyone, onchange: async (e) => { await save({ everyone: e.target.checked }); draw(); } }), ' Everyone'),
+          r.everyone ? null : who.map((a) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: r.agents.includes(a.id), onchange: async (e) => { const next = new Set(r.agents); e.target.checked ? next.add(a.id) : next.delete(a.id); r.agents = [...next]; await save({ agents: r.agents }); } }), ` ${a.label}`))),
+        h('small', { class: 'hint' }, `Updated ${ago(r.syncedAt)}. Agents only read from it. They never change it.`));
+    };
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Repositories'), h('p', { class: 'sub-title' }, 'Point agents at a repository so they can read information from it, such as notes, code or documents. They treat it as read-only.'))),
+      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, src, btn), h('div', { class: 'formrow', style: 'margin:8px 0' }, nm, br, nt), h('small', { class: 'hint' }, 'Private GitHub repositories work once GitHub is connected under Connections. Never put a password in the address.')),
+      repos.length ? repos.map(card) : h('div', { class: 'card empty' }, 'No repositories yet.'));
+  };
+  draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
+}
+
+// ---------- support tickets ----------
+const TICKET_LABEL = { open: ['info', 'Open'], working: ['work', 'An agent is working'], resolved: ['ok', 'Fixed. Please check'], closed: ['', 'Closed'] };
+function pageTickets() {
+  crumbs('Workspace', 'Support tickets');
+  let data = { tickets: [], handler: null }, openId = null;
+  const load = async () => { data = await api('/api/tickets'); draw(); };
+  const draw = () => {
+    const team = S.agents.filter((a) => a.member || a.kind === 'general');
+    const title = h('input', { type: 'text', placeholder: 'What is wrong? One short line', 'aria-label': 'Ticket title' }), desc = h('textarea', { rows: '3', placeholder: 'What happened, and what did you expect? The more detail, the faster the fix.', 'aria-label': 'Details' });
+    const pri = h('select', { 'aria-label': 'How urgent' }, [['normal', 'Normal'], ['high', 'Urgent'], ['low', 'Can wait']].map(([v, t]) => h('option', { value: v }, t)));
+    const who = h('select', { 'aria-label': 'Who should handle it' }, h('option', { value: '' }, data.handler ? `${data.handler} (decides who does it)` : 'Your CEO'), team.filter((a) => a.kind !== 'general').map((a) => h('option', { value: a.id }, `${a.name} (${a.title || a.role})`)));
+    const send = h('button', { class: 'btn primary', onclick: guard(async () => { const t = await api('/api/tickets', 'POST', { title: title.value, description: desc.value, priority: pri.value, assignee: who.value }); openId = t.id; load(); }) }, 'Send ticket');
+    const item = (t) => {
+      const [tone, label] = TICKET_LABEL[t.status], isOpen = openId === t.id;
+      const reply = h('textarea', { rows: '2', placeholder: t.status === 'resolved' ? 'Still broken? Tell the agent what you see.' : 'Reply to the agent', 'aria-label': 'Your reply' });
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('button', { class: 'tk-head', 'aria-expanded': String(isOpen), onclick: () => { openId = isOpen ? null : t.id; draw(); } }, h('b', {}, `#${t.num} ${t.title}`), h('span', { class: 'pill ' + tone }, label), t.priority === 'high' ? h('span', { class: 'pill err' }, 'Urgent') : null, h('small', { class: 'hint', style: 'margin-left:auto' }, ago(t.updatedAt))),
+        isOpen ? h('div', { style: 'margin-top:10px' }, t.description ? h('p', { class: 'tk-msg you' }, h('small', {}, 'You wrote'), t.description) : null,
+          t.comments.map((c) => h('p', { class: 'tk-msg ' + (c.kind === 'human' ? 'you' : c.kind === 'error' ? 'bad' : '') }, h('small', {}, `${c.who} · ${ago(c.at)}${c.kind === 'resolution' ? ' · fixed' : c.kind === 'question' ? ' · needs you' : ''}`), c.text)),
+          t.status === 'working' ? h('p', { class: 'hint', role: 'status' }, 'An agent is working on this…') : null,
+          t.status !== 'closed' ? h('div', {}, reply, h('div', { class: 'kv', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: guard(async () => { await api(`/api/tickets/${t.id}/comment`, 'POST', { text: reply.value }); load(); }) }, 'Send reply'), t.status !== 'working' ? h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/tickets/${t.id}/status`, 'POST', { status: 'closed' }); load(); }) }, 'Close ticket') : null, h('button', { class: 'btn danger', onclick: guard(async () => { if (confirm('Delete this ticket?')) { await api('/api/tickets/' + t.id, 'DELETE'); load(); } }) }, 'Delete')))
+            : h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/tickets/${t.id}/status`, 'POST', { status: 'open' }); load(); }) }, 'Reopen'), h('button', { class: 'btn danger', onclick: guard(async () => { if (confirm('Delete this ticket?')) { await api('/api/tickets/' + t.id, 'DELETE'); load(); } }) }, 'Delete'))) : null);
+    };
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Support tickets'), h('p', { class: 'sub-title' }, 'Something wrong? Describe it here. An agent looks into it, fixes what it can, and tells you what to check. If it needs you, it asks.'))),
+      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, pri, who), h('div', { style: 'margin-top:8px' }, desc), h('div', { style: 'margin-top:8px' }, send)),
+      data.tickets.length ? data.tickets.map(item) : h('div', { class: 'card empty' }, 'No tickets yet.'));
+  };
+  load().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (['agent', 'message'].includes(ev.type)) load().catch(() => {}); }, 1000) };
+}
+
 // ---------- settings ----------
 function pageAppearance() {
   crumbs('Settings', 'Appearance');
   const draw = () => view.replaceChildren(h('h1', {}, 'Appearance'), h('p', { class: 'sub-title' }, 'Apiary remembers your choice on this browser.'),
-    h('div', { class: 'card', style: 'max-width:560px' }, h('div', { class: 'seg' }, ['dark', 'light'].map((t) => h('button', { 'aria-pressed': String(document.documentElement.className === t), onclick: () => { applyTheme(t); draw(); } }, t === 'dark' ? 'Dark' : 'Light')))));
+    h('div', { class: 'card', style: 'max-width:560px' }, h('div', { class: 'seg' }, ['dark', 'light'].map((t) => h('button', { 'aria-pressed': String(document.documentElement.className === t), onclick: () => { applyTheme(t); draw(); } }, t === 'dark' ? 'Dark' : 'Light')))),
+    h('div', { class: 'card', style: 'max-width:560px;margin-top:16px' }, h('h2', {}, 'Writing style'), h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: S.plainEnglish, onchange: guard(async (e) => { await api('/api/settings', 'PUT', { plainEnglish: e.target.checked }); S.plainEnglish = e.target.checked; }) }), ' Agents write in plain, simple English'), h('p', { class: 'hint' }, 'On by default: short sentences and everyday words. Turn it off if you prefer technical language.')));
   draw();
 }
 function pageAccess() {
@@ -1009,6 +1164,6 @@ function pageStartup() {
 // ---------- boot ----------
 (async () => {
   try { await loadState(); } catch (e) { toast(e.message, true); }
-  connectEvents(); route(); refreshConns();
+  connectEvents(); route(); refreshConns(); loadUsage();
   if (!S.onboardingDone && cur() !== '#/setup') openSetup();
 })();

@@ -621,7 +621,7 @@ function updateOverlay(from) {
       if (restarting) {
         const st = await fetch('/api/state', { cache: 'no-store' }).then((r) => r.json());
         if (st.version && st.version !== from) { stop = true; clearInterval(tick); bar2.style.width = '100%'; sub.textContent = `Updated to ${st.version}. Refreshing…`; setTimeout(() => location.reload(), 700); return; }
-        if (Date.now() - t0 > 120000) { sub.textContent = 'This is taking longer than usual. Apiary may need a manual restart (systemctl --user restart apiary). You can close this and refresh the page.'; close.style.display = ''; }
+        if (Date.now() - t0 > 40000) { sub.textContent = 'This is taking longer than usual. If the page does not come back, restart Apiary by hand: systemctl --user restart apiary (or start it again in the terminal). Then refresh this page. Your update is installed.'; close.style.display = ''; }
       } else {
         const u = await fetch('/api/update', { cache: 'no-store' }).then((r) => r.json()), pr = u.progress;
         if (pr) {

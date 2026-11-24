@@ -85,3 +85,65 @@ export function commandRuleCovers(rule, command) {
 }
 
 export const COMMAND_SCOPES = { exact: 'this exact command', program: 'any command that runs this program', readonly: 'read-only commands (status, lists, logs, GET-only web requests)' };
+
+// ---------- trust levels (the slider on the Access and safety page) ----------
+// Risk of a shell command, from the least to the most serious:
+// 0 = simple, read or harmless; 1 = chained (&&, ||, ;, |) or runs a script or interpreter;
+// 2 = changes something (writes, redirects, service or package changes, network writes); 3 = destroys or reboots.
+const DESTRUCTIVE_PROGRAMS = new Set(['rm', 'rmdir', 'dd', 'mkfs', 'shred', 'reboot', 'shutdown', 'poweroff', 'halt', 'init', 'kill', 'killall', 'pkill', 'wipefs', 'truncate', 'fdisk', 'parted']);
+const DESTRUCTIVE_SUBCOMMANDS = {
+  apt: ['remove', 'purge', 'autoremove'], 'apt-get': ['remove', 'purge', 'autoremove'], dpkg: ['-r', '--remove', '-P', '--purge'],
+  pct: ['destroy', 'delete'], qm: ['destroy', 'delete'], zfs: ['destroy'], zpool: ['destroy'],
+  docker: ['rm', 'rmi', 'prune'], systemctl: ['reboot', 'poweroff'], git: ['reset', 'clean'],
+};
+const CHANGE_PROGRAMS = new Set(['mv', 'chown', 'chgrp', 'tee', 'sed', 'sudo', 'su', 'passwd', 'useradd', 'userdel', 'crontab', 'iptables', 'nft', 'ufw', 'mount', 'umount', 'ssh', 'scp', 'rsync', 'sftp', 'nc', 'ncat', 'telnet']);
+const INTERPRETERS = new Set(['python', 'python3', 'perl', 'ruby', 'node', 'bash', 'sh', 'zsh', 'env', 'xargs', 'awk', 'eval', 'exec']);
+const SEPARATORS = /&&|\|\||;|\||\n/;
+
+function partRisk(part) {
+  const tokens = part.trim().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return 0;
+  const prog = tokens[0].split('/').pop(), args = tokens.slice(1);
+  const sub = args.find((a) => !a.startsWith('-')) || '';
+  if (DESTRUCTIVE_PROGRAMS.has(prog)) return 3;
+  if ((DESTRUCTIVE_SUBCOMMANDS[prog] || []).some((d) => d === sub || args.includes(d))) return 3;
+  if (prog === 'find' && args.some((a) => ['-delete', '-exec', '-execdir', '-ok'].includes(a))) return 3;
+  if (CHANGE_PROGRAMS.has(prog)) return 2;
+  if ((DANGEROUS_SUBCOMMANDS[prog] || []).some((d) => d === sub || args.includes(d))) return 2;
+  if ((prog === 'curl' || prog === 'wget') && args.some((a) => CURL_WRITE.test(a))) return 2;
+  if (INTERPRETERS.has(prog)) return 1;
+  return 0;
+}
+
+export function riskOf(command) {
+  const cmd = String(command || '');
+  if (!cmd.trim()) return 3;
+  let risk = 0;
+  if (/[`<>]|\$\(|\$\{/.test(cmd)) risk = 2;                  // redirects, writes and substitutions
+  const parts = cmd.split(SEPARATORS).map((x) => x.trim()).filter(Boolean);
+  if (parts.length > 1) risk = Math.max(risk, 1);            // chained commands
+  for (const part of parts) risk = Math.max(risk, partRisk(part));
+  return risk;
+}
+
+// The six positions of the slider. Index 0 asks for every command; index 5 runs everything.
+export const TRUST_LEVELS = [
+  'Ask me for every command',
+  'Read-only commands run; everything else asks',
+  'Simple commands run; chains, scripts and changes ask',
+  'Chains and scripts run too; changes and destructive commands ask',
+  'Everything runs except deleting, rebooting and destroying',
+  'Everything runs without asking',
+];
+
+export function levelAllows(level, command) {
+  const L = Math.min(5, Math.max(0, Math.trunc(Number(level)) || 0));
+  if (L >= 5) return true;
+  if (L <= 0) return false;
+  if (L === 1) return isReadOnly(command);
+  const risk = riskOf(command);
+  if (L === 2) return risk === 0;
+  if (L === 3) return risk <= 1;
+  return risk <= 2;
+}
+

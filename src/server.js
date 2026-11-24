@@ -363,13 +363,14 @@ export function main(links = []) {
   const updater = new Updater({ dir: fileURLToPath(new URL('..', import.meta.url)), current: VERSION, authArgs: () => authArgs(engine.connections.get('github')) });
   const restart = () => {
     store.flush(); engine.memory.flush();
-    // INVOCATION_ID is set by systemd for every service it starts, so no systemctl call is needed to know
-    const svc = !!process.env.INVOCATION_ID;
-    if (svc) {
-      // A helper started from inside the service would be killed together with it when we exit.
-      // Exiting with an error code makes systemd (Restart=on-failure) start us again by itself.
-      console.log('Restarting through systemd…');
-      setTimeout(() => process.exit(75), 300);
+    // INVOCATION_ID is set by systemd for every service it starts
+    if (process.env.INVOCATION_ID) {
+      // Same as running "systemctl --user restart apiary" by hand: the job belongs to systemd, so it still
+      // happens after this process is stopped. (A helper started from in here would be killed with the service.)
+      const r = spawnSync('systemctl', ['--user', 'restart', '--no-block', 'apiary'], { stdio: 'ignore' });
+      console.log(r.status === 0 ? 'Restarting through systemd…' : 'systemctl failed, exiting so systemd starts Apiary again…');
+      if (r.status === 0) setTimeout(() => process.exit(75), 15000);   // systemd normally stops us long before this
+      else setTimeout(() => process.exit(75), 300);
       return;
     }
     spawn('sh', ['-c', 'sleep 1; exec "$@"', 'sh', process.execPath, ...process.argv.slice(1)], { detached: true, stdio: 'ignore', env: process.env, cwd: process.cwd() }).unref();

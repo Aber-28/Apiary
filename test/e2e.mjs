@@ -1368,6 +1368,22 @@ let orgIds;
     assert.deepEqual(await ask(other, 'rm -rf /tmp/apiary-not-real-3'), { asked: true, allowed: false }, 'other agents are still asked');
     assert.throws(() => engine.policy.add({ kind: 'command', action: 'allow', scope: 'program', command: 'curl; rm', agent: ag.id }), /program name/);
   }
+  { // a hire that cannot go ahead says why, and a hire waiting for approval is announced in the chat
+    const lead = Object.values(engine.agents).find((a) => !a.parentId && a.kind !== 'general') || Object.values(engine.agents).find((a) => !a.parentId);
+    const tick = () => new Promise((r) => setImmediate(r));
+    const said = (agent) => (engine.messages(agent.id) || []).filter((m) => m.role === 'system').map((m) => m.text);
+    const before = said(lead).length;
+    await engine._hire(lead, [{ title: 'Network Engineer', role: 'x', department: 'operations' }], []);
+    assert.ok(said(lead).slice(before).some((t) => /^Not hired: there is already a /.test(t)), 'the duplicate is explained in the chat');
+    lead.approvals = true;   // this hire must wait for the person
+    const hireWait = engine._hire(lead, [{ title: 'Chat Tester Engineer', role: 'Tests hires', department: 'engineering' }], []);
+    await tick();
+    assert.ok(said(lead).some((t) => /Proposed hire waiting for your approval/.test(t)), 'a pending hire is announced');
+    const waiting = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'hire');
+    assert.ok(waiting, 'a hire approval exists');
+    engine.decide(waiting.id, { decision: 'deny', note: 'test' });
+    await hireWait;
+  }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
 }

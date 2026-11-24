@@ -406,10 +406,13 @@ export class Engine extends EventEmitter {
     const titles = new Set(roster.map((m) => (m.title || m.name).toLowerCase()));
     const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
     const ok = [];
+    // Every hire that is not made says why, in the chat and the activity log, so nothing is dropped silently.
+    const drop = (text) => { notes.push(text); this._log(proposer, `! ${text}`); this._msg(proposer, { role: 'system', text }); };
+    this._log(proposer, `? hire proposal received: ${hires.map((h) => h.title || h.name).join(', ')}`);
     for (const h of hires.slice(0, 8)) {
       const title = String(h.title || h.name).trim().slice(0, 60);
-      if (titles.has(title.toLowerCase())) { notes.push(`There is already a ${title} on the team, so no one was hired for that. Use apiary-assign to give them work.`); continue; }
-      if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { notes.push(`Could not hire a ${title}: the team is at its size limit.`); continue; }
+      if (titles.has(title.toLowerCase())) { drop(`Not hired: there is already a ${title} on the team. Use apiary-assign to give them work.`); continue; }
+      if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { drop(`Not hired: the team is at its size limit, so a ${title} cannot be added.`); continue; }
       titles.add(title.toLowerCase());
       const dept = DEPARTMENTS[h.department] ? h.department : inferDepartment(title, h.role);
       const given = h.title && h.name ? String(h.name).trim().slice(0, 40) : '';
@@ -427,6 +430,7 @@ export class Engine extends EventEmitter {
     if (this._needsApproval(proposer)) {
       this._setStatus(proposer, 'waiting');
       this.emit('event', { type: 'activity', agentId: proposer.id, text: 'Waiting for your approval to hire' });
+      this._msg(proposer, { role: 'system', text: `Proposed hire waiting for your approval on the Approvals page: ${ok.map((x) => x.title).join(', ')}.` });
       const r = await this._ask(proposer, {
         kind: 'hire', title: `${proposer.name} suggests hiring ${ok.length} ${ok.length > 1 ? 'people' : 'person'}`,
         items: ok.map((x) => ({ name: x.name, title: x.title, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails, suggestedModel: x.advice.model, modelWhy: x.advice.why, modelOptions: this._modelList(x.provider).map((m) => m.id) })),

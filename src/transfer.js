@@ -5,7 +5,7 @@
 // opened on the other side with its passphrase, which is checked before anything is changed.
 // Importing never deletes: what was there before is moved to a backup-before-import-* folder.
 import { spawn, spawnSync } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, lstatSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync, lstatSync, chmodSync } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import path from 'node:path';
 import { Vault } from './vault.js';
@@ -55,6 +55,25 @@ function listEntries(file) {
   return r.stdout.split('\n').filter(Boolean);
 }
 
+// A tampered file could plant a link and then write a file "through" it to somewhere outside the data folder.
+// Links themselves are fine (a project may contain some), but nothing may be stored beneath a link,
+// hard links must stay inside the export, and special files (devices, pipes) are refused.
+export function checkLinks(file) {
+  const r = spawnSync('tar', ['-tvzf', file], { encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+  if (r.status !== 0) throw err(400, 'This is not a valid Apiary export file.');
+  const links = [], names = [];
+  for (const line of r.stdout.split('\n').filter(Boolean)) {
+    const kind = line[0];
+    if (!['-', 'd', 'l', 'h'].includes(kind)) throw err(400, 'The file contains special files and was not imported.');
+    const m = /^\S+\s+\S+\s+\d+\s+\d{4}-\d\d-\d\d \d\d:\d\d (.*)$/.exec(line); if (!m) continue;
+    let name = m[1], target = '';
+    if (kind === 'l') { [name, target] = [name.split(' -> ')[0], name.split(' -> ').slice(1).join(' -> ')]; links.push(name.replace(/^\.\//, '').replace(/\/$/, '')); }
+    else if (kind === 'h') { [name, target] = [name.split(' link to ')[0], name.split(' link to ').slice(1).join(' link to ')]; if (target.startsWith('/') || target.split('/').includes('..')) throw err(400, 'The file contains links that point outside the data folder and was not imported.'); }
+    names.push(name.replace(/^\.\//, ''));
+  }
+  for (const n of names) for (const l of links) if (n.startsWith(l + '/')) throw err(400, 'The file stores something beneath a link and was not imported.');
+}
+
 function fixPaths(dir, from, to, depth = 0) {
   if (depth > 4) return;
   let names; try { names = readdirSync(dir); } catch { return; }
@@ -89,6 +108,7 @@ export async function importFrom(engine, input, { passphrase = '' } = {}) {
       const top = e.replace(/^\.\//, '').split('/')[0];
       if (![...DATA, ...FILES, 'vault.json', MANIFEST].includes(top)) throw err(400, `The file contains something unexpected (${top}) and was not imported.`);
     }
+    checkLinks(file);
     if (!entries.some((e) => e.replace(/^\.\//, '') === MANIFEST)) throw err(400, 'This is not an Apiary export (no manifest).');
     mkdirSync(ex, { recursive: true });
     const r = spawnSync('tar', ['-xzf', file, '-C', ex, '--no-same-owner'], { encoding: 'utf8' });
@@ -122,6 +142,7 @@ export async function importFrom(engine, input, { passphrase = '' } = {}) {
       }
       for (const d of FILES) if (existsSync(path.join(base, d))) fixPaths(path.join(base, d), man.home, base);
     }
+    for (const f of ['state.json', 'memory.json', 'vault.json', 'token']) { try { chmodSync(path.join(base, f), 0o600); } catch { /* not there */ } }
     return { imported: incoming, vault: hasVault, backup: path.basename(backup), from: man.createdAt, version: man.version, notIncluded: man.notIncluded || [] };
   } finally { cleanup(); }
 }

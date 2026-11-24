@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1
+
+Security hardening after a full review.
+
+* Every page and answer now carries strict browser security headers (a Content Security Policy that blocks outside scripts, no framing, no content sniffing, no referrer). The small theme script moved into its own file so scripts can be locked down.
+* The access token is compared in constant time, and after you open the access link it is moved into a cookie (30 days) and removed from the address bar.
+* Your GitHub token is now only ever sent to github.com. Before, it could be sent to any address that merely contained "github.com".
+* Branch names are checked before they reach git.
+* Importing a file now refuses archives that hide links to write outside the data folder, and re-locks the permissions of the secret files.
+* Opened over plain http from another device, the top bar now says "Not encrypted".
+
 ## 0.10.0
 - **Install the AI from inside Apiary**: if no Claude Code or Codex is found, the first screen offers *Install Claude Code*, *Install Codex* or *Install both*. A progress bar, step list and live log show what is happening, and plain-language errors with *Try again* if it fails. Installed for your user only, no sudo
 - Apiary also finds tools in `~/.local/bin` when started as a service

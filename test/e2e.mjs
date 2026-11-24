@@ -879,7 +879,7 @@ let orgIds;
   const page = await get(`${target}:${port}`, '/', { accept: 'text/html' });
   assert.equal(page.status, 401); assert.match(page.body, /access link/, 'friendly page, not JSON');
   assert.equal((await get(`${target}:${port}`, '/api/state', { 'x-apiary-token': token })).status, 200, 'IP address + token works');
-  assert.equal((await get(`${target}:${port}`, `/?token=${token}`)).status, 200);
+  assert.equal((await get(`${target}:${port}`, `/?token=${token}`)).status, 302, "token link sets the cookie and redirects");
   assert.equal((await get(`evil.example:${port}`, '/api/state', { 'x-apiary-token': token })).status, 403, 'unknown host names still blocked');
   if (ip) assert.ok(out.includes(`http://${ip}:${port}/?token=${token}`), 'prints the link for this machine');
   child.kill('SIGTERM');
@@ -1058,6 +1058,51 @@ let orgIds;
   // API
   const g = (await call('/api/tools')).body; assert.ok(typeof g.installed === 'object' && typeof g.anyAI === 'boolean'); assert.equal(g.install.state, 'idle');
   assert.equal((await call('/api/tools/install', 'POST', { tools: [] })).status, 400); assert.equal((await call('/api/tools/install', 'POST', { tools: ['rm -rf'] })).status, 400);
+}
+
+// ---- 0.10.1: security hardening ----
+{
+  const r = await fetch(base + '/');
+  const csp = r.headers.get('content-security-policy');
+  assert.match(csp, /default-src 'self'/); assert.match(csp, /frame-ancestors 'none'/); assert.doesNotMatch(csp, /script-src[^;]*unsafe-inline/);
+  assert.equal(r.headers.get('x-frame-options'), 'DENY'); assert.equal(r.headers.get('x-content-type-options'), 'nosniff'); assert.equal(r.headers.get('referrer-policy'), 'no-referrer');
+  assert.doesNotMatch(await r.text(), /<script>/, 'no inline scripts, so the CSP can block injected ones');
+  assert.equal((await fetch(base + '/theme.js')).status, 200);
+  const api = await fetch(base + '/api/state'); assert.equal(api.headers.get('cache-control'), 'no-store'); assert.equal(api.headers.get('x-frame-options'), 'DENY');
+  // GitHub token only goes to github.com
+  const gh = await import('../src/github.js');
+  assert.match(gh.authArgs({ method: 'token', token: 'abc' })[1], /^http\.https:\/\/github\.com\/\.extraheader=/);
+  assert.equal(gh.isGithubUrl('https://github.com/a/b'), true);
+  for (const u of ['https://evil.com/github.com/a', 'https://github.com.evil.com/a', 'http://github.com/a', 'https://evil.com/?x=github.com', 'https://github.com@evil.com/a']) assert.equal(gh.isGithubUrl(u), false, u);
+  // import refuses links that point outside the data folder
+  const { spawnSync } = await import('node:child_process'); const { mkdirSync, symlinkSync, writeFileSync } = await import('node:fs'); const { checkLinks } = await import('../src/transfer.js');
+  const d = path.join(tmp, 'linktest'); mkdirSync(path.join(d, 'x'), { recursive: true });
+  symlinkSync('/tmp', path.join(d, 'x', 'bad')); spawnSync('tar', ['-czf', path.join(tmp, 'fine.tgz'), '-C', d, 'x']); checkLinks(path.join(tmp, 'fine.tgz'));   // a link alone is allowed
+  // a file stored beneath that link is not: build the archive by hand, since tar will not make one from a real folder
+  const evil = path.join(tmp, 'evil'); mkdirSync(path.join(evil, 'x', 'bad'), { recursive: true }); writeFileSync(path.join(evil, 'x', 'bad', 'pwn'), '1');
+  const ar = (a, b) => spawnSync('tar', ['-czf', path.join(tmp, 'bad.tgz'), '--transform', 's,^x/real,x/bad,', '-C', a, ...b]);
+  const mix = path.join(tmp, 'mix'); mkdirSync(path.join(mix, 'x', 'real'), { recursive: true }); writeFileSync(path.join(mix, 'x', 'real', 'pwn'), '1'); symlinkSync('/tmp', path.join(mix, 'x', 'bad'));
+  ar(mix, ['x/bad', 'x/real/pwn']);
+  assert.throws(() => checkLinks(path.join(tmp, 'bad.tgz')), /beneath a link/);
+  const d2 = path.join(tmp, 'linktest2'); mkdirSync(path.join(d2, 'x'), { recursive: true }); writeFileSync(path.join(d2, 'x', 'a'), '1'); symlinkSync('a', path.join(d2, 'x', 'ok'));
+  spawnSync('tar', ['-czf', path.join(tmp, 'ok.tgz'), '-C', d2, 'x']); checkLinks(path.join(tmp, 'ok.tgz'));
+  // branch names are checked before they reach git
+  const repos = await import('../src/repos.js'); assert.ok(repos);
+}
+// token: constant-time check, cookie then redirect so the token leaves the address bar
+{
+  const { spawn } = await import('node:child_process'); const home = mkdtempSync(path.join(os.tmpdir(), 'apiary-tok-'));
+  const child = spawn(process.execPath, ['bin/apiary.js', 'start'], { env: { ...process.env, APIARY_HOME: home, APIARY_PORT: '17891', APIARY_TOKEN: 'secret-token-123', APIARY_NO_UPDATE_CHECK: '1' }, stdio: 'ignore' });
+  try {
+    await until(async () => { try { return (await fetch('http://127.0.0.1:17891/api/state', { redirect: 'manual' })).status === 401; } catch { return false; } }, 8000);
+    const u = 'http://127.0.0.1:17891';
+    assert.equal((await fetch(u + '/api/state?token=wrong')).status, 401); assert.equal((await fetch(u + '/api/state?token=secret-token-123')).status, 200);
+    assert.equal((await fetch(u + '/api/state', { headers: { 'x-apiary-token': 'secret-token-123' } })).status, 200);
+    const red = await fetch(u + '/?token=secret-token-123', { redirect: 'manual' });
+    assert.equal(red.status, 302); assert.equal(red.headers.get('location'), '/');
+    const ck = red.headers.get('set-cookie'); assert.match(ck, /HttpOnly/); assert.match(ck, /SameSite=Strict/); assert.match(ck, /Max-Age=/);
+    assert.equal((await fetch(u + '/api/state', { headers: { cookie: ck.split(';')[0] } })).status, 200);
+  } finally { child.kill(); }
 }
 
 console.log('all e2e checks passed');

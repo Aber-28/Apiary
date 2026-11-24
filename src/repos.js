@@ -41,7 +41,7 @@ export class Repos {
       dest = path.join(this.dir, `${slugify(label)}-${id}`);
       try { await github.clone(this.getConn(), v.spec, dest); }
       catch (e) { rmSync(dest, { recursive: true, force: true }); throw err(e.status || 409, e.message); }
-      if (branch) { const r = await run('git', ['checkout', branch], { cwd: dest, timeout: 60000 }); if (r.code !== 0) { rmSync(dest, { recursive: true, force: true }); throw err(400, `Branch "${branch}" was not found`); } }
+      if (branch) { if (!/^[\w][\w./-]{0,79}$/.test(branch) || branch.includes('..')) { rmSync(dest, { recursive: true, force: true }); throw err(400, 'That branch name is not valid'); } const r = await run('git', ['checkout', branch, '--'], { cwd: dest, timeout: 60000 }); if (r.code !== 0) { rmSync(dest, { recursive: true, force: true }); throw err(400, `Branch "${branch}" was not found`); } }
     } else if (!statSync(dest).isDirectory()) throw err(400, 'That path is not a folder');
     const repo = { id, name: label, source: v.spec, kind: v.kind === 'path' ? 'local' : 'clone', path: dest, branch: String(branch || '').slice(0, 80), notes: String(notes).slice(0, 1000), agents: [], everyone: false, createdAt: Date.now(), syncedAt: Date.now() };
     repo.overview = await this._overview(repo);

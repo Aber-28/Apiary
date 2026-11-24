@@ -1,0 +1,1 @@
+try{var t=localStorage.getItem('apiary-theme')||(matchMedia('(prefers-color-scheme: light)').matches?'light':'dark');document.documentElement.className=t}catch(e){document.documentElement.className='dark'}

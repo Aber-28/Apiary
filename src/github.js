@@ -24,8 +24,10 @@ async function rest(token, pathname, init = {}) {
   return body;
 }
 // git over HTTPS with a token, without writing the token into .git/config
+// The header is scoped to github.com, so the token is never sent to any other server.
 export const authArgs = (conn) => conn.method === 'token' && conn.token
-  ? ['-c', `http.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${conn.token}`).toString('base64')}`] : [];
+  ? ['-c', `http.https://github.com/.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${conn.token}`).toString('base64')}`] : [];
+export const isGithubUrl = (u) => { try { const x = new URL(u); return x.protocol === 'https:' && x.hostname === 'github.com'; } catch { return false; } };
 const ghEnv = (conn) => (conn.method === 'token' && conn.token ? { GH_TOKEN: conn.token } : {});
 
 export function validateSource(spec) {
@@ -84,7 +86,7 @@ export const github = {
       return;
     }
     const url = kind === 'github' ? `https://github.com/${s}.git` : s;
-    await git.clone(url, dest, /github\.com/.test(url) ? authArgs(conn) : []);
+    await git.clone(url, dest, isGithubUrl(url) ? authArgs(conn) : []);
   },
 
   async openPr(conn, { dir, branch, base, title, body }) {

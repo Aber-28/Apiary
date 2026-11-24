@@ -73,6 +73,11 @@ function applyTheme(t) {
   const label = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
   b.setAttribute('aria-label', label); b.title = label;
 }
+// Over plain http from another device, the access link, API keys and the vault passphrase travel unencrypted.
+if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
+  const live = document.querySelector('.live');
+  if (live) { live.replaceChildren(h('span', { class: 'dot warn' }), 'Not encrypted. Use only on a network you trust.'); live.title = 'You are connected over plain http. Use an SSH tunnel, Tailscale or an https reverse proxy for anything you do not fully trust.'; }
+}
 $('#theme').onclick = () => applyTheme(document.documentElement.className === 'dark' ? 'light' : 'dark');
 $('#menu').onclick = () => $('#side').classList.toggle('open');
 applyTheme(document.documentElement.className || 'dark');

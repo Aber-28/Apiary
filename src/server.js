@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // HTTP + SSE server. Binds to localhost by default because agents can run commands on this machine.
+import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
@@ -35,8 +36,15 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
   });
   setInterval(() => { for (const res of clients) res.write(': ping\n\n'); }, 20000).unref();
 
+  // Sent on every answer: stops framing, content sniffing, outside scripts and referrer leaks.
+  const SECURITY_HEADERS = {
+    'content-security-policy': "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'",
+    'x-frame-options': 'DENY', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer',
+    'cross-origin-opener-policy': 'same-origin', 'cross-origin-resource-policy': 'same-origin',
+    'permissions-policy': 'camera=(), microphone=(), geolocation=(), payment=()',
+  };
   const json = (res, status, body) => {
-    res.writeHead(status, { 'content-type': 'application/json' });
+    res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(body));
   };
   const readBody = (req) => new Promise((resolve, reject) => {
@@ -44,6 +52,13 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
     req.on('data', (d) => { s += d; if (s.length > 1e6) reject(Object.assign(new Error('Body too large'), { status: 413 })); });
     req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(Object.assign(new Error('Bad JSON'), { status: 400 })); } });
   });
+
+  // Compare in constant time so the token cannot be guessed from response timing.
+  const sameToken = (given) => {
+    if (typeof given !== 'string') return false;
+    const a = createHash('sha256').update(given).digest(), b = createHash('sha256').update(TOKEN).digest();
+    return timingSafeEqual(a, b);
+  };
 
   function guard(req, url) {
     // Stops other websites (CSRF) and DNS-rebinding from driving a local agent runner.
@@ -58,7 +73,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
     if (TOKEN) {
       const cookie = /(?:^|;\s*)apiary_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
       const given = req.headers['x-apiary-token'] || url.searchParams.get('token') || (cookie && decodeURIComponent(cookie));
-      if (given !== TOKEN) return [401, 'Token required'];
+      if (!sameToken(given)) return [401, 'Token required'];
     }
     const upload = url.pathname === '/api/import' && /^application\/(gzip|x-gzip|octet-stream)/.test(req.headers['content-type'] || '') && req.headers['x-apiary-import'] === '1';
     if (['POST', 'PUT', 'DELETE'].includes(req.method) && !upload && !(req.headers['content-type'] || '').startsWith('application/json')) {
@@ -69,6 +84,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
 
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     try {
       const bad = guard(req, url);
       if (bad && bad[0] === 401 && req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
@@ -77,7 +93,9 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       }
       if (bad) return json(res, bad[0], { error: bad[1] });
       if (url.searchParams.get('token') && TOKEN && req.method === 'GET' && url.pathname === '/') {
-        res.setHeader('set-cookie', `apiary_token=${encodeURIComponent(TOKEN)}; HttpOnly; SameSite=Strict; Path=/`);
+        // Remember the token in a cookie, then drop it from the address bar (history, screenshots, shoulder-surfing).
+        res.writeHead(302, { location: '/', 'cache-control': 'no-store', 'set-cookie': `apiary_token=${encodeURIComponent(TOKEN)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=2592000${req.socket.encrypted ? '; Secure' : ''}` });
+        return res.end();
       }
       const m = (re) => re.exec(url.pathname);
       let r;
@@ -88,7 +106,6 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (!file.startsWith(PUBLIC + path.sep)) return json(res, 403, { error: 'Forbidden' });
         let body; try { body = readFileSync(file); } catch { return json(res, 404, { error: 'Not found' }); }
         const headers = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' };
-        if (res.getHeader('set-cookie')) headers['set-cookie'] = res.getHeader('set-cookie');
         res.writeHead(200, headers);
         return res.end(body);
       }

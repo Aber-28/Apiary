@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.21.0
+
+- **Weekly report** (Workspace > Weekly report): a plain-English summary made once a week on the day and time you choose (progress, tasks, approvals, health, servers down, next week's plan) with tokens used this week by AI and by agent compared with last week, and a chart of the last 8 weeks that marks weeks a usage limit was hit. Optionally sends a short digest to Telegram.
+- The search box no longer squeezes the breadcrumb in the top bar.
+
 ## 0.20.0
 
 - **Project templates** (Workspace > Project templates): save a project's goal, plan phases and team roles, and start new projects from it. Passwords, secrets, folders and specific servers are never saved; they are stripped and you are told how many details were removed.

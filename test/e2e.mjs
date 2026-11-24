@@ -1705,5 +1705,41 @@ let orgIds;
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageProjectTemplates/); assert.match(app, /globalSearchBox/);
 }
 
+// ---- weekly report ----
+{
+  const { dayKey } = await import('../src/usage.js');
+  const R = engine.reports, DAYMS = 86400000, now = Date.now();
+  engine.usage.d.days = {}; engine.usage.d.hitLog = {}; engine.usage.d.hits = {};
+  const seed = (daysAgo, provider, agentId, name, tok) => { const k = dayKey(now - daysAgo * DAYMS), day = (engine.usage.d.days[k] ||= { agents: {}, providers: {} }); const a = (day.agents[agentId] ||= { name, provider, input: 0, output: 0 }); a.input += tok; (day.providers[provider] ||= { input: 0, output: 0 }).input += tok; };
+  seed(1, 'claude', 'a1', 'CEO', 3000); seed(2, 'codex', 'a2', 'Coder', 1000);       // this week: 4000
+  seed(8, 'claude', 'a1', 'CEO', 1600); seed(9, 'codex', 'a2', 'Coder', 400);        // last week: 2000
+  seed(15, 'claude', 'a1', 'CEO', 500);                                              // two weeks ago
+  const limitDay = now - 9 * DAYMS; engine.usage.d.hitLog.claude = [limitDay];
+  const t1 = (await call('/api/tasks', 'POST', { title: 'Ship the thing' })).body; await call('/api/tasks/' + t1.id, 'PUT', { status: 'done' });
+  const t2 = (await call('/api/tasks', 'POST', { title: 'Waiting on DNS' })).body; await call('/api/tasks/' + t2.id, 'PUT', { status: 'blocked' });
+  const rep = (await call('/api/reports/run', 'POST', {})).body;
+  assert.equal(rep.usage.thisWeek, 4000); assert.equal(rep.usage.lastWeek, 2000); assert.equal(rep.usage.changePct, 100);
+  assert.deepEqual(rep.usage.byProvider, { claude: 3000, codex: 1000 }); assert.equal(rep.usage.weeks.length, 8);
+  assert.deepEqual(rep.usage.weeks.slice(-3).map((w) => w.total), [500, 2000, 4000]);
+  assert.deepEqual(rep.usage.weeks[rep.usage.weeks.length - 2].limitHit, ['claude'], 'the week the limit was hit is marked');
+  assert.equal(rep.usage.weeks[rep.usage.weeks.length - 1].limitHit.length, 0);
+  assert.ok(rep.usage.topAgents[0].name === 'CEO' && rep.usage.topAgents[0].tokens === 3000);
+  assert.ok(rep.stats.tasksDone.includes('Ship the thing') && rep.stats.tasksStuck.includes('Waiting on DNS'));
+  const text = rep.summary.join('\n'); assert.match(text, /Tokens used: 4\.0k this week, up 100% from 2\.0k last week/); assert.ok(text.includes(`Tasks: ${rep.stats.tasksDone.length} task`) && /stuck or blocked/.test(text)); assert.match(text, /Approvals:/); assert.match(text, /Health:/); assert.match(text, /Next week:/);
+  assert.equal((await call('/api/reports')).body.list.length >= 1, true); assert.equal((await call('/api/reports/' + rep.id)).body.id, rep.id); assert.equal((await call('/api/reports/nope')).status, 404);
+  // the Telegram version has counts only, never titles
+  const dg = R.digest(rep); assert.match(dg, new RegExp(`Weekly report: ${rep.stats.tasksDone.length} tasks? finished, ${rep.stats.tasksStuck.length} stuck`)); assert.ok(!/Ship the thing|Waiting on DNS/.test(dg));
+  // settings are validated
+  assert.equal((await call('/api/reports', 'PUT', { weekday: 9 })).status, 400); assert.equal((await call('/api/reports', 'PUT', { time: '25:00' })).status, 400);
+  // schedule: not when off, once when due, not again until the next week
+  const before = R.all.length; assert.equal(await R.tick(new Date()), null, 'off means never');
+  await call('/api/reports', 'PUT', { enabled: true, weekday: new Date().getDay(), time: '00:00' });
+  const first = await R.tick(new Date()); assert.ok(first && first.reason === 'schedule'); assert.equal(R.all.length, before + 1);
+  assert.equal(await R.tick(new Date()), null, 'already made this week');
+  const nextWeek = new Date(Date.now() + 7 * DAYMS + 60000); assert.ok(await R.tick(nextWeek), 'due again a week later');
+  await call('/api/reports', 'PUT', { enabled: false });
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageReports/); assert.match(app, /usageChart/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

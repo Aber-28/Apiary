@@ -24,6 +24,7 @@
 * [Audit log](using-apiary/audit-log.md)
 * [Project templates](using-apiary/project-templates.md)
 * [Global search](using-apiary/global-search.md)
+* [Weekly report](using-apiary/weekly-report.md)
 * [Telegram alerts](using-apiary/telegram-alerts.md)
 * [Machine usage in the top bar](using-apiary/machine-usage.md)
 * [Factory reset](using-apiary/factory-reset.md)

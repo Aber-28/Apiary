@@ -221,8 +221,13 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .sys[hidden]{display:none}
 @media (max-width:760px){.sys{display:none}}
 
-.gsearch{position:relative;margin-left:auto}.gsearch input{width:230px;padding:6px 10px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--text)}
+.crumbs{flex:1 1 auto;min-width:150px;white-space:nowrap}.gsearch{position:relative;flex:0 1 190px}.gsearch input{width:100%;box-sizing:border-box;padding:6px 10px;font-size:12px;border:1px solid var(--line);border-radius:8px;background:var(--surface2);color:var(--text)}
 .gres{position:absolute;right:0;top:36px;width:min(420px,90vw);max-height:70vh;overflow:auto;background:var(--surface);border:1px solid var(--line);border-radius:10px;box-shadow:0 8px 30px rgba(0,0,0,.25);z-index:50;padding:6px}
 .gres[hidden]{display:none}.gh{font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:8px 8px 3px}
 .gi{display:flex;flex-direction:column;padding:6px 8px;border-radius:6px;color:var(--text);text-decoration:none}.gi:hover,.gi:focus{background:var(--hover)}.gi small{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media (max-width:760px){.gsearch input{width:130px}}
+@media (max-width:760px){.gsearch{flex:0 1 120px}}
+
+.uchart{width:100%;height:auto}.uchart .grid{stroke:var(--line);stroke-width:1}.uchart .ax{fill:var(--muted);font-size:10px}
+.c0{fill:var(--accent);background:var(--accent)}.c1{fill:var(--info);background:var(--info)}.c2{fill:var(--ok);background:var(--ok)}.c3{fill:var(--err);background:var(--err)}
+.hit{fill:var(--err)}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--muted);margin-top:6px}.lg{display:inline-flex;align-items:center;gap:5px}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px}.tri{display:inline-block;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid var(--err)}

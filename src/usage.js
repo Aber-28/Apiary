@@ -24,7 +24,12 @@ export class Usage {
     this.store.save();
   }
 
-  markLimit(provider) { this.d.hits[provider] = Date.now(); this.store.save(); }
+  markLimit(provider) {
+    this.d.hits[provider] = Date.now();
+    const log = ((this.d.hitLog ||= {})[provider] ||= []); log.push(Date.now()); if (log.length > 200) log.splice(0, log.length - 200);
+    this.store.save();
+  }
+  limitHits(provider = null) { const l = this.d.hitLog || {}; return provider ? l[provider] || [] : Object.entries(l).flatMap(([prov, ts]) => ts.map((t) => ({ provider: prov, t }))); }
   setLimits(patch = {}) {
     for (const [prov, v] of Object.entries(patch)) {
       if (!/^\w+$/.test(prov) || typeof v !== 'object' || !v) continue;

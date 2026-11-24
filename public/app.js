@@ -98,7 +98,7 @@ applyTheme(document.documentElement.className || 'dark');
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/reports', 'Weekly report'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
@@ -147,6 +147,7 @@ const ROUTES = [
   [/^#\/backups$/, () => pageBackups()],
   [/^#\/audit$/, () => pageAudit()],
   [/^#\/health$/, () => pageHealth()],
+  [/^#\/reports$/, () => pageReports()],
   [/^#\/project-templates$/, () => pageProjectTemplates()],
   [/^#\/telegram$/, () => pageTelegram()],
   [/^#\/reset$/, () => pageReset()],
@@ -1397,6 +1398,48 @@ async function pageProjectTemplates() {
   document.addEventListener('click', (e) => { if (!form.contains(e.target)) close(); });
   document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); input.focus(); input.select(); } });
 })();
+const escHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const TOK = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(n));
+// Stacked bars, one per week, split by AI. A triangle marks weeks a usage limit was hit.
+function usageChart(weeks) {
+  const provs = [...new Set(weeks.flatMap((w) => Object.keys(w.byProvider)))].sort(), W = 640, H = 220, L = 46, B = 34, T = 18, bw = (W - L - 10) / weeks.length;
+  const max = Math.max(1, ...weeks.map((w) => w.total)), y = (v) => T + (H - T - B) * (1 - v / max);
+  let svgs = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Tokens used per week" class="uchart">`;
+  for (let i = 0; i <= 3; i++) { const v = (max * i) / 3; svgs += `<line x1="${L}" x2="${W - 6}" y1="${y(v)}" y2="${y(v)}" class="grid"/><text x="${L - 6}" y="${y(v) + 3}" text-anchor="end" class="ax">${TOK(Math.round(v))}</text>`; }
+  weeks.forEach((w, i) => {
+    let acc = 0; const x = L + i * bw + bw * 0.18, ww = bw * 0.64;
+    provs.forEach((p, k) => { const v = w.byProvider[p] || 0; if (!v) return; svgs += `<rect x="${x}" y="${y(acc + v)}" width="${ww}" height="${Math.max(0.5, y(acc) - y(acc + v))}" class="c${k % 4}"><title>${escHtml(p)}: ${TOK(v)} tokens</title></rect>`; acc += v; });
+    svgs += `<text x="${x + ww / 2}" y="${H - 16}" text-anchor="middle" class="ax">${escHtml(new Date(w.start).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }))}</text>`;
+    if (w.limitHit.length) svgs += `<path d="M${x + ww / 2 - 5} ${H - 3} l5 -9 l5 9 z" class="hit"><title>Usage limit hit: ${escHtml(w.limitHit.join(', '))}</title></path>`;
+  });
+  svgs += '</svg>';
+  const legend = provs.map((p, k) => `<span class="lg"><i class="sw c${k % 4}"></i>${escHtml(p)}</span>`).join('') + (weeks.some((w) => w.limitHit.length) ? '<span class="lg"><i class="tri"></i>a usage limit was hit that week</span>' : '');
+  const box = h('div', { class: 'card', style: 'max-width:700px' }); box.innerHTML = `<h2 style="margin-top:0">Tokens per week</h2>${svgs}<div class="legend">${legend}</div>`;
+  return box;
+}
+async function pageReports() {
+  crumbs('Workspace', 'Weekly report');
+  let sel = null;
+  const draw = async () => {
+    let d; try { d = await api('/api/reports'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const c = d.config, id = sel || d.list[0]?.id, rep = id ? await api('/api/reports/' + id) : null;
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const on = h('input', { type: 'checkbox', checked: c.enabled }), day = h('select', { 'aria-label': 'Day' }, days.map((n, i) => h('option', { value: i, selected: c.weekday === i }, n))), time = h('input', { type: 'time', value: c.time, 'aria-label': 'Time' }), tg = h('input', { type: 'checkbox', checked: c.telegram });
+    const save = guard(async () => { await api('/api/reports', 'PUT', { enabled: on.checked, weekday: Number(day.value), time: time.value, telegram: tg.checked }); toast('Saved'); draw(); });
+    const run = guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Making…'; try { const r = await api('/api/reports/run', 'POST', {}); sel = r.id; } finally { draw(); } });
+    const pick = h('select', { 'aria-label': 'Past reports', onchange: (e) => { sel = e.target.value; draw(); } }, d.list.map((r) => h('option', { value: r.id, selected: r.id === id }, `Week ending ${new Date(r.weekEnd).toLocaleDateString()}`)));
+    const u = rep?.usage;
+    const provRow = (p) => { const a = u.byProvider[p] || 0, b = u.lastByProvider[p] || 0, ch = b ? Math.round(((a - b) / b) * 100) : null; return h('tr', {}, h('td', {}, p), h('td', {}, TOK(a)), h('td', {}, TOK(b)), h('td', {}, ch === null ? 'n/a' : `${ch >= 0 ? '+' : ''}${ch}%`)); };
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Weekly report'), h('p', { class: 'sub-title' }, 'A plain-English summary of the week and how many tokens were used compared with last week.')), h('div', { class: 'formrow' }, d.list.length ? pick : null, h('button', { class: 'btn primary', onclick: run }, 'Make one now'))),
+      h('div', { class: 'card', style: 'max-width:700px;margin-bottom:12px' }, h('label', { class: 'check' }, on, ' Make a report every week and keep it here'),
+        h('div', { class: 'formrow', style: 'margin:8px 0' }, day, time), h('label', { class: 'check' }, tg, ' Also send a short version to Telegram (counts and totals only)'), h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: save }, 'Save'))),
+      rep ? h('div', { class: 'card', style: 'max-width:700px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Summary'), ...rep.summary.map((l, i) => h('p', { style: i ? '' : 'font-weight:600' }, l))) : h('div', { class: 'card empty', style: 'max-width:700px' }, 'No report yet. Press Make one now, or switch on the weekly report.'),
+      rep ? usageChart(u.weeks) : null,
+      rep ? h('div', { class: 'card', style: 'max-width:700px;margin-top:12px;padding:0;overflow:auto' }, h('table', { class: 'tbl', style: 'min-width:0' }, h('thead', {}, h('tr', {}, ['AI', 'This week', 'Last week', 'Change'].map((t) => h('th', {}, t)))), h('tbody', {}, [...new Set([...Object.keys(u.byProvider), ...Object.keys(u.lastByProvider)])].map(provRow)),
+        u.topAgents.length ? h('tfoot', {}, h('tr', {}, h('td', { colspan: 4, class: 'hint' }, 'Biggest users this week: ' + u.topAgents.map((a) => `${a.name} (${TOK(a.tokens)})`).join(', ')))) : null)) : null);
+  };
+  await draw(); page = { shows: () => false, update: (ev) => ev.type === 'report' && !document.querySelector('dialog[open]') && draw() };
+}
 async function pageHealth() {
   crumbs('Infrastructure', 'Health');
   const draw = async (st) => {

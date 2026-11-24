@@ -122,3 +122,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 - `PUT /api/templates/{id}` edits `name`, `description`, `goal`. `DELETE /api/templates/{id}` removes it.
 - `POST /api/templates/{id}/start` with `{ name, provider, cwd }` creates a project with the saved team and plan.
 - `GET /api/search?q=` searches projects, team, tasks, devices, templates, past chats and secret names (never values).
+
+## Weekly report
+
+- `GET /api/reports` returns `{ config: { enabled, weekday, time, telegram }, list }`. `PUT /api/reports` changes the settings.
+- `POST /api/reports/run` makes a report now. `GET /api/reports/{id}` returns `{ summary: [lines], stats, usage: { thisWeek, lastWeek, changePct, byProvider, topAgents, weeks } }`.

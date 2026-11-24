@@ -370,6 +370,10 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/reports' && req.method === 'GET') return json(res, 200, { config: engine.reports.config, list: engine.reports.list() });
+      if (url.pathname === '/api/reports' && req.method === 'PUT') return json(res, 200, { config: engine.reports.setConfig(await readBody(req)), list: engine.reports.list() });
+      if (url.pathname === '/api/reports/run' && req.method === 'POST') { await readBody(req); return json(res, 201, await engine.reports.generate({})); }
+      if ((r = m(/^\/api\/reports\/([\w-]+)$/)) && req.method === 'GET') return json(res, 200, engine.reports.get(r[1]));
       if (url.pathname === '/api/search' && req.method === 'GET') return json(res, 200, globalSearch(engine, url.searchParams.get('q') || ''));
       if (url.pathname === '/api/templates' && req.method === 'GET') return json(res, 200, engine.templates.list());
       if (url.pathname === '/api/templates' && req.method === 'POST') { const b = await readBody(req); return json(res, 201, engine.templates.save(b.projectId, b)); }
@@ -521,6 +525,7 @@ export function main(links = []) {
   setTimeout(() => engine.health.run().catch(() => {}), 15000).unref();
   setInterval(() => engine.health.run().catch(() => {}), 5 * 60000).unref();   // the map turns red by itself
   setInterval(() => engine.audit.prune(), 3600000).unref();
+  setInterval(() => engine.reports.tick().catch(() => {}), 60000).unref();
   setInterval(() => engine.backups.tick().catch(() => {}), 60000).unref();
   setTimeout(() => engine.refreshLimits().catch(() => {}), 8000).unref();
   setInterval(() => engine.refreshLimits().catch(() => {}), EVERY).unref();   // once an hour

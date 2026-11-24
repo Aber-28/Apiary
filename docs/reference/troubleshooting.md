@@ -15,11 +15,14 @@ See [Install on Linux](../getting-started/install.md) for installing a current N
 ## “Port 7777 is already in use”
 `APIARY_PORT=7790 apiary`, or stop the other process.
 
+## I can't open Apiary from another computer or VM
+The default is local-only. Start it with `apiary start --lan` and open the link it prints. If it still fails, allow the port in the firewall (`sudo ufw allow 7777/tcp`) and check you use the server's IP address, not `127.0.0.1`.
+
 ## “Host not allowed”
-You opened Apiary using a name other than `localhost` / `127.0.0.1`. Set `APIARY_ALLOWED_HOSTS=that-name` and a token.
+You opened Apiary using a name or address it was not told to accept. Start it with `apiary start --lan` and use the server's IP address, or set `APIARY_ALLOWED_HOSTS=that-name` (with a token) to use a host name.
 
 ## “Token required”
-Open the page once with `/?token=YOUR_TOKEN`.
+Open the full link once (`/?token=…`). Run `apiary token` on the server to see it again.
 
 ## GitHub: “Not signed in”
 Run `gh auth login`, or save a token under Connections → GitHub.

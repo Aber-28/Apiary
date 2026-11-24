@@ -3,6 +3,7 @@ Description=Apiary
 After=network-online.target
 
 [Service]
+# Add --lan to reach it from other devices:  ExecStart=%h/.local/bin/apiary start --lan
 ExecStart=%h/.local/bin/apiary
 Restart=on-failure
 Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin

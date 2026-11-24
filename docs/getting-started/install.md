@@ -73,6 +73,8 @@ apiary
 
 Then open **http://127.0.0.1:7777** in your browser.
 
+**Installed on a VM or server and want to open it from another computer?** Start it with `apiary start --lan` instead. See [Run it as a service](service.md#using-it-from-another-device-vm-server-phone).
+
 To use another port: `APIARY_PORT=8080 apiary`.
 
 ## Check it works

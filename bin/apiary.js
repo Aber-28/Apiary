@@ -6,7 +6,9 @@ const BASE = `http://${HOST === '0.0.0.0' ? '127.0.0.1' : HOST}:${PORT}`;
 const HELP = `Apiary — chat-first orchestrator for Claude Code and Codex agents
 
 Usage:
-  apiary [start]                     Start Apiary and open it at ${BASE}
+  apiary [start] [--lan] [--port N]  Start Apiary (http://127.0.0.1:7777). --lan makes it reachable from
+                                     other devices on your network, protected by an access token
+  apiary token                       Print the access link for --lan (and create the token if needed)
   apiary status                      Show what is connected and which agents exist
   apiary connect <claude|codex|github> [--method cli|api|token] [--model NAME]
                                      Choose how a service is reached. For api/token, pipe the key in:
@@ -16,10 +18,30 @@ Usage:
 
 Environment: APIARY_PORT, APIARY_HOST, APIARY_TOKEN, APIARY_HOME (see the docs)`;
 
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'node:fs';
+import { networkInterfaces, homedir } from 'node:os';
+import { randomBytes } from 'node:crypto';
+import path from 'node:path';
+// One token, created on first use and kept (private file) so the link stays the same between restarts.
+function lanToken() {
+  const dir = process.env.APIARY_HOME || path.join(homedir(), '.apiary'), file = path.join(dir, 'token');
+  if (existsSync(file)) return readFileSync(file, 'utf8').trim();
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const t = randomBytes(24).toString('hex');
+  writeFileSync(file, t + '\n', { mode: 0o600 }); try { chmodSync(file, 0o600); } catch { /* best effort */ }
+  return t;
+}
+function savedToken() { try { return process.env.APIARY_TOKEN || readFileSync(path.join(process.env.APIARY_HOME || path.join(homedir(), '.apiary'), 'token'), 'utf8').trim(); } catch { return ''; } }
+function lanLinks(token = process.env.APIARY_TOKEN, force = false) {
+  if (!token || (!force && (process.env.APIARY_HOST || '127.0.0.1') === '127.0.0.1')) return [];
+  const ips = Object.values(networkInterfaces()).flat().filter((i) => i && i.family === 'IPv4' && !i.internal).map((i) => i.address);
+  return ips.map((ip) => `http://${ip}:${process.env.APIARY_PORT || 7777}/?token=${token}`);
+}
+
 async function api(path, method = 'GET', body) {
   let r;
   try {
-    r = await fetch(BASE + path, { method, headers: { 'content-type': 'application/json', ...(process.env.APIARY_TOKEN ? { 'x-apiary-token': process.env.APIARY_TOKEN } : {}) }, body: body && JSON.stringify(body) });
+    r = await fetch(BASE + path, { method, headers: { 'content-type': 'application/json', ...(savedToken() ? { 'x-apiary-token': savedToken() } : {}) }, body: body && JSON.stringify(body) });
   } catch { throw new Error(`Apiary is not running at ${BASE}. Start it with: apiary`); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
@@ -31,8 +53,18 @@ const readStdin = async () => { if (process.stdin.isTTY) return ''; let s = ''; 
 try {
   if (cmd === '--help' || cmd === '-h' || cmd === 'help') console.log(HELP);
   else if (cmd === '--version' || cmd === '-v') console.log(JSON.parse((await import('node:fs')).readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version);
-  else if (cmd === 'start') { const { main } = await import('../src/server.js'); main(); }
-  else if (cmd === 'status') {
+  else if (cmd === 'start' || cmd.startsWith('--')) {
+    const a = cmd === 'start' ? args : [cmd, ...args];
+    const f = (n) => { const i = a.indexOf(n); return i >= 0 ? a[i + 1] : undefined; };
+    if (f('--port')) process.env.APIARY_PORT = f('--port');
+    if (f('--host')) process.env.APIARY_HOST = f('--host');
+    if (a.includes('--lan')) { process.env.APIARY_HOST ||= '0.0.0.0'; process.env.APIARY_TOKEN ||= lanToken(); }
+    const { main } = await import('../src/server.js'); main(lanLinks());
+  } else if (cmd === 'token') {
+    const t = process.env.APIARY_TOKEN || lanToken();
+    console.log(`Access token: ${t}`);
+    for (const u of lanLinks(t, true)) console.log(u);
+  } else if (cmd === 'status') {
     const [conns, st] = await Promise.all([api('/api/connections'), api('/api/state')]);
     for (const c of conns) {
       const ok = c.id === 'github' ? c.status?.ok : c.ready;

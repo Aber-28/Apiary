@@ -35,12 +35,34 @@ To keep it running when you are logged out: `loginctl enable-linger $USER`.
 The service must be able to find `claude`, `codex` and `gh`. If `apiary status` shows them as not found, add their folder to the `Environment=PATH=` line (run `which claude` to find it).
 {% endhint %}
 
-## Using it from another device
+## Using it from another device (VM, server, phone)
 
-By default Apiary only accepts connections from the computer it runs on. To open it from your phone or another PC, set a token **and** the allowed host name:
+By default Apiary only accepts connections from the computer it runs on (`127.0.0.1`), so opening `http://<server-ip>:7777` from another machine fails. To allow it, start Apiary in **LAN mode**:
 
 ```bash
-APIARY_HOST=0.0.0.0 APIARY_TOKEN='a-long-random-secret' APIARY_ALLOWED_HOSTS=my-server.lan apiary
+apiary start --lan
 ```
 
-Open `http://my-server.lan:7777/?token=a-long-random-secret` once; your browser remembers it. Apiary refuses to listen on a non-local address without a token. Put it behind HTTPS (for example a reverse proxy) if it leaves your home network. See [Security](../reference/security.md).
+It listens on your network, creates a private access token (saved in `~/.apiary/token`) and prints a link for every network address of the machine:
+
+```text
+Open it from another device on your network with:
+  http://192.168.1.50:7777/?token=3f9c…
+```
+
+Open that link once; your browser remembers it. To show the link again later: `apiary token`.
+
+If it still cannot be reached, check the firewall on the machine:
+
+```bash
+sudo ufw allow 7777/tcp          # Ubuntu / Debian with ufw
+sudo firewall-cmd --add-port=7777/tcp --permanent && sudo firewall-cmd --reload   # Fedora / RHEL
+```
+
+For the systemd service, change the `ExecStart` line to `ExecStart=%h/.local/bin/apiary start --lan`, then `systemctl --user daemon-reload && systemctl --user restart apiary`. Run `apiary token` to get the link.
+
+To use a name instead of an IP address (for example `my-server.lan`), add `APIARY_ALLOWED_HOSTS=my-server.lan`. Another port: `apiary start --lan --port 8080`.
+
+{% hint style="danger" %}
+Anyone with the link can run commands on that machine as your user. Keep it private and only use it on a network you trust. If it leaves your home network, put it behind HTTPS (for example a reverse proxy or a VPN such as WireGuard or Tailscale). See [Security](../reference/security.md).
+{% endhint %}

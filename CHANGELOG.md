@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.2.1
+- `apiary start --lan` and `apiary token`: reach Apiary from other devices (VMs, servers) with an automatic access token; IP addresses accepted when a token is set; friendly page when the token is missing
+
 ## 0.2.0
 - Approvals: approve, deny or partially approve new sub-agents; review the diff before a sub-agent's work is merged; inbox, badge and notifications
 - Review changes screen for any git agent

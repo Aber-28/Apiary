@@ -562,9 +562,15 @@ export class Engine extends EventEmitter {
   }
   _clearLease(id) { this.leases.delete(id); this.userLeases.delete(id); }
   // Who can be given a secret: the CEO, project leads and standing team members, by role (so renaming does not break access).
+  _agentLabel(a) {
+    const t = a.title && a.title !== a.name ? a.title : '';
+    if (a.kind === 'general') return a.name === 'CEO' ? 'CEO' : `${a.name} (CEO)`;
+    if (a.member) return t ? `${a.name} (${t})` : a.name;
+    return `${a.name} (project lead)`;
+  }
   eligibleAgents() {
     const seen = new Map();
-    for (const a of Object.values(this.agents)) if (a.member || !a.parentId) { const k = this._mkey(a); if (!seen.has(k)) seen.set(k, { key: k, label: `${a.title ? a.title : a.name}${a.kind === 'general' ? ' (CEO)' : a.member ? '' : ' (project lead)'}` }); }
+    for (const a of Object.values(this.agents)) if (a.member || !a.parentId) { const k = this._mkey(a); if (!seen.has(k)) seen.set(k, { key: k, label: this._agentLabel(a) }); }
     return [...seen.values()].sort((x, y) => x.label.localeCompare(y.label));
   }
 

@@ -590,6 +590,7 @@ let orgIds;
   assert.equal((await call('/api/vault/unlock', 'POST', { passphrase: 'wrong wrong wrong' })).status, 403);
   assert.equal((await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' })).status, 200);
   assert.ok((await call('/api/vault')).body.eligible.some((e) => e.key === 'network-engineer'));
+  { const el = (await call('/api/vault')).body.eligible; assert.ok(!el.some((e) => /\(CEO\) \(CEO\)|^CEO \(CEO\)$/.test(e.label)), 'no doubled CEO label'); assert.ok(el.find((e) => e.key === 'network-engineer').label.includes(' (Network Engineer)')); }
   // assign to the network engineer only
   await call('/api/vault/secrets/' + sec.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });
   const ne = orgIds.ne, se = orgIds.se;

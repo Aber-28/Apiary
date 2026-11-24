@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.11.1
+
+* Secrets: *Who may use it* is now a drop-down. Choose an agent, choose *Ask me each time* or *Always allowed*, press **Add**. Agents with access are listed with a **Remove** button, instead of one long list of "No access" boxes.
+* Agent names in that list show the person's name with the job in brackets, and no longer read "CEO (CEO)".
+
 ## 0.11.0
 
 * **Call an agent with @.** Type @ in any chat to pick a teammate, the CEO or a project lead. They receive your message in their own chat, and their answer is shown in the chat you are in. See "Call an agent with @" in the docs.

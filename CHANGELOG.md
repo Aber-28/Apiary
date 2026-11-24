@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.27.1
+
+- **Fix:** a hire that cannot go ahead is no longer dropped silently. The chat and the activity log now say why (for example, a role that already exists or the team size limit), and a hire waiting for your approval is announced in the chat.
+
 ## 0.27.0
 
 - **Choose how much an agent may do without asking.** When an agent wants to run a shell command, the Approvals page now offers: Allow once, Always allow this exact command, Always allow any command that runs the same program, Always allow read-only commands, Allow everything for this agent (asks you to confirm), and Deny.

@@ -19,6 +19,7 @@ import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
 import { TYPES } from './infra.js';
+import { ResetGate, factoryReset } from './reset.js';
 import { EVERY } from './limits.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
@@ -32,6 +33,7 @@ const EXTRA_HOSTS = new Set((process.env.APIARY_ALLOWED_HOSTS || '').split(',').
 
 export function createServer(engine, { updater = null, restart = () => {}, auth = new Auth(path.join(HOME, 'auth.json')) } = {}) {
   const clients = new Set();
+  const resetGate = new ResetGate();
   engine.on('event', (ev) => {
     const data = `data: ${JSON.stringify(ev)}\n\n`;
     for (const res of clients) res.write(data);
@@ -225,6 +227,21 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         json(res, 200, { ...out, restarting: true });
         res.on('finish', () => setTimeout(restart, 600));
         return;
+      }
+      // ----- factory reset: three checks, enforced here and not just in the page -----
+      if (url.pathname === '/api/reset') {
+        if (req.method === 'POST') {
+          const b = await readBody(req);
+          if (b.action === 'start') return json(res, 200, resetGate.start());
+          if (b.action === 'cancel') { resetGate.cancel(); return json(res, 200, { ok: true }); }
+          const out = resetGate.answer(b.id, b.answer);
+          if (!out.done) return json(res, 200, out);
+          const r = factoryReset(engine, { keepAccount: b.removeAccount !== true });
+          if (b.removeAccount === true) auth.data = null;
+          json(res, 200, { done: true, ...r, restarting: true });
+          res.on('finish', () => setTimeout(restart, 600));
+          return;
+        }
       }
       // ----- project plans -----
       if ((r = m(/^\/api\/projects\/([\w-]+)\/plan$/))) {

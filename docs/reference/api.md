@@ -91,3 +91,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 * `GET /api/infra` lists items. `POST /api/infra` adds one. `PUT /api/infra/:id` updates, `DELETE` removes.
 * `POST /api/infra/:id/test` checks reachability. `POST /api/infra/:id/confirm` `{ok}` accepts or rejects a suggestion. `POST /api/infra/:id/answer` `{text}` answers a question.
+
+## Factory reset
+
+`POST /api/reset` `{action:"start"}` begins; then `{id, answer}` answers each check in order (YES, YES, a sum). `{action:"cancel"}` cancels. `removeAccount:true` on the last answer also removes the sign-in account.

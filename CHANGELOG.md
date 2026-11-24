@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.15.1
+
+* **Factory reset** (Settings > Factory reset). Deletes everything Apiary holds (projects, chats, tasks, agents, the CEO and team, memory, the infrastructure map, the vault and its auto-unlock key, connections and settings) and restarts into the setup wizard. It takes three checks: type YES, type YES again, then answer a simple sum. A wrong answer cancels everything, and the checks are enforced by the server, not just the page. Your access link and sign-in account are kept (tick a box to remove the account too), and folders on your computer that a project only pointed at are never touched.
+* **Live activity.** A new page, and a **Working now** box in the sidebar, show every agent that is working right now: your CEO, specialists and project helpers, with what they are doing and their latest output. Open their chat or stop them from there. Tasks show a live line with a **Watch** button while their agent (or one of that agent's specialists) is working.
+* **Smaller text** throughout.
+
 ## 0.15.0
 
 * **Infrastructure.** A new **Infrastructure** menu with two pages. **Devices** lists everything you run or connect to (Proxmox, Raspberry Pi, VMs, containers, NAS, routers, websites, services). Each has **Test connection** (a quick check that the address or website answers), **Update** and **Remove**, and **Add new** creates one. **Map** draws it as a diagram: boxes inside a box run on it, arrows are connections, and the outline shows the last test. The map redraws as things change.

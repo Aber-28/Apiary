@@ -98,11 +98,11 @@ applyTheme(document.documentElement.className || 'dark');
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -125,7 +125,7 @@ function renderSide() {
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
     newBtn, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
     h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
-    h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
+    workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
 }
 function crumbs(...parts) {
   $('#crumbs').replaceChildren(...parts.flatMap((p, i) => [i ? h('span', {}, '/') : null, i === parts.length - 1 ? h('b', {}, p) : h('span', {}, p)]).filter(Boolean));
@@ -144,10 +144,12 @@ const ROUTES = [
   [/^#\/infrastructure$/, () => pageInfra('devices')],
   [/^#\/infrastructure\/map$/, () => pageInfra('map')],
   [/^#\/signin$/, () => pageSignin()],
+  [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
   [/^#\/teams$/, () => pageTeams()],
   [/^#\/memory$/, () => pageMemory()],
+  [/^#\/activity$/, () => pageActivity()],
   [/^#\/projects$/, () => pageProjects()],
   [/^#\/project\/([\w-]+)$/, (m) => pageProject(m[1])],
   [/^#\/approvals$/, () => pageApprovals()],
@@ -204,7 +206,7 @@ function connectEvents() {
     } else if (ev.type === 'delta') S.stream[ev.agentId] = (S.stream[ev.agentId] || '') + ev.text;
     else if (ev.type === 'activity') S.activity[ev.agentId] = ev.text;
     else if (ev.type === 'log') { (S.logs[ev.agentId] ||= []).push(ev.line); }
-    if (['agent', 'removed'].includes(ev.type)) renderSide();
+    if (['agent', 'removed'].includes(ev.type)) renderSide(); else if (ev.type === 'activity') updateWorking();
     if (ev.type === 'approval') toastIfPending(ev.approval);
     page?.update?.(ev);
   };
@@ -432,7 +434,7 @@ function pageProject(leadId, general = false) {
     if (fs.file) {
       const f = await api(`/api/agents/${leadId}/file?path=${q(fs.file)}`).catch((e) => ({ error: e.message }));
       const area = h('textarea', { rows: '22', class: 'mono', 'aria-label': 'File contents', style: 'width:100%' }); area.value = f.content ?? '';
-      box.replaceChildren(crumbBar(), h('h2', { style: 'margin:14px 0 8px;font-size:16px' }, fs.file),
+      box.replaceChildren(crumbBar(), h('h2', { style: 'margin:14px 0 8px;font-size:14px' }, fs.file),
         f.error ? h('p', { class: 'hint' }, f.error) : f.binary ? h('p', { class: 'hint' }, `This file is not text (${f.size} bytes). Download it to open it.`) : area,
         h('div', { class: 'kv', style: 'margin-top:12px' },
           !f.binary && !f.error ? h('button', { class: 'btn primary', onclick: guard(async () => { await api(`/api/agents/${leadId}/file?path=${q(fs.file)}`, 'PUT', { content: area.value }); toast('Saved'); }) }, 'Save') : null,
@@ -546,7 +548,7 @@ async function pageChat() {
     if (!S.agents.some((x) => x.id === a.id)) S.agents.push(a);
     if (cur() !== '#/chat' && cur() !== '#/organisation') return;
     await ensureMsgs(a.id);
-    S.sel = a.id;
+    if (!S.sel || rootOf(S.agents.find((x) => x.id === S.sel) || { id: null }).id !== a.id) S.sel = a.id;
     pageProject(a.id, true);
     if (!S.orgDone) { const cta = h('div', { class: 'card', style: 'margin:12px 16px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, h('div', { style: 'flex:1;min-width:240px' }, h('b', {}, 'You have not set up your CEO yet'), h('p', { class: 'hint', style: 'margin:2px 0 0' }, 'A short interview about your setup lets Apiary propose the team you need and write each person\'s profile for you.')), h('button', { class: 'btn primary', onclick: () => openSetup(3) }, 'Set up my CEO')); view.querySelector('.chat')?.prepend(cta); }
   } catch (e) { view.replaceChildren(...[getStartedCard(() => route()), h('div', { class: 'card empty' }, getStartedCard() ? 'No AI is connected yet.' : e.message, ' ', h('a', { href: '#/connections', style: 'text-decoration:underline' }, 'Open Connections'))].filter(Boolean)); }
@@ -686,7 +688,7 @@ function renderUpdateChip() {
   let c = document.getElementById('upd');
   const u = S.update;
   if (!u || u.state !== 'ready') { c?.remove(); return; }
-  if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:13px' }); $('#theme').before(c); }
+  if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:12px' }); $('#theme').before(c); }
   c.textContent = `Update ready: ${u.latest}`;
 }
 async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
@@ -1160,6 +1162,12 @@ function pageTasks() {
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, t.title), t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
+    (() => {
+      const w = t.assignee && S.agents.find((a) => a.id === t.assignee.id);
+      if (!w || t.status === 'done') return null;
+      const live = [w, ...S.agents.filter((a) => a.parentId === w.id)].filter((a) => a.status === 'working' || a.status === 'waiting');
+      return live.length ? h('div', { role: 'status', style: 'margin-top:8px' }, live.map((a) => h('div', { class: 'kv', style: 'gap:8px;align-items:center;margin:2px 0' }, h('span', { class: 'dot work pulse' }), h('span', { style: 'flex:1;min-width:0' }, `${a.name}: ${S.activity[a.id] || (a.status === 'waiting' ? 'waiting for the team' : 'working…')}`), h('button', { class: 'btn', onclick: () => openAgent(a.id) }, 'Watch')))) : null;
+    })(),
     h('label', { class: 'hint', style: 'display:block;margin-top:8px' }, 'Responsible ', (() => { const x = agentSel(t.assignee?.id, `Who does "${t.title}"`); x.onchange = guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { assignee: x.value }); load(); }); return x; })()),
     h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), t.status !== 'done' ? h('button', { class: 'btn', title: 'Send this task to the agent now', onclick: guard(async () => { const r = await api(`/api/tasks/${t.id}/start`, 'POST', {}); toast(`Sent to ${r.agent}. Follow it in their chat.`); load(); }) }, 'Start') : null, h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
   const draw = () => {
@@ -1174,7 +1182,7 @@ function pageTasks() {
         return h('section', { class: 'col', 'aria-label': name }, h('h3', {}, name, h('span', { class: 'count' }, String(tasks.filter((t) => t.status === k).length))), h('small', { class: 'hint' }, sub), list.length ? list.map(card) : h('p', { class: 'hint empty-col' }, 'Nothing here'), more ? h('button', { class: 'btn', onclick: () => { showAllDone = true; draw(); } }, 'Show all') : null);
       })));
   };
-  load().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (['agent', 'message'].includes(ev.type)) load().catch(() => {}); }) };
+  load().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (['agent', 'message'].includes(ev.type)) load().catch(() => {}); else if (ev.type === 'activity') draw(); }) };
 }
 
 // ---------- repositories ----------
@@ -1238,6 +1246,49 @@ function pageAppearance() {
     h('div', { class: 'card', style: 'max-width:560px' }, h('div', { class: 'seg' }, ['dark', 'light'].map((t) => h('button', { 'aria-pressed': String(document.documentElement.className === t), onclick: () => { applyTheme(t); draw(); } }, t === 'dark' ? 'Dark' : 'Light')))),
     h('div', { class: 'card', style: 'max-width:560px;margin-top:16px' }, h('h2', {}, 'Writing style'), h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: S.plainEnglish, onchange: guard(async (e) => { await api('/api/settings', 'PUT', { plainEnglish: e.target.checked }); S.plainEnglish = e.target.checked; }) }), ' Agents write in plain, simple English'), h('p', { class: 'hint' }, 'On by default: short sentences and everyday words. Turn it off if you prefer technical language.')));
   draw();
+}
+
+// ---------- who is working right now ----------
+const busy = () => S.agents.filter((a) => a.status === 'working' || a.status === 'waiting');
+function openAgent(id) {
+  const a = S.agents.find((x) => x.id === id); if (!a) return;
+  const root = rootOf(a); S.sel = id; S.nextTab = 'chat';
+  const target = root.kind === 'general' ? '#/chat' : `#/project/${root.id}`;
+  if (location.hash === target) route(); else location.hash = target;
+}
+function workingBox() {
+  const list = busy().slice(0, 6);
+  return h('div', { class: 'conn-box', id: 'working', 'aria-live': 'polite' }, h('h4', {}, 'Working now'),
+    list.length ? list.map((a) => h('button', { class: 'conn-row', style: 'background:none;border:0;padding:2px 0;text-align:left;width:100%;cursor:pointer', onclick: () => openAgent(a.id), title: 'Open this agent' }, h('span', { class: 'dot work pulse' }), h('span', { style: 'flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, a.name), h('small', { style: 'max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap' }, S.activity[a.id] || (a.status === 'waiting' ? 'Waiting' : 'Working')))) : h('small', { class: 'hint' }, 'Nobody right now'),
+    busy().length > 6 ? h('a', { class: 'hint', href: '#/activity' }, `and ${busy().length - 6} more`) : h('a', { class: 'hint', href: '#/activity' }, 'See live activity'));
+}
+function updateWorking() { const old = document.getElementById('working'); if (old) old.replaceWith(workingBox()); }
+
+function pageActivity() {
+  crumbs('Workspace', 'Live activity');
+  let tails = {};
+  const draw = () => {
+    const list = busy();
+    const card = (a) => {
+      const root = rootOf(a), lines = (S.logs[a.id] || tails[a.id] || []).slice(-8);
+      const where = a.member ? `${a.title || a.role || 'Specialist'}` : a.kind === 'general' ? 'CEO' : !a.parentId ? 'Project' : (a.role || 'Helper');
+      return h('div', { class: 'card', style: 'margin-bottom:12px' },
+        h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', {}, h('b', {}, a.name), ' ', h('span', { class: 'pill' }, where), root.id !== a.id ? h('small', { class: 'hint' }, ` in ${root.name}`) : null), pill(a.status)),
+        h('p', { style: 'margin:6px 0;font-weight:600' }, h('span', { class: 'dot work pulse' }), ' ', S.activity[a.id] || (a.status === 'waiting' ? 'Waiting for the team…' : 'Working…')),
+        lines.length ? h('pre', { class: 'mono', style: 'max-height:150px;overflow:auto;margin:6px 0;padding:8px;background:var(--bg);border:1px solid var(--line);border-radius:8px;white-space:pre-wrap' }, lines.join('\n')) : h('p', { class: 'hint' }, 'No terminal output yet.'),
+        h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: () => openAgent(a.id) }, 'Open chat'), h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop')));
+    };
+    view.replaceChildren(h('h1', {}, 'Live activity'), h('p', { class: 'sub-title' }, 'Every agent that is working right now: your CEO, specialists and project helpers. This updates by itself.'),
+      list.length ? list.map(card) : h('div', { class: 'card empty' }, 'Nobody is working right now. When you give a task or message to an agent, you will see them here, with what they are doing and their latest output.'));
+  };
+  const load = async () => { for (const a of busy()) { if (!tails[a.id]) { try { tails[a.id] = await api(`/api/agents/${a.id}/logs`); } catch { tails[a.id] = []; } } } draw(); };
+  load();
+  let queued = 0;   // redraw at most twice a second, so a busy agent's output cannot starve the page
+  page = { shows: () => true, update: (ev) => {
+    if (!['agent', 'removed', 'activity', 'log'].includes(ev.type)) return;
+    if (ev.type === 'log') (tails[ev.agentId] ||= []).push(ev.line);
+    if (!queued) queued = setTimeout(() => { queued = 0; if (cur() === '#/activity') load(); }, 400);
+  } };
 }
 
 // ---------- infrastructure: devices and the map ----------
@@ -1369,6 +1420,47 @@ async function pageInfra(tab) {
   await draw(); page = { shows: () => true, update: (ev) => ev.type === 'infra' && !document.querySelector('dialog[open]') && draw() };
 }
 
+// ---------- factory reset ----------
+function pageReset() {
+  crumbs('Settings', 'Factory reset');
+  const removeAcc = h('input', { type: 'checkbox' });
+  const begin = guard(async () => {
+    let q = await api('/api/reset', 'POST', { action: 'start' });
+    const ans = h('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', autocapitalize: 'off', 'aria-label': 'Your answer' });
+    const title = h('h2', {}), prompt = h('p', { style: 'font-weight:600' }), err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' });
+    const go = h('button', { class: 'btn danger', type: 'submit', value: 'go' }, 'Continue');
+    const paint = () => { title.textContent = `Factory reset: check ${q.step} of ${q.of}`; prompt.textContent = q.prompt; ans.value = ''; ans.inputMode = q.step === 3 ? 'numeric' : 'text'; go.textContent = q.step === 3 ? 'Delete everything' : 'Continue'; ans.focus(); };
+    const dlg = h('dialog', {}, h('form', { method: 'dialog' }, title, prompt, ans, err, h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Cancel'), go)));
+    let finished = false;
+    dlg.addEventListener('close', () => { if (!finished) api('/api/reset', 'POST', { action: 'cancel' }).catch(() => {}); dlg.remove(); });
+    go.addEventListener('click', async (e) => {
+      e.preventDefault(); err.textContent = ''; go.disabled = true;
+      try {
+        const r = await api('/api/reset', 'POST', { id: q.id, answer: ans.value, removeAccount: removeAcc.checked });
+        if (r.done) { finished = true; dlg.close(); resetOverlay(); return; }
+        q = r; paint();
+      } catch (x) { finished = true; dlg.close(); toast(x.message, true); }
+      go.disabled = false;
+    });
+    document.body.append(dlg); dlg.showModal(); paint();
+  });
+  view.replaceChildren(h('h1', {}, 'Factory reset'), h('p', { class: 'sub-title' }, 'Delete everything Apiary holds and start again from the setup wizard.'),
+    h('div', { class: 'card', style: 'max-width:640px;border-color:var(--err)' },
+      h('h2', {}, 'This cannot be undone'),
+      h('p', {}, h('b', {}, 'Deleted: '), 'every project, chat, task and agent, the CEO and your team, memory, meetings, the infrastructure map, the Secrets vault and its auto-unlock key, saved connections (including the GitHub token), settings, and the project folders and repository copies Apiary created.'),
+      h('p', {}, h('b', {}, 'Kept: '), 'Apiary itself, the access link, your sign-in account (unless you tick the box below), Claude Code and Codex sign-ins, and any folder on your computer that a project merely pointed at. Those are your own files.'),
+      h('p', { class: 'hint' }, 'Want a copy first? Use Export and import before you start. To keep your secrets, include the vault in the export.'),
+      h('label', { class: 'check' }, removeAcc, ' Also remove my sign-in account'),
+      h('p', { class: 'hint' }, 'It takes three checks: type YES, type YES again, then answer a simple sum. A wrong answer cancels everything.'),
+      h('div', { class: 'formrow', style: 'margin-top:12px' }, h('button', { class: 'btn danger', onclick: begin }, 'Start factory reset'))));
+}
+function resetOverlay() {
+  const o = h('div', { class: 'wizard', role: 'alert', 'aria-live': 'assertive' }, h('div', { class: 'card', style: 'max-width:420px;margin:20vh auto;text-align:center' }, h('h2', {}, 'Everything was deleted'), h('p', {}, 'Apiary is restarting. This page reloads by itself and opens the setup wizard.')));
+  document.body.append(o);
+  const tryLoad = async () => { try { const r = await fetch('/api/state', { cache: 'no-store' }); if (r.ok) { location.hash = '#/chat'; location.reload(); return; } } catch { /* still restarting */ } setTimeout(tryLoad, 1500); };
+  setTimeout(tryLoad, 2500);
+}
+
 // ---------- sign-in account ----------
 async function pageSignin() {
   crumbs('Settings', 'Sign-in');
@@ -1404,7 +1496,7 @@ async function pageSignin() {
 function renderSignOut() {
   let b = $('#signout');
   if (!S.account?.exists) { b?.remove(); return; }
-  if (!b) { b = h('button', { id: 'signout', class: 'btn', style: 'padding:4px 12px;font-size:13px', onclick: guard(async () => { await api('/api/logout', 'POST', {}); location.replace('/login'); }) }, 'Sign out'); $('#theme').before(b); }
+  if (!b) { b = h('button', { id: 'signout', class: 'btn', style: 'padding:4px 12px;font-size:12px', onclick: guard(async () => { await api('/api/logout', 'POST', {}); location.replace('/login'); }) }, 'Sign out'); $('#theme').before(b); }
 }
 function pageAccess() {
   crumbs('Settings', 'Access and safety');

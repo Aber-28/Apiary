@@ -1448,5 +1448,50 @@ let orgIds;
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageInfra/); assert.match(app, /Is this right\?/);
 }
 
+// ---- factory reset ----
+{
+  const { ResetGate, plan } = await import('../src/reset.js');
+  const g = new ResetGate();
+  let q = g.start(); assert.equal(q.step, 1);
+  assert.throws(() => g.answer(q.id, 'yes'), /not YES/); assert.throws(() => g.answer(q.id, 'YES'), /expired or was cancelled/, 'a wrong answer cancels everything');
+  q = g.start(); q = g.answer(q.id, 'YES'); assert.equal(q.step, 2); q = g.answer(q.id, 'YES'); assert.equal(q.step, 3);
+  const [, a, b] = /What is (\d+) \+ (\d+)\?/.exec(q.prompt); assert.throws(() => g.answer(q.id, String(+a + +b + 1)), /not the right answer/);
+  q = g.start(); g.answer(q.id, 'YES'); q = g.answer(q.id, 'YES'); const [, a3, b3] = /What is (\d+) \+ (\d+)\?/.exec(q.prompt); assert.deepEqual(g.answer(q.id, String(+a3 + +b3)), { done: true });
+}
+{
+  // through the API on a separate engine and data folder, so nothing else in the test is disturbed
+  const { plan } = await import('../src/reset.js');
+  const dir2 = mkdtempSync(path.join(os.tmpdir(), 'apiary-reset-'));
+  const st2 = new Store(path.join(dir2, 'state.json')), eng2 = new Engine(st2);
+  const keep = path.join(os.tmpdir(), `apiary-outside-${Date.now()}`); (await import('node:fs')).mkdirSync(keep); (await import('node:fs')).writeFileSync(path.join(keep, 'mine.txt'), 'my own file');
+  const proj = await eng2.createLead({ provider: 'mock', approvals: false, name: 'P', goal: 'hi', cwd: keep });
+  eng2.infra.add({ name: 'A box', type: 'server' }); eng2.vault.init('correct horse battery'); eng2.vault.add('X', 'val');
+  eng2.store.flush();
+  (await import('node:fs')).writeFileSync(path.join(dir2, 'token'), 'tok'); (await import('node:fs')).writeFileSync(path.join(dir2, 'auth.json'), '{"v":1}');
+  let restarted = 0;
+  const { Auth } = await import('../src/auth.js');
+  const srv2 = createServer(eng2, { restart: () => { restarted++; }, auth: new Auth(path.join(dir2, 'auth.json')) });
+  await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
+  const c2 = async (body) => { const r = await fetch(`http://127.0.0.1:${srv2.address().port}/api/reset`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+  // skipping ahead or guessing does nothing
+  assert.equal((await c2({ id: 'x', answer: 'YES' })).status, 409);
+  let r1 = (await c2({ action: 'start' })).body; r1 = (await c2({ id: r1.id, answer: 'YES' })).body; r1 = (await c2({ id: r1.id, answer: 'YES' })).body;
+  assert.equal(r1.step, 3); assert.equal((await c2({ id: r1.id, answer: '1' })).status, 400);
+  assert.ok(fsExists(path.join(dir2, 'state.json')) && eng2.vault.exists, 'nothing deleted after a wrong sum');
+  let r2 = (await c2({ action: 'start' })).body; r2 = (await c2({ id: r2.id, answer: 'YES' })).body; r2 = (await c2({ id: r2.id, answer: 'YES' })).body;
+  const [, a2, b2] = /What is (\d+) \+ (\d+)\?/.exec(r2.prompt);
+  assert.ok(plan(eng2).files.length > 3);
+  const done = await c2({ id: r2.id, answer: String(+a2 + +b2) });
+  assert.equal(done.status, 200); assert.equal(done.body.done, true);
+  await new Promise((r) => setTimeout(r, 900)); assert.equal(restarted, 1, 'it restarts afterwards');
+  for (const n of ['state.json', 'vault.json', 'infra.json', 'memory.json', 'workspaces']) assert.equal(fsExists(path.join(dir2, n)), false, n + ' is gone');
+  assert.ok(fsExists(path.join(dir2, 'token')) && fsExists(path.join(dir2, 'auth.json')), 'the access token and sign-in stay');
+  assert.equal(fsRead(path.join(keep, 'mine.txt'), 'utf8'), 'my own file', 'folders outside Apiary are never touched');
+  // and the next start is a clean first run
+  const fresh = new Engine(new Store(path.join(dir2, 'state.json'))); assert.equal(fresh.onboardingDone, false); assert.equal(Object.keys(fresh.agents).length, 0); assert.equal(fresh.infra.items.length, 0); assert.equal(fresh.vault.exists, false);
+  srv2.close(); void proj;
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(appjs, /Start factory reset/); assert.match(appjs, /pageActivity/); assert.match(appjs, /Working now/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

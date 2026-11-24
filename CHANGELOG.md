@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.0
+
+- **Agents talk freely in any direction.** A message to a teammate no longer holds the sender's chat until the teammate has finished. The message is delivered, and the reply comes back as a new message in the sender's own chat. Before, Bruce's chat sat at "waiting for Neo" until Neo's turn ended, and anything you sent to Bruce queued behind it. A child agent is no longer refused for asking its parent.
+
+## 0.29.0
+
+- **How much each agent may do without asking.** The Access and safety page has a slider under each agent. All the way left, every command asks you. All the way right, everything runs. The positions between allow more as you move right: read-only commands; simple commands; chains and scripts too; everything except deleting, rebooting and destroying. A Deny rule on Approval rules still wins, and an agent on Full access runs everything.
+
+## 0.28.0
+
+- **Open a task and carry on with it.** Task titles on the Tasks board are links. A task page shows its details, status, subtasks, history and the conversation with the agent doing it. You can send that agent the next instruction (it is linked to the task's code), ask it to carry on, or start work on the task.
+
 ## 0.27.1
 
 - **Fix:** a hire that cannot go ahead is no longer dropped silently. The chat and the activity log now say why (for example, a role that already exists or the team size limit), and a hire waiting for your approval is announced in the chat.

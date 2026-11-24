@@ -168,6 +168,7 @@ function crumbs(...parts) {
 // ---------- routing ----------
 const ROUTES = [
   [/^#\/chat$/, () => pageChat()],
+  [/^#\/task\/([\w-]+)$/, (m) => pageTask(m[1])],
   [/^#\/organisation$/, () => { S.nextTab = 'org'; pageChat(); }],
   [/^#\/meetings$/, () => pageMeetings()],
   [/^#\/tasks$/, () => pageTasks()],
@@ -1252,7 +1253,7 @@ function pageTasks() {
       h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
         h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); d.close(); load(); })(); } }, 'Save')));
   };
-  const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), t.title),
+  const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), h('a', { href: `#/task/${t.id}`, title: 'Open this task' }, t.title)),
     t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
     t.subtasks?.length ? h('small', { class: 'hint', style: 'display:block' }, (t.waitingFor.length ? `Waiting for ${t.waitingFor.join(', ')}. ` : 'All subtasks closed. '), t.subtasks.map((k) => `${k.code} ${k.assignee} (${k.status === 'done' ? 'closed' : k.status})`).join(' · ')) : null,
     t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
@@ -1279,6 +1280,41 @@ function pageTasks() {
       })));
   };
   load().catch((e) => toast(e.message, true)); page = { shows: () => true, update: debounce((ev) => { if (['agent', 'message'].includes(ev.type)) load().catch(() => {}); else if (ev.type === 'activity') draw(); }) };
+}
+
+// ---------- one task: read it, see its conversation, and carry on working on it ----------
+async function pageTask(id) {
+  crumbs('Workspace', 'Tasks', 'Task');
+  const draw = async () => {
+    let t; try { t = await api('/api/tasks/' + id); } catch (e) { view.replaceChildren(h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')), h('div', { class: 'card empty' }, e.message)); return; }
+    const who = t.assignee && S.agents.find((a) => a.id === t.assignee.id);
+    const convo = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []).filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14) : [];
+    const text = h('textarea', { rows: '3', 'aria-label': 'What to tell the agent next', placeholder: who ? `Tell ${who.name} what to do next, or answer a question…` : 'Assign someone to this task first, then continue here.' });
+    const send = h('button', { class: 'btn primary', disabled: !who, onclick: guard(async () => {
+      if (!text.value.trim()) { toast('Write a message first', true); return; }
+      await api(`/api/agents/${who.id}/messages`, 'POST', { text: `About task ${t.code} "${t.title}": ${text.value.trim()}` });
+      text.value = ''; toast(`Sent to ${who.name}`);
+    }) }, 'Send to ' + (who ? who.name : 'the agent'));
+    const start = h('button', { class: 'btn', disabled: t.status === 'done', onclick: guard(async () => {
+      const r = await api(`/api/tasks/${t.id}/start`, 'POST'); toast(`${r.agent} is working on it`); draw();
+    }) }, t.status === 'inprogress' ? 'Ask the agent to carry on' : 'Start work on this task');
+    const statusSel = h('select', { 'aria-label': 'Status', onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); toast('Status updated'); draw(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n)));
+    view.replaceChildren(
+      h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')),
+      h('h1', {}, h('span', { class: 'chip mono', style: 'margin-right:8px' }, t.code || ''), t.title),
+      h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
+      h('small', { class: 'hint', style: 'display:block;margin:6px 0 14px' }, [who ? `With ${who.name}` : 'Not assigned', t.projectName ? `Project ${t.projectName}` : '', t.source === 'human' ? '' : `Added by ${t.source}`, ago(t.updatedAt)].filter(Boolean).join(' · ')),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? h('p', { style: 'white-space:pre-wrap' }, t.notes) : h('p', { class: 'hint' }, 'No details yet.'),
+        t.closure ? h('p', { style: 'color:var(--ok-text);font-weight:600' }, t.closure) : null,
+        h('label', { class: 'f', style: 'margin-top:8px' }, 'Status', statusSel)),
+      t.subtasks?.length ? h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Subtasks'), h('ul', {}, t.subtasks.map((k) => h('li', {}, h('a', { href: `#/task/${k.id}` }, `${k.code} ${k.title}`), ` · ${k.assignee || 'unassigned'} · ${k.status === 'done' ? 'closed' : k.status}`)))) : null,
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Continue working on this'), h('p', { class: 'hint' }, who ? `Your message goes to ${who.name} with this task's code, so the work stays linked to it.` : 'Assign someone to this task to continue it.'),
+        h('div', { class: 'formrow', style: 'flex-direction:column;align-items:stretch' }, text), h('div', { class: 'formrow', style: 'margin-top:8px;flex-wrap:wrap' }, send, start),
+        h('h3', { style: 'margin-top:16px' }, 'Conversation'), convo.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, convo.map((m) => h('li', { style: 'margin:6px 0;white-space:pre-wrap' }, h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, 'No conversation with this agent yet.')),
+      t.log?.length ? h('details', { style: 'max-width:760px' }, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null);
+  };
+  await draw();
+  page = { shows: () => true, update: debounce((ev) => { if (['message', 'agent', 'activity'].includes(ev.type)) draw().catch(() => {}); }) };
 }
 
 // ---------- repositories ----------

@@ -9,7 +9,8 @@
 // apiary/<project>/<agent-id>). Children branch from their parent, are auto-committed after
 // each turn, and the parent merges them when they report back.
 import { EventEmitter } from 'node:events';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import { readFileSync, mkdirSync, realpathSync, existsSync, statSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { providers, which } from './providers.js';
@@ -74,6 +75,8 @@ export class Engine extends EventEmitter {
     this.stopped = new Set();  // agents asked to stop mid-delegation
     this.locks = new Map();    // repo dir -> promise chain (git worktree operations are serialised)
     this.pending = new Map();  // approvalId -> { resolve, reject }
+    this.approvalRuns = new Map(); // one-time token -> { agent, signal } for each safe-mode run's approval bridge
+    this.baseUrl = '';         // where this Apiary is reachable on this machine (set by the server when it starts)
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
@@ -983,16 +986,47 @@ export class Engine extends EventEmitter {
     const r = this.agents[this.projectFor.get(agent.id)];
     return r ? `\nYou are working on the project "${r.name}". Its folder is ${r.cwd} (you have been given access to it). Make the project's changes there. Your own folder is only for your notes.\n` : '';
   }
+  // Safe-mode Claude runs ask the person before a shell command runs. The CLI calls the approval bridge,
+  // which posts the request here with this run's one-time token; the answer comes from the Approvals page.
+  beginApprovalBridge(agent, signal) {
+    const token = randomBytes(24).toString('hex');
+    this.approvalRuns.set(token, { agent, signal });
+    return { url: `${this.baseUrl}/api/approval-bridge`, token, bridge: fileURLToPath(new URL('./approval-bridge.js', import.meta.url)) };
+  }
+  endApprovalBridge(approval) { if (approval) this.approvalRuns.delete(approval.token); }
+  async requestCommandApproval(token, body = {}) {
+    const run = this.approvalRuns.get(token);
+    if (!run) return { behavior: 'deny', message: 'This run is no longer active.' };
+    const { agent, signal } = run;
+    const input = body.input && typeof body.input === 'object' ? body.input : {};
+    const tool = String(body.tool_name || 'a tool').slice(0, 80);
+    const command = typeof input.command === 'string' ? input.command : JSON.stringify(input);
+    const shown = this._redact(command).slice(0, 800);
+    const title = tool === 'Bash' ? `${agent.name} wants to run a command` : `${agent.name} wants to use ${tool}`;
+    // If the run is stopped while the person is deciding, the request is denied rather than left hanging.
+    const cancel = () => { for (const r of Object.values(this.store.data.approvals)) if (r.status === 'pending' && r.kind === 'command' && r.agentId === agent.id) this.decide(r.id, { decision: 'deny', note: 'The run was stopped.' }); };
+    signal?.addEventListener('abort', cancel, { once: true });
+    try {
+      const ans = await this._ask(agent, { kind: 'command', title, detail: shown });
+      if (ans.decision === 'approve') return { behavior: 'allow', updatedInput: input };
+      return { behavior: 'deny', message: ans.note || 'The person did not allow this command.' };
+    } catch {
+      return { behavior: 'deny', message: 'The command was not approved.' };
+    } finally {
+      signal?.removeEventListener('abort', cancel);
+    }
+  }
   async _exec(agent, prompt) {
     const ctl = new AbortController();
     this.ctls.set(agent.id, ctl);
     this._setStatus(agent, 'working');
     this._log(agent, `── ${new Date().toLocaleTimeString()} ${agent.name} (${agent.provider}, ${agent.method === 'api' ? 'web' : 'terminal'}) ──`);
+    const approval = agent.provider === 'claude' && agent.method !== 'api' && agent.access !== 'full' ? this.beginApprovalBridge(agent, ctl.signal) : undefined;
     try {
       const runner = providers.pick(agent);
       const system = this._system(agent) + this._projectNote(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
       const res = await runner.run({
-        agent, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: ctl.signal,
+        agent, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: ctl.signal, approval,
         history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
         onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }),
         onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
@@ -1008,6 +1042,7 @@ export class Engine extends EventEmitter {
       if (e.name !== 'AbortError') { this.health.noteLoginFailure(agent.provider, e.message); this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
       throw e;
     } finally {
+      this.endApprovalBridge(approval);
       this.ctls.delete(agent.id);
       this.emit('event', { type: 'activity', agentId: agent.id, text: '' });
     }

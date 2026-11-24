@@ -103,6 +103,13 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
     const url = new URL(req.url, 'http://x');
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     try {
+      // The approval bridge that a safe-mode Claude run starts. Only this machine may call it, and only with that run's one-time token.
+      if (url.pathname === '/api/approval-bridge' && req.method === 'POST') {
+        const from = (req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+        const auth = req.headers.authorization || '';
+        if (!(from === '127.0.0.1' || from === '::1') || !auth.startsWith('Bearer ')) return json(res, 403, { error: 'Not allowed' });
+        return json(res, 200, await engine.requestCommandApproval(auth.slice(7), await readBody(req)));
+      }
       const bad = guard(req, url);
       if (bad && bad[0] === 401 && auth.exists && req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
         res.writeHead(302, { location: '/login', 'cache-control': 'no-store' });
@@ -551,6 +558,9 @@ export function main(links = []) {
   }
   server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set APIARY_PORT to another port.` : e.message); process.exit(1); });
   server.listen(PORT, HOST, () => {
+    const bound = server.address();
+    const local = bound.address === '0.0.0.0' || bound.address === '::' ? '127.0.0.1' : bound.address;
+    engine.baseUrl = `http://${local.includes(':') ? `[${local}]` : local}:${bound.port}`;
     console.log(`Apiary ${VERSION} running at http://${HOST}:${PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);
     if (links.length) { console.log('\nOpen it from another device on your network with:'); for (const l of links) console.log('  ' + l); console.log('Keep these links private: anyone who has one can run commands as you.\n'); }
     console.log('Connected:', engine.available.map((p) => `${p.id} (${p.method})`).join(', ') || 'nothing yet');

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.26.0
+
+- **Approve shell commands from the Approvals page.** In safe mode, when an agent wants to run a command that is not already allowed, Apiary now shows it on the Approvals page with the exact command, and waits for your Approve or Deny. Before, the command was refused and no request appeared. Denied or stopped requests are not run. Full-access agents are unchanged. Codex agents are not yet covered.
+- **Replaces the 0.25.1 shortcut.** The blanket allow rule for `apiary-ssh` is gone, so every shell command in safe mode is decided by you.
+
 ## 0.25.1
 
 - **Fix:** an agent in safe mode can now run the `apiary-ssh` helper after you approve its vault login. Before, the shell command was refused because nobody could answer its permission prompt, so the agent reported "needs approval". Only that one helper is pre-approved; other commands still need approval, and full-access agents are unchanged.

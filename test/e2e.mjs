@@ -1300,12 +1300,31 @@ let orgIds;
   const r3 = run({}, ['Lab server']); assert.equal(r3.status, 2); assert.match(r3.stderr, /not available to you/);
   const ask = spawnSync(process.execPath, [helper, "admin@lab's password: "], { env: { ...process.env, APIARY_ASKPASS_VAR: 'APIARY_SECRET_LAB_SERVER', APIARY_SECRET_LAB_SERVER: 'hunter2-pass' }, encoding: 'utf8' }); assert.equal(ask.stdout.trim(), 'hunter2-pass', 'ssh asks this same file for the password');
   const { childEnv } = await import('../src/providers.js'); assert.ok(childEnv().PATH.split(path.delimiter)[0].endsWith('bin'), 'agents find apiary-ssh');
-  { // safe mode pre-approves only the apiary-ssh helper; full access is unchanged
+  { // safe-mode shell commands are decided by the person in Apiary; full access is unchanged
     const { claudeCliArgs } = await import('../src/providers.js');
-    const safe = claudeCliArgs({ access: 'safe', system: 'x', dirs: ['/tmp/a'] });
-    assert.deepEqual(safe.slice(safe.indexOf('--permission-mode'), safe.indexOf('--permission-mode') + 4), ['--permission-mode', 'acceptEdits', '--allowedTools', 'Bash(apiary-ssh:*)']);
-    assert.ok(!claudeCliArgs({ access: 'full', system: 'x' }).includes('--allowedTools'));
-    assert.equal(claudeCliArgs({ access: 'full', system: 'x' })[claudeCliArgs({ access: 'full', system: 'x' }).indexOf('--permission-mode') + 1], 'bypassPermissions');
+    const approval = { url: 'http://127.0.0.1:1/api/approval-bridge', token: 't', bridge: '/x/approval-bridge.js' };
+    const safe = claudeCliArgs({ access: 'safe', system: 'x', approval });
+    assert.equal(safe[safe.indexOf('--permission-mode') + 1], 'acceptEdits');
+    assert.equal(safe[safe.indexOf('--permission-prompt-tool') + 1], 'mcp__apiary__approve');
+    assert.ok(!safe.includes('--allowedTools'), 'no blanket shell rule');
+    assert.ok(!claudeCliArgs({ access: 'safe', system: 'x' }).includes('--mcp-config'), 'no bridge, no approvals');
+    assert.ok(!claudeCliArgs({ access: 'full', system: 'x', approval }).includes('--mcp-config'));
+    const full = claudeCliArgs({ access: 'full', system: 'x' });
+    assert.equal(full[full.indexOf('--permission-mode') + 1], 'bypassPermissions');
+    // the engine turns a bridge request into an approval; the person's answer decides it
+    const agent = Object.values(engine.agents)[0];
+    const run = engine.beginApprovalBridge(agent, new AbortController().signal);
+    const tick = () => new Promise((r) => setImmediate(r));
+    const pendingCmd = () => Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'command');
+    const p1 = engine.requestCommandApproval(run.token, { tool_name: 'Bash', input: { command: 'curl -s http://10.0.0.5' } });
+    await tick(); assert.ok(pendingCmd() && pendingCmd().detail.includes('curl -s'));
+    engine.decide(pendingCmd().id, { decision: 'approve' });
+    assert.deepEqual(await p1, { behavior: 'allow', updatedInput: { command: 'curl -s http://10.0.0.5' } });
+    const p2 = engine.requestCommandApproval(run.token, { tool_name: 'Bash', input: { command: 'rm -rf /tmp/x' } });
+    await tick(); engine.decide(pendingCmd().id, { decision: 'deny', note: 'No.' });
+    assert.equal((await p2).behavior, 'deny');
+    engine.endApprovalBridge(run);
+    assert.equal((await engine.requestCommandApproval(run.token, { tool_name: 'Bash', input: { command: 'ls' } })).behavior, 'deny', 'an ended run cannot ask');
   }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});

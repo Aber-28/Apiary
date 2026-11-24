@@ -77,14 +77,18 @@ function runProc(cmd, args, { cwd, input, signal, onLine, env }) {
 }
 
 // ---------- terminal (CLI) providers ----------
-// Arguments for one headless Claude CLI turn. In safe mode a headless run cannot answer the shell
-// permission prompt, so the one helper that uses vault logins (apiary-ssh) is pre-approved. The human
-// still approves every vault secret use in Apiary before the helper can get a password.
-export function claudeCliArgs({ access, model, system, dirs = [], sessionId }) {
+// Arguments for one headless Claude CLI turn. In safe mode a headless run cannot show a shell
+// permission prompt, so each command that needs approval is sent to Apiary instead: `approval` names
+// the bridge (src/approval-bridge.js), its URL and this run's token. Without `approval`, anything that
+// would prompt is refused.
+export function claudeCliArgs({ access, model, system, dirs = [], sessionId, approval }) {
   const full = access === 'full';
   const args = ['-p', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', full ? 'bypassPermissions' : 'acceptEdits'];
-  if (!full) args.push('--allowedTools', 'Bash(apiary-ssh:*)');
+  if (!full && approval) {
+    const mcpServers = { apiary: { command: process.execPath, args: [approval.bridge], env: { APIARY_APPROVAL_URL: approval.url, APIARY_APPROVAL_TOKEN: approval.token } } };
+    args.push('--mcp-config', JSON.stringify({ mcpServers }), '--permission-prompt-tool', 'mcp__apiary__approve');
+  }
   args.push('--append-system-prompt', system);
   if (model) args.push('--model', model);
   for (const d of dirs) args.push('--add-dir', d);
@@ -93,8 +97,8 @@ export function claudeCliArgs({ access, model, system, dirs = [], sessionId }) {
 }
 
 const claudeCli = {
-  async run({ agent, prompt, system, env, dirs = [], signal, onText, onActivity, onLog }) {
-    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId });
+  async run({ agent, prompt, system, env, dirs = [], signal, approval, onText, onActivity, onLog }) {
+    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval });
     let sessionId = agent.sessionId, streamed = '', final = null, isError = false, usage = null;
     const { code, stderr } = await runProc('claude', args, {
       cwd: agent.cwd, input: prompt, signal, env,

@@ -1383,6 +1383,7 @@ let orgIds;
     assert.ok(waiting, 'a hire approval exists');
     engine.decide(waiting.id, { decision: 'deny', note: 'test' });
     await hireWait;
+  }
   { // the trust slider: 0 asks for everything, 5 runs everything, the levels in between allow more as they go up; a Deny rule still wins
     const { riskOf } = await import('../src/command-rules.js');
     const ag = engine._add({ id: 'trust1', name: 'Trust tester', role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: 'trust1' });

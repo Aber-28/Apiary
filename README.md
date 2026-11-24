@@ -8,8 +8,9 @@ Needs Node.js 20+ and git.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash
-apiary
 ```
+
+The installer starts Apiary and prints where to open it. On a server, answer **y** when it asks about other devices (or add `-s -- --lan` after `bash`) and open the private link it prints.
 
 The setup wizard opens on first run: it detects your AI logins, helps you sign in, lets you pick default models and can start Apiary automatically at login.
 

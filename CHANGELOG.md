@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.9.1
+- **Installer now starts Apiary**: it sets up the service (or runs it in the background), waits until it answers, and prints the link. It asks whether you will open it from another device and prints your private access link for that. Clear errors if the port is taken
+
 ## 0.9.0
 - **Real usage from the AI itself**: the usage bars show what Claude and Codex report (5-hour session, weekly, reset times) instead of Apiary's own count, so use from other tools is included. Refreshes every hour, or press ↻. Falls back to Apiary's count and says why when the provider cannot be read
 - **Update checks are your choice**: daily, weekly, monthly, or only when you press the button

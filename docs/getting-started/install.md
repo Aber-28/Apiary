@@ -39,7 +39,18 @@ sudo pacman -S nodejs npm git
 curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash
 ```
 
-The script checks Node and git, clones Apiary to `~/.local/share/apiary`, and links the `apiary` command into `~/.local/bin`. Read it first if you like: it is short.
+The script checks Node and git, clones Apiary to `~/.local/share/apiary`, links the `apiary` command into `~/.local/bin`, **starts Apiary**, waits until it really answers, and prints where to open it. Read it first if you like: it is short.
+
+- It asks: *will you open Apiary from another device?* Answer **y** when Apiary is on a server or VM and you use a browser on another computer. You then get a private link that contains your access token.
+- With systemd it runs Apiary as a **service**: it starts at login and restarts itself. Without systemd it runs in the background for now.
+- Options (after `bash -s --`): `--lan` (reachable from other devices, with a token), `--local` (only this computer), `--no-service`.
+- Run it again any time to update, or to switch between local and network access.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash -s -- --lan
+```
+
+If the page does not open from another device, the firewall may block port 7777 (for example `sudo ufw allow 7777/tcp`).
 
 ## Option 2: clone it yourself
 

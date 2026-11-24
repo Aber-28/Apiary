@@ -137,6 +137,14 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         return json(res, 200, engine.tickets.get(r[1]));
       }
       if ((r = m(/^\/api\/tickets\/([\w-]+)\/status$/)) && req.method === 'POST') return json(res, 200, engine.tickets.setStatus(r[1], (await readBody(req)).status));
+      // ----- project plans -----
+      if ((r = m(/^\/api\/projects\/([\w-]+)\/plan$/))) {
+        const root = engine.agents[r[1]]; if (!root) throw Object.assign(new Error('No such project'), { status: 404 });
+        if (req.method === 'GET') return json(res, 200, { plan: root.plan || null, stats: engine.planStats(root.plan) });
+        if (req.method === 'PUT') return json(res, 200, { plan: engine.editPlan(r[1], await readBody(req)) });
+        if (req.method === 'DELETE') { engine.clearPlan(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if ((r = m(/^\/api\/projects\/([\w-]+)\/plan\/ask$/)) && req.method === 'POST') return json(res, 202, engine.askPlan(r[1], (await readBody(req)).text));
       // ----- model advice -----
       if ((r = m(/^\/api\/agents\/([\w-]+)\/model-advice$/)) && req.method === 'GET') return json(res, 200, engine.adviseModel(r[1]));
       if ((r = m(/^\/api\/agents\/([\w-]+)\/model$/)) && req.method === 'PUT') return json(res, 200, engine.setModel(r[1], (await readBody(req)).model));
@@ -252,7 +260,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); return json(res, 200, { ok: true }); }
-        if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note, vb.username); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
         if ((r = m(/^\/api\/vault\/secrets\/([\w-]+)$/))) {
           if (req.method === 'PUT') return json(res, 200, v.update(r[1], vb));
           if (req.method === 'DELETE') { v.remove(r[1]); return json(res, 200, { ok: true }); }
@@ -265,10 +273,11 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         const ub = await readBody(req);
         const busy = Object.values(engine.agents).filter((a) => a.status === 'working' || a.status === 'waiting').length;
         if (busy && !ub.force) return json(res, 409, { error: `${busy} agent${busy > 1 ? 's are' : ' is'} working right now. Installing restarts Apiary and interrupts them.`, busy });
-        const r2 = await updater.install();
-        json(res, 200, { ok: true, version: r2.version, restarting: true });
-        setTimeout(restart, 400);
-        return;
+        if (updater.s.state === 'installing') return json(res, 202, { started: true });
+        if (updater.s.state !== 'ready') throw Object.assign(new Error('There is no downloaded update to install. Check for updates first.'), { status: 409 });
+        // The work takes a while and ends in a restart, so it runs in the background and the page watches /api/update.
+        updater.install().then(() => { updater.markRestarting(); setTimeout(restart, 1800); }).catch((e) => console.error('Update failed:', e.message));
+        return json(res, 202, { started: true });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });

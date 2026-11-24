@@ -177,3 +177,14 @@ details summary{cursor:pointer;color:var(--accent-text);font-weight:600;min-heig
 .who{border:1px solid var(--line);border-radius:10px;margin:8px 0;padding:8px 12px;display:flex;flex-wrap:wrap;gap:4px 16px}.who legend{font-size:13px;color:var(--muted);padding:0 6px}
 .formrow{display:flex;gap:8px;flex-wrap:wrap;align-items:center}.formrow>input,.formrow>select{flex:1 1 200px;width:auto;min-width:0}.formrow>.btn{flex:0 0 auto}
 .doc-top{color:var(--muted);font-size:14px;font-weight:500;text-decoration:none;margin-left:auto;padding:6px 10px;border-radius:8px}.doc-top:hover{background:var(--hover);color:var(--text)}.doc-top:focus-visible,.doclink:focus-visible{outline:2px solid var(--accent)}.doc-top+.live{margin-left:0}.doclink{text-decoration:none}
+
+/* 0.7.0: model picker, project plan, update progress */
+.model-box{display:flex;flex-direction:column;gap:2px}.model-box small{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.04em}.model-pick{max-width:210px;padding:5px 8px;font-size:13px}
+.ubar.big{height:10px}.ubar span.warn{background:#e8a200}
+.phase.current{border-color:var(--accent)}.step{display:flex;gap:8px;align-items:flex-start;padding:3px 0}.step.done{color:var(--muted);text-decoration:line-through}
+.plan-list{margin:8px 0;padding-left:20px}.plan-list ul{margin:2px 0 8px;color:var(--muted)}
+.upd-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:100;padding:16px}
+.upd-card{width:min(640px,100%);max-height:90vh;overflow:auto}.upd-steps{list-style:none;padding:0;margin:14px 0;display:flex;flex-direction:column;gap:6px}
+.upd-steps li.st-run{font-weight:600}.upd-steps li.st-wait{color:var(--muted)}.upd-steps li.st-done span{color:var(--ok)}.upd-steps li.st-fail{color:var(--err)}.upd-steps li.st-run span{display:inline-block;animation:spin 1s linear infinite}
+.upd-log{height:150px;overflow:auto;margin:8px 0;font-size:12px}
+@keyframes spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion:reduce){.upd-steps li.st-run span{animation:none}}

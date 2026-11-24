@@ -29,13 +29,19 @@ export function redactPairs(text, pairs) {
   for (const [name, v] of [...pairs].sort((a, b) => b[1].length - a[1].length)) if (v && v.length >= 4 && s.includes(v)) s = s.split(v).join(`[secret:${name}]`);
   return s;
 }
+// What is sealed: the secret value, plus an optional username (some logins need both).
+const pack = (value, user) => (user ? JSON.stringify({ apiary: 1, v: value, u: user }) : value);
+function unpack(plain) {
+  if (plain.startsWith('{"apiary":1')) { try { const o = JSON.parse(plain); return { value: String(o.v ?? ''), user: String(o.u ?? '') }; } catch { /* plain text that looks like JSON */ } }
+  return { value: plain, user: '' };
+}
 export const envName = (name) => 'APIARY_SECRET_' + String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 
 export class Vault {
   constructor(file) {
     this.file = file;
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
-    this.data = null; this.key = null; this.values = new Map(); this._fails = 0;
+    this.data = null; this.key = null; this.values = new Map(); this.users = new Map(); this._fails = 0;
     if (existsSync(file)) { try { this.data = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { console.error('Could not read the vault file:', e.message); } }
   }
   get exists() { return !!this.data; }
@@ -53,7 +59,7 @@ export class Vault {
     if (String(pass || '').length < 8) throw err(400, 'Choose a passphrase of at least 8 characters');
     const salt = randomBytes(16), key = this._derive(pass, salt);
     this.data = { v: 1, salt: b64(salt), verify: seal(key, CHECK, 'verify'), items: {} };
-    this.key = key; this.values.clear(); this._save();
+    this.key = key; this.values.clear(); this.users.clear(); this._save();
   }
   async unlock(pass) {
     if (!this.exists) throw err(409, 'There is no vault yet. Create one first.');
@@ -61,32 +67,39 @@ export class Vault {
     const key = this._derive(pass, unb64(this.data.salt));
     try { if (open(key, this.data.verify, 'verify') !== CHECK) throw new Error('bad'); }
     catch { this._fails++; throw err(403, 'Wrong passphrase'); }
-    this._fails = 0; this.key = key; this.values.clear();
-    for (const it of Object.values(this.data.items)) { try { this.values.set(it.id, open(key, it, it.id)); } catch { /* skip a damaged item */ } }
+    this._fails = 0; this.key = key; this.values.clear(); this.users.clear();
+    for (const it of Object.values(this.data.items)) { try { const x = unpack(open(key, it, it.id)); this.values.set(it.id, x.value); if (x.user) this.users.set(it.id, x.user); } catch { /* skip a damaged item */ } }
   }
-  lock() { this.key?.fill(0); this.key = null; this.values.clear(); }
+  lock() { this.key?.fill(0); this.key = null; this.values.clear(); this.users.clear(); }
 
   _need() { if (!this.exists) throw err(409, 'Create the vault first'); if (!this.unlocked) throw err(423, 'The vault is locked. Unlock it first.'); }
   list() {
-    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, name: i.name, note: i.note || '', createdAt: i.createdAt, assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
+    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, name: i.name, note: i.note || '', createdAt: i.createdAt, username: this.users.get(i.id) || '', hasUsername: !!i.hasUser, assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
   }
   byName(name) { return Object.values(this.data?.items || {}).find((i) => i.name.toLowerCase() === String(name).trim().toLowerCase()); }
-  add(name, value, note = '') {
+  add(name, value, note = '', username = '') {
     this._need();
     name = String(name || '').trim().slice(0, 60);
     if (!name) throw err(400, 'Give the secret a name');
     if (!String(value || '')) throw err(400, 'Enter the secret value');
     if (String(value).length > 20000) throw err(400, 'That value is too large');
     if (this.byName(name)) throw err(409, `You already have a secret called "${name}"`);
-    const id = randomUUID().slice(0, 8);
-    this.data.items[id] = { id, name, note: String(note).slice(0, 300), createdAt: Date.now(), assigned: {}, ...seal(this.key, String(value), id) };
-    this.values.set(id, String(value)); this._save();
+    const id = randomUUID().slice(0, 8), user = String(username || '').trim().slice(0, 200);
+    this.data.items[id] = { id, name, note: String(note).slice(0, 300), createdAt: Date.now(), assigned: {}, hasUser: !!user, ...seal(this.key, pack(String(value), user), id) };
+    this.values.set(id, String(value)); if (user) this.users.set(id, user); this._save();
     return this.list().find((i) => i.id === id);
   }
-  update(id, { value, note, assigned }) {
+  update(id, { value, username, note, assigned }) {
     const it = this.data?.items[id];
     if (!it) throw err(404, 'No such secret');
-    if (value !== undefined && value !== '') { this._need(); Object.assign(it, seal(this.key, String(value), id)); this.values.set(id, String(value)); }
+    if ((value !== undefined && value !== '') || username !== undefined) {
+      this._need();
+      const val = value !== undefined && value !== '' ? String(value) : this.values.get(id);
+      const user = username !== undefined ? String(username || '').trim().slice(0, 200) : this.users.get(id) || '';
+      if (val === undefined) throw err(409, 'That secret could not be read, so it cannot be changed');
+      Object.assign(it, seal(this.key, pack(val, user), id)); it.hasUser = !!user;
+      this.values.set(id, val); if (user) this.users.set(id, user); else this.users.delete(id);
+    }
     if (note !== undefined) it.note = String(note).slice(0, 300);
     if (assigned !== undefined) {
       it.assigned = {};
@@ -98,6 +111,7 @@ export class Vault {
   setGrant(id, key, grant) { const a = this.data?.items[id]?.assigned?.[key]; if (a) { a.grant = grant; this._save(); } }
   remove(id) { if (!this.data?.items[id]) throw err(404, 'No such secret'); delete this.data.items[id]; this.values.delete(id); this._save(); }
   value(id) { return this.values.get(id) ?? null; }
+  user(id) { return this.users.get(id) || ''; }
 
   // Replace every known secret value in a piece of text, so it never reaches chats, logs or memory.
   redact(text, extra = []) {

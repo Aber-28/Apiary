@@ -49,9 +49,11 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | POST | `/api/meetings/run` | Hold a meeting now |
 | GET | `/api/vault` | Vault status, secret names and eligible agents (never values) |
 | POST | `/api/vault/init`, `/unlock`, `/lock`, `/secrets` | Create, unlock, lock, add |
-| PUT/DELETE | `/api/vault/secrets/:id` | Edit, assign, delete |
+| PUT/DELETE | `/api/vault/secrets/:id` | Edit (value, optional username, note), assign, delete |
 | GET | `/api/update` | Update status |
-| POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install |
+| POST | `/api/update/check`, `/api/update/install` | Check (downloads) and install (install answers 202 and runs in the background; `GET /api/update` then returns `progress` with `pct`, `steps`, `log`, `failed`) |
+| GET/PUT/DELETE | `/api/projects/:id/plan` | Read, edit or clear a project's phased plan |
+| POST | `/api/projects/:id/plan/ask` | Ask the lead to draft a plan |
 
 
 ## 0.6.0 endpoints

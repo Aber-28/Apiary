@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0
+- **Update progress screen**: progress bar, steps, live log and timer while updating, automatic rollback if it fails, page refreshes when done
+- **Secrets**: optional username next to the password, token or key (`APIARY_SECRET_<NAME>_USER`)
+- **Model per agent**: dropdown on each agent, filled in for its provider (Claude, Codex…), with "Other…"
+- **Project plans**: big projects get a phased plan you approve; progress bars and a Plan tab show where it stands
+- Back burner is the first Tasks column
+
 ## 0.6.0
 - **Tasks** board: To do, Back burner, In progress, Blocked, Done. You add to-do items and back-burner ideas; agents add and move tasks as they work, and team jobs and tickets show up automatically
 - **Usage**: tokens per agent per day as a chart, a table per agent, optional limits per AI, and a usage bar next to each connection in the sidebar. Apiary also notices when an AI says its limit is reached

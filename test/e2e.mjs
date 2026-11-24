@@ -655,13 +655,14 @@ let orgIds;
   const write = (v, log) => { fsm.writeFileSync(path.join(work, 'package.json'), JSON.stringify({ name: 'x', version: v })); fsm.writeFileSync(path.join(work, 'CHANGELOG.md'), `# Changelog\n\n${log}`); gitc(work, 'add', '-A'); gitc(work, 'commit', '-qm', v); gitc(work, 'push', '-q', 'origin', 'HEAD:main'); };
   write('0.1.0', '## 0.1.0\n- first\n');
   execFileSync('git', ['clone', '-q', rem, app]);
-  const up = new Updater({ dir: app, current: '0.1.0' });
+  const up = new Updater({ dir: app, current: '0.1.0' }); up.pace = 0;
   assert.equal((await up.check()).state, 'uptodate');
   write('0.2.0', '## 0.2.0\n- shiny new thing\n\n## 0.1.0\n- first\n');
   const st = await up.check();
   assert.equal(st.state, 'ready'); assert.equal(st.latest, '0.2.0'); assert.match(st.notes, /shiny new thing/); assert.doesNotMatch(st.notes, /first/);
   assert.equal(JSON.parse(fsm.readFileSync(path.join(app, 'package.json'), 'utf8')).version, '0.1.0', 'downloading changes nothing that is running');
   const r1 = await up.install(); assert.equal(r1.version, '0.2.0');
+  assert.deepEqual(up.status.progress.steps.map((x) => x.state), ['done', 'done', 'skip', 'done', 'wait'], 'every step is recorded for the screen'); assert.ok(up.status.progress.pct >= 80 && up.status.progress.log.length >= 5);
   assert.equal(JSON.parse(fsm.readFileSync(path.join(app, 'package.json'), 'utf8')).version, '0.2.0');
   assert.equal((await new Updater({ dir: app, current: '0.2.0' }).check()).state, 'uptodate');
   await assert.rejects(() => new Updater({ dir: app, current: '0.2.0' }).install(), /no downloaded update/);
@@ -673,7 +674,7 @@ let orgIds;
   // over HTTP: check, then install restarts the app
   const app2 = path.join(tmp, 'upd-app2'); execFileSync('git', ['clone', '-q', rem, app2]); gitc(app2, 'reset', '-q', '--hard', 'HEAD~1');
   let restarts = 0;
-  const up2 = new Updater({ dir: app2, current: '0.2.0' });
+  const up2 = new Updater({ dir: app2, current: '0.2.0' }); up2.pace = 0;
   const srv2 = createServer(engine, { updater: up2, restart: () => { restarts++; } });
   await new Promise((r) => srv2.listen(0, '127.0.0.1', r));
   const b2 = `http://127.0.0.1:${srv2.address().port}`;
@@ -686,8 +687,18 @@ let orgIds;
   const blocked = await c2('/api/update/install', 'POST', {}); assert.equal(blocked.status, 409); assert.ok(blocked.body.busy >= 1, 'asks before interrupting working agents');
   assert.equal(restarts, 0);
   busyAgent.status = was;
-  const done2 = await c2('/api/update/install', 'POST', {}); assert.equal(done2.body.version, '0.3.0'); assert.equal(done2.body.restarting, true);
-  await until(() => restarts === 1, 3000);
+  const done2 = await c2('/api/update/install', 'POST', {}); assert.equal(done2.status, 202); assert.equal(done2.body.started, true);
+  await until(async () => (await c2('/api/update')).body.progress?.steps[4].state === 'run', 5000);
+  const prog = (await c2('/api/update')).body.progress; assert.equal(prog.failed, false); assert.ok(prog.log.some((l) => /Restarting/.test(l)) && prog.pct >= 80, 'the page can show what is happening');
+  await until(() => restarts === 1, 4000);
+  assert.equal(JSON.parse(fsm.readFileSync(path.join(app2, 'package.json'), 'utf8')).version, '0.3.0');
+  // a broken update is rolled back
+  const app3 = path.join(tmp, 'upd-app3'); execFileSync('git', ['clone', '-q', rem, app3]);
+  fsm.mkdirSync(path.join(work, 'src'), { recursive: true }); fsm.writeFileSync(path.join(work, 'src', 'server.js'), 'this is not javascript ((('); fsm.writeFileSync(path.join(work, 'src', 'engine.js'), '');
+  write('0.4.0', '## 0.4.0\n- broken\n\n## 0.3.0\n- more\n');
+  const up3 = new Updater({ dir: app3, current: '0.3.0' }); up3.pace = 0; await up3.check();
+  await assert.rejects(() => up3.install(), /failed its check/);
+  assert.equal(JSON.parse(fsm.readFileSync(path.join(app3, 'package.json'), 'utf8')).version, '0.3.0', 'the old version is put back'); assert.equal(up3.status.state, 'ready'); assert.equal(up3.status.progress.failed, true);
   srv2.close();
 }
 
@@ -784,6 +795,69 @@ let orgIds;
   assert.equal((await call(`/api/tickets/${k2.id}/status`, 'POST', { status: 'weird' })).status, 400);
   assert.equal((await call('/api/tickets')).body.tickets.length, 2);
   assert.equal((await call(`/api/tickets/${k2.id}`, 'DELETE')).status, 200);
+}
+
+// ---- 0.7.0: username on secrets, model lists, project plans ----
+{
+  // a secret can have a username as well (optional)
+  if (!engine.vault.unlocked) await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  const PW = 'Pa55-word-for-router', ne = orgIds.ne;
+  const only = (await call('/api/vault/secrets', 'POST', { name: 'API token', value: 'tok-123456789' })).body; assert.equal(only.username, ''); assert.equal(only.hasUsername, false);
+  const both = (await call('/api/vault/secrets', 'POST', { name: 'Router login', value: PW, username: 'alice-admin', note: 'web UI' })).body;
+  assert.equal(both.username, 'alice-admin'); assert.equal(both.hasUsername, true);
+  const vraw = fsRead(path.join(tmp, 'vault.json'), 'utf8'); assert.equal(vraw.includes('alice-admin'), false, 'the username is encrypted too'); assert.equal(vraw.includes(PW), false);
+  assert.equal((await call('/api/vault/secrets/' + both.id, 'PUT', { username: 'bob-admin' })).body.username, 'bob-admin');
+  assert.equal(engine.vault.value(both.id), PW, 'changing the username keeps the password');
+  assert.equal((await call('/api/vault/secrets/' + both.id, 'PUT', { username: 'alice-admin' })).body.username, 'alice-admin');
+  await call('/api/vault/secrets/' + both.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'always' }] });
+  const before = engine.messages(ne.id).length;
+  await call(`/api/agents/${ne.id}/messages`, 'POST', { text: 'use-secret:Router_login' });
+  await until(() => engine.agents[ne.id].status === 'idle' && engine.messages(ne.id).slice(before).some((m) => /Logged in using the secret/.test(m.text || '')), 10000);
+  const said = engine.messages(ne.id).slice(before).find((m) => /Logged in using the secret/.test(m.text || '')).text;
+  assert.match(said, /as alice-admin/); assert.equal(said.includes(PW), false, 'the password is hidden, the username is not');
+  await call('/api/vault/lock', 'POST', {});
+  assert.equal((await call('/api/vault')).body.secrets.find((x) => x.id === both.id).username, '', 'usernames are hidden while locked');
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  assert.equal((await call('/api/vault')).body.secrets.find((x) => x.id === both.id).username, 'alice-admin');
+
+  // model lists per AI
+  const cm = (await call('/api/connections/claude/models')).body; assert.ok(cm.models.some((m) => /opus/.test(m.id)) && cm.models.some((m) => /haiku/.test(m.id)));
+  const xm = (await call('/api/connections/codex/models')).body; assert.ok(xm.models.length >= 3, 'codex has a list to choose from too');
+  assert.ok(engine.connections.known('codex').length >= 3);
+
+  // project plans: planned in phases, approved, tracked
+  const proj = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Big site', approvals: true })).body, lead = engine.agents[proj.id];
+  assert.match(engine._system(lead), /BIG PROJECTS/); assert.equal((await call(`/api/projects/${lead.id}/plan`)).body.plan, null);
+  await call(`/api/agents/${lead.id}/messages`, 'POST', { text: 'plan-it for the new website' });
+  let ap; await until(() => (ap = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'plan')), 8000);
+  assert.equal(ap.phases.length, 2); assert.equal(ap.phases[0].steps.length, 2);
+  await call(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'approve' });
+  await until(() => lead.plan && engine.agents[lead.id].status === 'idle', 8000);
+  let pl = (await call(`/api/projects/${lead.id}/plan`)).body;
+  assert.equal(pl.plan.phases[0].status, 'active'); assert.equal(pl.plan.phases[1].status, 'pending'); assert.equal(pl.stats.pct, 0); assert.equal(pl.stats.current, 'Plan and design');
+  assert.match(engine._system(lead), /PROJECT PLAN \(where the project stands: 0% done, now in "Plan and design"/); assert.doesNotMatch(engine._system(lead), /BIG PROJECTS/);
+  await call(`/api/agents/${lead.id}/messages`, 'POST', { text: 'progress:1:1' });
+  await until(() => lead.plan.phases[0].steps[0].done && engine.agents[lead.id].status === 'idle', 8000);
+  await call(`/api/agents/${lead.id}/messages`, 'POST', { text: 'progress:1:2' });
+  await until(() => lead.plan.phases[0].status === 'done' && engine.agents[lead.id].status === 'idle', 8000);
+  pl = (await call(`/api/projects/${lead.id}/plan`)).body;
+  assert.equal(pl.plan.phases[1].status, 'active', 'the next phase starts by itself'); assert.equal(pl.stats.pct, 50); assert.equal(pl.stats.current, 'Build'); assert.equal(pl.stats.phasesDone, 1);
+  // the human can change it too
+  assert.equal((await call(`/api/projects/${lead.id}/plan`, 'PUT', { phase: 1, step: 2, done: false })).status, 200);
+  pl = (await call(`/api/projects/${lead.id}/plan`)).body; assert.equal(pl.stats.pct, 25, 'unticking a step lowers progress');
+  assert.equal((await call(`/api/projects/${lead.id}/plan`, 'PUT', { phase: 2, status: 'blocked', note: 'Waiting for the logo' })).body.plan.phases[1].status, 'blocked');
+  assert.match(engine._system(lead), /\[blocked\] \(Waiting for the logo\)/);
+  assert.equal((await call(`/api/projects/${lead.id}/plan`, 'PUT', { phase: 9, status: 'done' })).status, 400);
+  // a denied plan is not saved, and the agent is told
+  const p2 = engine.agents[(await call('/api/agents', 'POST', { provider: 'mock', name: 'Denied plan', approvals: true })).body.id];
+  await call(`/api/agents/${p2.id}/messages`, 'POST', { text: 'plan-it please' });
+  await until(() => engine.approvals().some((a) => a.status === 'pending' && a.kind === 'plan' && a.agentId === p2.id), 8000);
+  await call(`/api/approvals/${engine.approvals().find((a) => a.status === 'pending' && a.kind === 'plan').id}/decide`, 'POST', { decision: 'deny', note: 'Too big' });
+  await until(() => engine.agents[p2.id].status === 'idle' && engine.messages(p2.id).some((m) => /did not approve the plan: Too big/.test(m.text || '')), 8000);
+  assert.equal(p2.plan, undefined);
+  assert.equal((await call(`/api/projects/${orgIds.ceo.id}/plan/ask`, 'POST', {})).status, 400, 'the main chat has no plans');
+  assert.equal((await call(`/api/projects/${lead.id}/plan`, 'DELETE')).status, 200); assert.equal(lead.plan, undefined);
+  await call('/api/agents/' + lead.id, 'DELETE'); await call('/api/agents/' + p2.id, 'DELETE');
 }
 
 // ---- LAN mode: reachable by IP with a token, still locked down ----

@@ -4,6 +4,8 @@ Apiary has **no dependencies** beyond Node.js. You install it by pulling it from
 
 ## Requirements
 
+On Debian and Ubuntu the installer checks for git, curl and Node.js 20 or newer, and offers to install whatever is missing with `apt` (it asks first and needs your password). On other distributions, install them yourself.
+
 | Needed | Why | Check |
 | --- | --- | --- |
 | Linux (any modern distribution) | Apiary runs on your machine | `uname -a` |

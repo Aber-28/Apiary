@@ -12,10 +12,36 @@ PORT="${APIARY_PORT:-7777}"
 LAN=""; SERVICE=1
 for a in "$@"; do case "$a" in --lan) LAN=yes ;; --local) LAN=no ;; --no-service) SERVICE=0 ;; esac; done
 
-need() { command -v "$1" >/dev/null 2>&1 || { echo "Missing: $1. $2" >&2; exit 1; }; }
-need git "Install git first."
-need node "Install Node.js 20 or newer (https://nodejs.org)."
-[ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ] || { echo "Node.js 20 or newer is required (found $(node --version))." >&2; exit 1; }
+# git, curl and Node.js 20+ are needed. On Debian/Ubuntu the installer can fetch them for you (it asks first).
+nodeok() { command -v node >/dev/null 2>&1 && [ "$(node -p 'process.versions.node.split(".")[0]')" -ge 20 ]; }
+missing=""
+command -v git >/dev/null 2>&1 || missing="$missing git"
+command -v curl >/dev/null 2>&1 || missing="$missing curl"
+nodeok || missing="$missing nodejs"
+if [ -n "$missing" ]; then
+  echo "Apiary needs:$missing"
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "This is not Debian/Ubuntu, so install them yourself: git, curl and Node.js 20 or newer (https://nodejs.org)." >&2; exit 1
+  fi
+  SUDO=""; [ "$(id -u)" -eq 0 ] || SUDO="sudo"
+  if [ -n "$SUDO" ] && ! command -v sudo >/dev/null 2>&1; then echo "sudo is not available. Run this installer as root, or install:$missing" >&2; exit 1; fi
+  go=""
+  if [ "${APIARY_YES:-}" = 1 ]; then go=y
+  elif { : </dev/tty; } 2>/dev/null; then
+    printf 'Install them now with apt (this asks for your password)? [Y/n] ' >/dev/tty; read -r go </dev/tty || go=""; [ -z "$go" ] && go=y
+  fi
+  case "$go" in y|Y|yes|YES) ;; *) echo "Install them, then run this installer again:  sudo apt install -y git curl   (and Node.js 20+: https://nodejs.org)" >&2; exit 1 ;; esac
+  export DEBIAN_FRONTEND=noninteractive
+  $SUDO apt-get update -y
+  $SUDO apt-get install -y git curl ca-certificates
+  if ! nodeok; then
+    echo "Adding the official NodeSource Node.js 22 repository…"
+    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO -E bash -
+    $SUDO apt-get install -y nodejs
+  fi
+  nodeok || { echo "Node.js 20 or newer is still missing. Install it from https://nodejs.org and run this again." >&2; exit 1; }
+  echo "Prerequisites installed."
+fi
 
 if [ -d "$DIR/.git" ]; then
   echo "Updating Apiary in $DIR"; git -C "$DIR" pull --ff-only

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.2
+
+* The installer now offers to install git, curl and Node.js 20+ itself on Debian/Ubuntu (it asks first). Set `APIARY_YES=1` to skip the question.
+
 ## 0.10.1
 
 Security hardening after a full review.

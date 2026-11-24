@@ -34,10 +34,20 @@ function logOutput(onLog, text) {
   if (lines.length > 8) onLog(`  … ${lines.length - 8} more lines`);
 }
 
+// What an agent's process gets to see: our environment, without Apiary's own access token,
+// plus only the secrets that were approved for this turn.
+export function childEnv(extra = {}) {
+  const env = { ...process.env }; delete env.APIARY_TOKEN;
+  return { ...env, ...extra };
+}
+// Codex hides variables with KEY, SECRET or TOKEN in the name from its shell unless told not to,
+// which would hide an approved secret from the agent. Only turned on when a secret was approved.
+export const codexSecretFlags = (env = {}) => Object.keys(env).some((k) => k.startsWith('APIARY_SECRET_')) ? ['-c', 'shell_environment_policy.ignore_default_excludes=true'] : [];
+
 function runProc(cmd, args, { cwd, input, signal, onLine, env }) {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) return reject(abortErr());
-    const child = spawn(cmd, args, { cwd, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(cmd, args, { cwd, env: childEnv(env), stdio: ['pipe', 'pipe', 'pipe'] });
     let stderr = '', buf = '';
     const onAbort = () => child.kill('SIGTERM');
     signal?.addEventListener('abort', onAbort, { once: true });
@@ -116,7 +126,7 @@ const codexCli = {
     const input = agent.sessionId ? prompt : `${system}\n\n---\n\n${prompt}`;
     const flags = ['--json', '--skip-git-repo-check', '--sandbox', full ? 'danger-full-access' : 'workspace-write'];
     if (agent.model) flags.push('-m', agent.model);
-    const args = agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'];
+    const args = [...codexSecretFlags(env), ...(agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'])];
     let sessionId = agent.sessionId, last = '', err = null, usage = null;
     const { code, stderr } = await runProc('codex', args, {
       cwd: agent.cwd, input, signal, env,

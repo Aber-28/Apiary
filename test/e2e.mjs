@@ -1183,5 +1183,39 @@ let orgIds;
   engine.tasks.update(t2.id, { status: 'done' }); assert.equal((await call('/api/tasks/' + t2.id + '/start', 'POST', {})).status, 409);
 }
 
+// ---- 0.11.4: what an agent's process can see ----
+{
+  const { childEnv, codexSecretFlags } = await import('../src/providers.js');
+  process.env.APIARY_TOKEN = 'must-not-leak';
+  const e = childEnv({ APIARY_SECRET_ROUTER: 'x' });
+  assert.equal(e.APIARY_TOKEN, undefined, 'the access token is not passed to agents'); assert.equal(e.APIARY_SECRET_ROUTER, 'x'); assert.ok(e.PATH);
+  delete process.env.APIARY_TOKEN;
+  assert.deepEqual(codexSecretFlags({}), []); assert.deepEqual(codexSecretFlags({ APIARY_SECRET_X: '1' }), ['-c', 'shell_environment_policy.ignore_default_excludes=true']);
+}
+
+// ---- 0.11.4: the responsible agent of a project ----
+{
+  const { ceo, ne } = orgIds;
+  const proj = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, name: 'Owner test site', goal: 'say hi' })).body;
+  await until(() => engine.agents[proj.id].status === 'idle');
+  const root = engine.agents[proj.id];
+  assert.equal(root.ownerId, ceo.id, 'new projects belong to the CEO'); assert.equal(engine.ownerOf(root).id, ceo.id);
+  assert.equal((await call(`/api/projects/${proj.id}/owner`, 'PUT', { agent: 'nobody' })).status, 400);
+  assert.equal((await call(`/api/projects/${proj.id}/owner`, 'PUT', { agent: proj.id })).status, 400, 'not its own owner');
+  assert.equal((await call(`/api/projects/${ceo.id}/owner`, 'PUT', { agent: ne.id })).status, 404, 'the main chat is not a project');
+  assert.equal((await call(`/api/projects/${proj.id}/owner`, 'PUT', { agent: ne.id })).status, 200);
+  assert.equal(engine.ownerOf(root).id, ne.id); assert.ok(engine.projectsOwnedBy(ne).some((r) => r.id === proj.id)); assert.ok(!engine.projectsOwnedBy(ceo).some((r) => r.id === proj.id));
+  assert.match(engine._system(ne), /responsible for these projects[^\n]*Owner test site/); assert.match(engine._system(root), new RegExp(`${ne.name} is responsible for your project`));
+  assert.ok(engine.messages(proj.id).some((m) => /is now responsible for this project/.test(m.text)));
+  // the owner can reach the lead and the lead can reach the owner, which was not possible across teams before
+  assert.equal((await engine._findPeer(ne, 'Owner test site')).peer?.id, proj.id);
+  assert.equal((await engine._findPeer(root, 'owner')).peer?.id, ne.id);
+  assert.equal((await engine._findPeer(orgIds.se, 'Owner test site')).error ? true : false, true, 'others cannot');
+  // a vanished owner falls back to the CEO
+  root.ownerId = 'gone'; assert.equal(engine.ownerOf(root).id, ceo.id);
+  assert.ok((await call('/api/state')).body.agents.find((a) => a.id === proj.id));
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Responsible: \$\{ownerOf\(a\)/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

@@ -633,7 +633,7 @@ export class Engine extends EventEmitter {
     const id = id8();
     const title = (name || goal || 'New project').trim().split('\n')[0].slice(0, 48);
     const pslug = slug(title);
-    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
+    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, ownerId: this._ceo()?.id, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
 
     // Where does the work happen?
     let repo = null;
@@ -849,6 +849,7 @@ export class Engine extends EventEmitter {
     s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += this._secretsNote(agent);
+    if (agent.member || !agent.parentId) s += this._ownerNote(agent);
     if (agent.member) {
       const lead = this.agents[agent.parentId];
       s += `\nYou are a standing member of the team "${lead?.team?.name || 'team'}" led by ${lead?.name || 'the lead'}. Before a teammate does a task, Apiary may ask you for a pre-check from your area. Then reply in exactly this shape and do no work yet:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first (one line per item, only with CONDITIONS)\n` +
@@ -917,6 +918,27 @@ export class Engine extends EventEmitter {
 
   // ----- project stages: Building, then Maintenance, finally Closed (nothing is ever deleted) -----
   stageOf(root) { return root.stage || 'building'; }
+  // The agent responsible for a project (its lead does the work). The CEO unless you choose someone else.
+  ownerOf(root) { return (root.ownerId && this.agents[root.ownerId]) || this._ceo(); }
+  projectsOwnedBy(agent) { return Object.values(this.agents).filter((r) => !r.parentId && r.kind !== 'general' && r.id !== agent.id && this.ownerOf(r)?.id === agent.id); }
+  setOwner(rootId, agentId) {
+    const root = this.agents[rootId];
+    if (!root || root.parentId || root.kind === 'general') throw httpErr(404, 'No such project');
+    const who = this.agents[agentId];
+    if (!who || !this.assignable().some((a) => a.id === agentId) || who.id === root.id) throw httpErr(400, 'Choose an agent from the list');
+    if (this.ownerOf(root)?.id === who.id && root.ownerId) return root;
+    root.ownerId = who.id;
+    this._msg(root, { role: 'system', text: `${who.name} is now responsible for this project` });
+    this.emit('event', { type: 'agent', agent: root }); this.store.save();
+    return root;
+  }
+  _ownerNote(agent) {
+    const bits = [];
+    const owned = this.projectsOwnedBy(agent);
+    if (owned.length) bits.push(`You are responsible for these projects (the lead named does the work): ${owned.map((r) => r.name).join(', ')}. Each is run by a lead agent with the same name. Give it work, or ask how it is going, with an apiary-send block addressed to that name.`);
+    if (!agent.parentId && agent.kind !== 'general') { const o = this.ownerOf(agent); if (o) bits.push(`${o.name} is responsible for your project. You can report to or ask ${o.name} with an apiary-send block addressed to "owner".`); }
+    return bits.length ? '\n' + bits.join('\n') + '\n' : '';
+  }
   setStage(rootId, stage, note = '', by = 'you') {
     const root = this.agents[rootId];
     if (!root || root.parentId) throw httpErr(404, 'No such project');
@@ -1285,7 +1307,9 @@ export class Engine extends EventEmitter {
     for (let tries = 0; tries < 10; tries++) {   // a just-spawned teammate may not exist yet
       if (t === 'parent' && agent.parentId) return { peer: this.agents[agent.parentId] };
       if (t === 'lead') return { peer: root };
-      const hits = this.tree(root.id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t || (a.title || '').toLowerCase() === t));
+      if (t === 'owner' && !agent.parentId && agent.kind !== 'general') { const o = this.ownerOf(agent); if (o && o.id !== agent.id) return { peer: o }; }
+      const pool = [...new Set([...this.tree(root.id), ...this.projectsOwnedBy(agent).map((r) => r.id), ...(!agent.parentId && agent.kind !== 'general' ? [this.ownerOf(agent)?.id].filter(Boolean) : [])])];
+      const hits = pool.map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t || (a.title || '').toLowerCase() === t));
       if (hits.length === 1) return { peer: hits[0] };
       if (hits.length > 1) return { error: `More than one teammate is called "${to}". Use a more specific name.` };
       await new Promise((r) => setTimeout(r, 100));

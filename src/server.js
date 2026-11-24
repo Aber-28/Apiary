@@ -166,6 +166,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       }
       if ((r = m(/^\/api\/tickets\/([\w-]+)\/status$/)) && req.method === 'POST') return json(res, 200, engine.tickets.setStatus(r[1], (await readBody(req)).status));
       // ----- project stages -----
+      if ((r = m(/^\/api\/projects\/([\w-]+)\/owner$/)) && req.method === 'PUT') { const b = await readBody(req); return json(res, 200, { ownerId: engine.setOwner(r[1], b.agent).ownerId }); }
       if ((r = m(/^\/api\/projects\/([\w-]+)\/stage$/)) && req.method === 'PUT') { const b = await readBody(req); const root = engine.setStage(r[1], b.stage, b.note); return json(res, 200, { stage: engine.stageOf(root), stageLog: root.stageLog || [] }); }
       // ----- export and import: move everything to another computer -----
       if (url.pathname === '/api/export' && req.method === 'GET') {

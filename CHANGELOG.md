@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.4
+
+* **Responsible agent for projects.** Every project shows who is responsible (the CEO by default) in its header and on its card, and you can change it. The responsible agent and the project lead can now message each other, which teams could not do before.
+* Tasks show **Responsible** on the card, with a drop-down to change it right there.
+* Agents no longer receive Apiary's own access token in their environment.
+* Codex agents now receive an approved secret. Codex hides variables with KEY, SECRET or TOKEN in the name unless told otherwise.
+
 ## 0.11.3
 
 * **Fixed: giving an agent access to a secret never worked from the screen.** The page and the server disagreed about the format, so agents always showed as "No access" and nothing was saved. Fixed, and the server now accepts both formats.

@@ -266,6 +266,16 @@ function stagePicker(a) {
   }) }, Object.entries(STAGES).map(([k, [label]]) => h('option', { value: k, selected: stageOf(a) === k }, label)));
   return h('label', { class: 'model-box' }, h('small', {}, 'Stage'), sel);
 }
+// Who is responsible for a project: the CEO unless you choose someone else.
+function ownerOf(a) { return S.agents.find((x) => x.id === a.ownerId) || S.agents.find((x) => x.kind === 'general'); }
+function ownerPicker(a) {
+  const sel = h('select', { 'aria-label': 'Responsible agent', class: 'model-pick', onchange: guard(async (e) => {
+    await api(`/api/projects/${a.id}/owner`, 'PUT', { agent: e.target.value });
+    toast(`${e.target.selectedOptions[0].textContent.replace(' (default)', '')} is now responsible.`);
+  }) }, h('option', {}, ownerOf(a)?.name || 'CEO'));
+  api('/api/tasks/agents').then((list) => { const cur = ownerOf(a)?.id; sel.replaceChildren(...list.filter((x) => x.id !== a.id).map((x) => h('option', { value: x.id, selected: x.id === cur }, x.label + (x.ceo ? ' (default)' : '')))); }).catch(() => {});
+  return h('label', { class: 'model-box' }, h('small', {}, 'Responsible'), sel);
+}
 function pageProjects() {
   crumbs('Workspace', 'Projects');
   const draw = () => {
@@ -276,7 +286,7 @@ function pageProjects() {
       ls.length ? Object.keys(STAGES).map((k) => { const g = ls.filter((a) => stageOf(a) === k); if (!g.length) return null;
         const grid = h('div', { class: 'grid' }, g.map((a) => h('a', { class: 'card', href: `#/project/${a.id}`, style: 'display:block' },
         h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, a.name), h('span', { class: 'kv' }, stagePill(a), pill(a.status))),
-        h('p', { class: 'hint', style: 'margin:8px 0' }, `${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'} · ${kidsOf(a.id).length} sub-agents`),
+        h('p', { class: 'hint', style: 'margin:8px 0' }, `${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'} · ${kidsOf(a.id).length} sub-agents`), h('div', { class: 'hint' }, `Responsible: ${ownerOf(a)?.name || 'not set'}`),
         a.git ? h('div', { class: 'mono hint' }, a.git.branch) : h('div', { class: 'hint' }, 'Plain folder'),
         a.plan ? (() => { const st = planStats(a.plan); return h('div', { style: 'margin-top:10px' }, bar(st.pct, `${a.name} progress`), h('small', { class: 'hint' }, `${st.pct}% · ${st.current ? `Phase ${st.index} of ${st.phases}: ${st.current.title}` : 'All phases done'}`)); })() : null,
         h('div', { class: 'hint', style: 'margin-top:6px' }, `Started ${ago(a.createdAt)}`))));
@@ -339,6 +349,7 @@ function pageProject(leadId, general = false) {
       !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
       modelPicker(a),
       !a.parentId && !a.kind ? stagePicker(a) : null,
+      !a.parentId && !a.kind ? ownerPicker(a) : null,
       pill(a.status),
       a.kind === 'general' || a.title || a.mdFile ? h('button', { class: 'btn', onclick: () => openProfile(a) }, 'Edit profile') : null,
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
@@ -1091,7 +1102,8 @@ function pageTasks() {
   };
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, t.title), t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
-    h('small', { class: 'hint' }, [t.assignee?.name ? `For ${t.assignee.name}` : '', t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
+    h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
+    h('label', { class: 'hint', style: 'display:block;margin-top:8px' }, 'Responsible ', (() => { const x = agentSel(t.assignee?.id, `Who does "${t.title}"`); x.onchange = guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { assignee: x.value }); load(); }); return x; })()),
     h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), t.status !== 'done' ? h('button', { class: 'btn', title: 'Send this task to the agent now', onclick: guard(async () => { const r = await api(`/api/tasks/${t.id}/start`, 'POST', {}); toast(`Sent to ${r.agent}. Follow it in their chat.`); load(); }) }, 'Start') : null, h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
   const draw = () => {
     const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });

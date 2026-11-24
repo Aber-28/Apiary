@@ -21,3 +21,9 @@ Open a project and choose the **Files** tab. A project that Apiary created for y
 Agents work in the same folder, so what you save is immediately visible to them, and what they write appears here. For a git repository project this is the lead's checkout, and agents commit their work on their own branches as usual.
 
 Files up to 2 MB can be saved from the browser. The `.git` folder is managed by Apiary and cannot be opened, and nothing outside the project folder can be reached (links that point outside are refused).
+
+## Who is responsible
+
+Every project shows a **Responsible** agent, in the project's header and on its card in the Projects list. It starts as your CEO. Change it from the drop-down to any teammate or another project's lead.
+
+The project's own lead agent still does the work. The responsible agent is the one who answers for it: it can give the lead work or ask how it is going, and the lead can report back to it. Tasks work the same way, with **Responsible** on every card (see [Tasks](tasks.md)).

@@ -14,3 +14,14 @@ Do not paste secrets into chats: use the vault.
 ## What agents know about secrets
 
 Each agent is told the **names** of the secrets assigned to it (never the values), so you can just say "use the router login". Your CEO and project leads also see which teammate holds which secret, and hand the job to that person, who asks for the secret themselves.
+
+## How an agent can use a secret when the vault is locked and password protected
+
+It cannot open the vault, and it never gets the passphrase. Only **you** unlock it, in the browser, and Apiary keeps the key in memory only while it runs (it locks again on every restart). When an agent needs a secret:
+
+1. It asks by name. Apiary checks that the vault is unlocked and that the secret is assigned to that agent.
+2. Unless you chose *Always allowed*, you approve each use.
+3. Apiary hands the value to that one agent for that one task, as an environment variable for its shell commands. It is removed afterwards.
+4. Agents never see the value in the conversation: it is hidden in what is shown and saved.
+
+If the vault is locked, agents are told so and nothing is handed out. Apiary's own access token is never passed to agents.

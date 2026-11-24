@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.27.0
+
+- **Choose how much an agent may do without asking.** When an agent wants to run a shell command, the Approvals page now offers: Allow once, Always allow this exact command, Always allow any command that runs the same program, Always allow read-only commands, Allow everything for this agent (asks you to confirm), and Deny.
+- **Approval rules cover commands.** Rules on the Approval rules page can cover one command, one program, read-only commands, or everything, and can be limited to one agent. The most careful matching rule wins, so a Deny rule beats an allow rule.
+- **Safety list.** Commands that delete, reboot, change packages, services or containers, write data over the network, run other programs, or chain commands together are always asked about, unless you choose Allow everything for that agent.
+
 ## 0.26.0
 
 - **Approve shell commands from the Approvals page.** In safe mode, when an agent wants to run a command that is not already allowed, Apiary now shows it on the Approvals page with the exact command, and waits for your Approve or Deny. Before, the command was refused and no request appeared. Denied or stopped requests are not run. Full-access agents are unchanged. Codex agents are not yet covered.

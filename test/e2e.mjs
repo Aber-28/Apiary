@@ -1326,6 +1326,48 @@ let orgIds;
     engine.endApprovalBridge(run);
     assert.equal((await engine.requestCommandApproval(run.token, { tool_name: 'Bash', input: { command: 'ls' } })).behavior, 'deny', 'an ended run cannot ask');
   }
+  { // command rules: exact, program, read-only, allow everything, the safety list, agent scope and deny
+    const mk = (id, name) => engine._add({ id, name, role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: id });
+    const ag = mk('rules1', 'Rules tester'), other = mk('rules2', 'Other tester');
+    const tick = () => new Promise((r) => setImmediate(r));
+    // ask(command, answer): runs one request through the bridge; if the person is asked, answers with `answer`
+    const ask = async (who, command, answer) => {
+      const run = engine.beginApprovalBridge(who, new AbortController().signal);
+      const p = engine.requestCommandApproval(run.token, { tool_name: 'Bash', input: { command } });
+      await tick();
+      const pend = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'command' && r.agentId === who.id);
+      if (pend) engine.decide(pend.id, answer || { decision: 'deny' });
+      const out = await p; engine.endApprovalBridge(run);
+      return { asked: !!pend, allowed: out.behavior === 'allow' };
+    };
+    const approve = (mode) => ({ decision: 'approve', mode });
+    engine.policy.add({ kind: 'command', action: 'allow', scope: 'exact', command: 'uptime', agent: ag.id });
+    assert.deepEqual(await ask(ag, 'uptime'), { asked: false, allowed: true }, 'exact rule');
+    assert.deepEqual(await ask(other, 'uptime'), { asked: true, allowed: false }, 'a rule for one agent does not reach another');
+    engine.policy.add({ kind: 'command', action: 'allow', scope: 'program', command: 'curl', agent: ag.id });
+    assert.deepEqual(await ask(ag, 'curl -s http://10.0.0.5/api/'), { asked: false, allowed: true }, 'program rule, GET');
+    assert.deepEqual(await ask(ag, 'curl -X POST http://10.0.0.5/x'), { asked: true, allowed: false }, 'program rule never covers a write');
+    assert.deepEqual(await ask(ag, 'curl -s http://10.0.0.5/ && rm -rf /tmp/x'), { asked: true, allowed: false }, 'chained commands are always asked');
+    engine.policy.add({ kind: 'command', action: 'allow', scope: 'readonly', agent: ag.id });
+    assert.deepEqual(await ask(ag, 'docker ps'), { asked: false, allowed: true }, 'read-only preset');
+    assert.deepEqual(await ask(ag, 'docker rm old-box'), { asked: true, allowed: false }, 'read-only preset never covers docker rm');
+    assert.deepEqual(await ask(ag, 'pct destroy 101'), { asked: true, allowed: false }, 'destructive pct is asked');
+    assert.deepEqual(await ask(ag, 'python3 -c "print(1)"'), { asked: true, allowed: false }, 'interpreters are asked');
+    // "always" choices from the card create rules
+    assert.deepEqual(await ask(ag, 'echo remembered-once', approve('exact')), { asked: true, allowed: true }, 'exact choice is approved');
+    assert.deepEqual(await ask(ag, 'echo remembered-once'), { asked: false, allowed: true }, 'and remembered');
+    assert.deepEqual(await ask(ag, 'jq . /tmp/a.json', approve('program')), { asked: true, allowed: true }, 'program choice');
+    assert.deepEqual(await ask(ag, 'jq . /tmp/b.json'), { asked: false, allowed: true }, 'program choice is remembered');
+    assert.deepEqual(await ask(ag, 'jq -n 1', approve('once')), { asked: false, allowed: true }, 'an existing rule covers it');
+    // a deny rule beats an allow rule
+    engine.policy.add({ kind: 'command', action: 'deny', scope: 'program', command: 'git', agent: ag.id });
+    assert.deepEqual(await ask(ag, 'git status'), { asked: false, allowed: false }, 'deny wins over the read-only rule');
+    // allow everything for this agent covers a destructive command, but not another agent
+    assert.deepEqual(await ask(ag, 'rm -rf /tmp/apiary-not-real-1', approve('agent')), { asked: true, allowed: true }, 'allow everything choice');
+    assert.deepEqual(await ask(ag, 'rm -rf /tmp/apiary-not-real-2'), { asked: false, allowed: true }, 'then no more questions for that agent');
+    assert.deepEqual(await ask(other, 'rm -rf /tmp/apiary-not-real-3'), { asked: true, allowed: false }, 'other agents are still asked');
+    assert.throws(() => engine.policy.add({ kind: 'command', action: 'allow', scope: 'program', command: 'curl; rm', agent: ag.id }), /program name/);
+  }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
 }

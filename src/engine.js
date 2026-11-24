@@ -28,6 +28,7 @@ import { Templates } from './templates.js';
 import { Reports } from './report.js';
 import { Runbooks } from './runbooks.js';
 import { Policy } from './policy.js';
+import { parseCommand, isDangerous } from './command-rules.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -146,10 +147,10 @@ export class Engine extends EventEmitter {
     return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, archived: r.status !== 'pending' && (r.decidedAt || r.createdAt) < cut }));
   }
   _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }
-  _ask(agent, fields) {
+  _ask(agent, fields, ctx = {}) {
     const id = id8();
     const rec = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields };
-    const rule = this.policy.match({ kind: fields.kind, title: fields.title, secret: fields.secret, project: rec.projectId });
+    const rule = this.policy.match({ kind: fields.kind, title: fields.title, secret: fields.secret, project: rec.projectId, agent: agent.id, command: ctx.command });
     if (rule) {   // one of your rules decides, so nobody is asked
       const allow = rule.action === 'allow';
       Object.assign(rec, { status: allow ? 'approved' : 'denied', decidedAt: Date.now(), auto: true, rule: rule.id, note: allow ? `Allowed automatically by your rule. ${this.policy.describe(rule)}` : `Blocked by your rule. ${this.policy.describe(rule)}`, ...(allow && fields.kind === 'secret' ? { mode: 'once' } : {}) });
@@ -179,6 +180,7 @@ export class Engine extends EventEmitter {
     rec.note = String(note || '').slice(0, 1000);
     if (decision === 'approve' && only) rec.only = only;
     if (decision === 'approve' && rec.kind === 'secret') rec.mode = mode === 'always' ? 'always' : 'once';
+    if (decision === 'approve' && rec.kind === 'command') rec.mode = ['exact', 'program', 'readonly', 'agent'].includes(mode) ? mode : 'once';
     if (decision === 'approve' && rec.kind === 'hire' && names && typeof names === 'object') {
       rec.names = {};
       for (const [i, n] of Object.entries(names)) { const t = String(n || '').trim().slice(0, 40); if (t && rec.items?.[Number(i)]) rec.names[Number(i)] = t; }
@@ -1000,20 +1002,37 @@ export class Engine extends EventEmitter {
     const { agent, signal } = run;
     const input = body.input && typeof body.input === 'object' ? body.input : {};
     const tool = String(body.tool_name || 'a tool').slice(0, 80);
-    const command = typeof input.command === 'string' ? input.command : JSON.stringify(input);
-    const shown = this._redact(command).slice(0, 800);
-    const title = tool === 'Bash' ? `${agent.name} wants to run a command` : `${agent.name} wants to use ${tool}`;
+    const command = typeof input.command === 'string' ? input.command : '';
+    const isShell = tool === 'Bash' && !!command;
+    const shown = this._redact(isShell ? command : JSON.stringify(input)).slice(0, 800);
+    const title = isShell ? `${agent.name} wants to run a command` : `${agent.name} wants to use ${tool}`;
+    const parsed = isShell ? parseCommand(command) : null;
+    // "Always allow this exact command" is offered only when the text holds no secret value and is short.
+    const canExact = !!parsed && shown === command && command.length <= 500;
     // If the run is stopped while the person is deciding, the request is denied rather than left hanging.
     const cancel = () => { for (const r of Object.values(this.store.data.approvals)) if (r.status === 'pending' && r.kind === 'command' && r.agentId === agent.id) this.decide(r.id, { decision: 'deny', note: 'The run was stopped.' }); };
     signal?.addEventListener('abort', cancel, { once: true });
     try {
-      const ans = await this._ask(agent, { kind: 'command', title, detail: shown });
-      if (ans.decision === 'approve') return { behavior: 'allow', updatedInput: input };
-      return { behavior: 'deny', message: ans.note || 'The person did not allow this command.' };
+      const fields = { kind: 'command', title, detail: shown, tool, canExact, program: parsed?.program || '' };
+      const ans = await this._ask(agent, fields, { command: isShell ? command : '' });
+      if (ans.decision !== 'approve') return { behavior: 'deny', message: ans.note || 'The person did not allow this command.' };
+      if (ans.mode && ans.mode !== 'once' && isShell) this._rememberCommand(agent, ans.mode, command, parsed, canExact);
+      return { behavior: 'allow', updatedInput: input };
     } catch {
       return { behavior: 'deny', message: 'The command was not approved.' };
     } finally {
       signal?.removeEventListener('abort', cancel);
+    }
+  }
+  // Saves an "always" choice as a rule, so the same kind of command is not asked about again.
+  _rememberCommand(agent, mode, command, parsed, canExact) {
+    try {
+      if (mode === 'exact' && canExact) this.policy.add({ kind: 'command', action: 'allow', scope: 'exact', command: command.trim(), agent: agent.id });
+      else if (mode === 'program' && parsed?.program && !isDangerous(command)) this.policy.add({ kind: 'command', action: 'allow', scope: 'program', command: parsed.program, agent: agent.id });
+      else if (mode === 'readonly') this.policy.add({ kind: 'command', action: 'allow', scope: 'readonly', agent: agent.id });
+      else if (mode === 'agent') this.policy.add({ kind: 'any', action: 'allow', agent: agent.id });
+    } catch (e) {
+      this._log(agent, `! could not save that rule: ${e.message}`);   // e.g. a duplicate: the answer still applies to this request
     }
   }
   async _exec(agent, prompt) {

@@ -24,6 +24,7 @@ import * as orgfiles from './orgfiles.js';
 import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
 import { Tasks, STATUSES as TASK_STATUSES } from './tasks.js';
 import { Tickets } from './tickets.js';
+import os from 'node:os';
 import { Repos } from './repos.js';
 import { suggestModel } from './models.js';
 import { Limits } from './limits.js';
@@ -64,7 +65,7 @@ export class Engine extends EventEmitter {
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
-    this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'));
+    this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();
     this.toolInstaller = new ToolInstaller({ onDone: () => { this.connections._cache.clear(); this.emit('event', { type: 'tools' }); } });

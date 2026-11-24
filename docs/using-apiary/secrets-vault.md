@@ -53,3 +53,13 @@ You do not have to assign every secret in advance. If an agent asks for a secret
 * **Allow once** lets it use the secret this one time and nothing is stored.
 * **Always allow** also assigns the secret to that agent for good. You can remove that on the Secrets page.
 * **Deny** tells the agent no, and it does not look for the secret anywhere else.
+
+## Auto-unlock
+
+The vault locks every time Apiary restarts, and updates restart it. To avoid unlocking by hand each time, open **Settings > Secrets vault**, enter your passphrase under **Auto-unlock** and turn it on.
+
+* After a restart, Apiary opens the vault by itself using a key file that only your user can read. It lives in `~/.config/apiary/vault.key`, **outside** the Apiary folder, so an export or a backup of `~/.apiary` never includes it.
+* Your passphrase still works. If you press **Lock now**, the vault stays locked until the next restart or until you enter the passphrase.
+* This protects the vault if someone gets a copy of your backup or export. It does **not** protect against someone who is signed in to this computer as you, because they can read the key file too. Leave it off if that matters more to you than convenience.
+* Turn it off from the same card. That deletes the key file.
+* On a new computer, or after an import, the vault stays locked until you enter the passphrase.

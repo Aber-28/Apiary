@@ -6,6 +6,7 @@ import path from 'node:path';
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'apiary-test-'));
 process.env.APIARY_HOME = tmp;
+process.env.APIARY_KEYFILE = path.join(tmp + '-keys', 'vault.key');
 process.env.APIARY_MOCK = '1';
 const { Store } = await import('../src/store.js');
 const { Engine, parseSpawns } = await import('../src/engine.js');
@@ -1368,6 +1369,40 @@ let orgIds;
   assert.equal((await fetch(b + '/api/state')).status, 200, 'open again after removal');
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /pageSignin/);
   srv.close();
+}
+
+// ---- vault auto-unlock ----
+{
+  const { Vault } = await import('../src/vault.js');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-auto-')), vf = path.join(dir, 'data', 'vault.json'), kf = path.join(dir, 'keys', 'vault.key');
+  const v1 = new Vault(vf, kf); v1.init('correct horse battery');
+  const it = v1.add('Site login', 'hunter2-value', 'n', 'bob');
+  assert.equal(v1.auto, 'off');
+  assert.throws(() => new Vault(vf, kf).enableAuto('correct horse battery'), /locked/);
+  assert.throws(() => v1.enableAuto('wrong passphrase!!'), /Wrong passphrase/);
+  v1.enableAuto('correct horse battery'); assert.equal(v1.auto, 'on');
+  assert.equal(fsStat(kf).mode & 0o777, 0o600); assert.equal(fsStat(path.dirname(kf)).mode & 0o777, 0o700);
+  assert.ok(!fsRead(vf, 'utf8').includes('hunter2-value'), 'values stay encrypted');
+  // a restart: the vault opens by itself, values and usernames intact
+  const v2 = new Vault(vf, kf); assert.equal(v2.unlocked, true); assert.equal(v2.value(it.id), 'hunter2-value'); assert.equal(v2.user(it.id), 'bob'); assert.equal(v2.auto, 'on');
+  // without the key file (a copied or exported vault) it stays locked
+  const v3 = new Vault(vf, path.join(dir, 'elsewhere', 'vault.key')); assert.equal(v3.unlocked, false); assert.equal(v3.auto, 'broken');
+  await v3.unlock('correct horse battery'); assert.equal(v3.value(it.id), 'hunter2-value', 'the passphrase still works');
+  assert.equal(new Vault(vf).unlocked, false, 'no key file configured, no auto-unlock');
+  // a key file from another vault does not open this one
+  const other = new Vault(path.join(dir, 'o', 'vault.json'), path.join(dir, 'ok', 'vault.key')); other.init('another long phrase'); other.enableAuto('another long phrase');
+  const v4 = new Vault(vf, path.join(dir, 'ok', 'vault.key')); assert.equal(v4.unlocked, false); assert.equal(v4.auto, 'broken');
+  // turning it off removes the key file
+  v2.disableAuto(); assert.equal(v2.auto, 'off'); assert.equal(fsExists(kf), false);
+  assert.equal(new Vault(vf, kf).unlocked, false);
+  // through the API: the passphrase is needed to turn it on
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  assert.equal((await call('/api/vault/auto', 'POST', { enable: true, passphrase: 'wrong wrong wrong' })).status, 403);
+  assert.equal((await call('/api/vault/auto', 'POST', { enable: true, passphrase: 'correct horse battery' })).status, 200);
+  assert.equal((await call('/api/vault')).body.auto, 'on'); assert.ok(fsExists(process.env.APIARY_KEYFILE));
+  assert.equal(fsRead(path.join(tmp, 'vault.json'), 'utf8').includes(fsRead(process.env.APIARY_KEYFILE).toString('base64')), false, 'the key is not stored beside the vault');
+  assert.equal((await call('/api/vault/auto', 'POST', { enable: false })).body.auto, 'off'); assert.equal(fsExists(process.env.APIARY_KEYFILE), false);
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Turn on auto-unlock/);
 }
 
 console.log('all e2e checks passed');

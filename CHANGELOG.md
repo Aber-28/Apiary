@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.0
+
+* **Vault auto-unlock.** On the Secrets page, turn on **Auto-unlock** (it asks for your passphrase once). After a restart or an update the vault then opens by itself, so agents can use their secrets straight away. The key is a private file (only your user can read it) kept in `~/.config/apiary/`, outside the Apiary folder, so exports and backups never contain it. Your passphrase still works as a backup, and you can turn auto-unlock off at any time, which deletes the key file.
+* Importing an export, or copying the folder to another computer, keeps the vault locked until you enter the passphrase there.
+
 ## 0.13.0
 
 * **The CEO leads everything.** A new project is led by your CEO, who hands work to the specialists he created. There is no hidden "project lead" agent any more. The agent shown as **Responsible** is the one acting in the project chat, and you can change it per project. Projects you already have keep whoever is responsible today.

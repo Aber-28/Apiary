@@ -617,7 +617,7 @@ function pageSecrets() {
   crumbs('Settings', 'Secrets vault');
   const draw = async () => {
     let v; try { v = await api('/api/vault'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
-    S.vault = { exists: v.exists, unlocked: v.unlocked };
+    S.vault = { exists: v.exists, unlocked: v.unlocked, auto: v.auto };
     const head = h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Secrets vault'), h('p', { class: 'sub-title' }, 'Passwords and keys are encrypted with your passphrase and never stored in plain text. Assign each secret to the agents that may use it. When an agent asks to use one you approve it once or always. Never paste secrets into a chat.')),
       v.exists && v.unlocked ? h('button', { class: 'btn', onclick: guard(async () => { await api('/api/vault/lock', 'POST', {}); draw(); }) }, 'Lock now') : null);
     if (!v.exists) {
@@ -627,8 +627,19 @@ function pageSecrets() {
     if (!v.unlocked) {
       const a = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': 'Passphrase', onkeydown: (e) => { if (e.key === 'Enter') go(); } });
       const go = guard(async () => { await api('/api/vault/unlock', 'POST', { passphrase: a.value }); draw(); });
-      view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'The vault is locked'), h('p', { class: 'hint' }, 'It locks whenever Apiary restarts. Agents cannot use secrets while it is locked.'), h('label', { class: 'f' }, 'Passphrase', a), h('button', { class: 'btn primary', onclick: go }, 'Unlock'))); return;
+      view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'The vault is locked'), h('p', { class: 'hint' }, v.auto === 'broken' ? v.autoProblem : v.auto === 'on' ? 'Auto-unlock is on, but the vault was locked by hand. It unlocks by itself after the next restart, or enter the passphrase now.' : 'It locks whenever Apiary restarts, and updates restart it. Agents cannot use secrets while it is locked. You can turn on auto-unlock once it is open.'), h('label', { class: 'f' }, 'Passphrase', a), h('button', { class: 'btn primary', onclick: go }, 'Unlock'))); return;
     }
+    const autoCard = (() => {
+      const pass = h('input', { type: 'password', autocomplete: 'current-password', 'aria-label': 'Passphrase', placeholder: 'Passphrase' });
+      const on = guard(async () => { await api('/api/vault/auto', 'POST', { enable: true, passphrase: pass.value }); pass.value = ''; toast('Auto-unlock is on'); draw(); });
+      const off = guard(async () => { await api('/api/vault/auto', 'POST', { enable: false }); toast('Auto-unlock is off'); draw(); });
+      const isOn = v.auto === 'on';
+      return h('div', { class: 'card' }, h('h2', {}, 'Auto-unlock ', h('span', { class: 'pill ' + (isOn ? 'ok' : v.auto === 'broken' ? 'err' : '') }, isOn ? 'On' : v.auto === 'broken' ? 'Needs attention' : 'Off')),
+        h('p', { class: 'hint' }, 'After a restart or an update, the vault unlocks by itself using a key file that only your user can read (kept outside the Apiary folder, so exports and backups never include it). Your passphrase still works as a backup. This protects against a stolen backup, but not against someone who is signed in to this computer as you.'),
+        v.auto === 'broken' ? h('p', { class: 'hint', role: 'alert' }, v.autoProblem) : null,
+        isOn ? h('button', { class: 'btn', onclick: off }, 'Turn off auto-unlock')
+          : h('form', { class: 'formrow', onsubmit: (e) => { e.preventDefault(); on(); } }, pass, h('button', { class: 'btn primary', type: 'submit' }, 'Turn on auto-unlock')));
+    })();
     const addCard = secretForm(draw);
     const rows = v.secrets.map((x) => {
       const asg = Object.fromEntries((x.assigned || []).map((a) => [a.key, a]));   // the server sends a list; this is the same thing by key
@@ -661,7 +672,7 @@ function pageSecrets() {
         h('div', { class: 'kv' }, x.type === 'ssh' ? h('button', { class: 'btn', onclick: editConn }, 'Edit connection') : null, x.type === 'login' ? h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name}`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username') : null, h('button', { class: 'btn', onclick: guard(async () => { const nv = await askSecret(`Replace ${x.name}`, replaceLabel, { key: x.type === 'ssh' && x.auth === 'key' }); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
         h('details', { open: Object.keys(asg).length > 0 }, h('summary', {}, 'Who may use it'), picks));
     });
-    view.replaceChildren(head, addCard, rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
+    view.replaceChildren(head, autoCard, addCard, rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
   };
   draw(); page = { shows: () => true };
 }

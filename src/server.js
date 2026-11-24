@@ -151,7 +151,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
@@ -342,11 +342,16 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         engine.runMeeting(root.id).catch((e) => engine._log(root, `! team meeting failed: ${e.message}`));
         return json(res, 202, { started: true });
       }
-      if (url.pathname === '/api/vault' && req.method === 'GET') return json(res, 200, { exists: engine.vault.exists, unlocked: engine.vault.unlocked, secrets: engine.vault.list(), eligible: engine.eligibleAgents() });
+      if (url.pathname === '/api/vault' && req.method === 'GET') return json(res, 200, { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto, autoProblem: engine.vault.autoProblem, secrets: engine.vault.list(), eligible: engine.eligibleAgents() });
       if (url.pathname.startsWith('/api/vault/')) {
         const vb = req.method === 'GET' ? {} : await readBody(req), v = engine.vault;
         if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/auto') {
+          // turning it on needs the passphrase again, so a borrowed open window cannot do it
+          if (vb.enable) v.enableAuto(vb.passphrase); else v.disableAuto();
+          return json(res, 200, { auto: v.auto });
+        }
         if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note, vb.username, { type: vb.type, host: vb.host, port: vb.port, auth: vb.auth }); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
         if ((r = m(/^\/api\/vault\/secrets\/([\w-]+)$/))) {

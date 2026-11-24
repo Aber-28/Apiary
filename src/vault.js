@@ -3,7 +3,7 @@
 // Values are encrypted with AES-256-GCM. The key comes from a passphrase (scrypt) that is never stored: it is
 // asked for after every start and the derived key lives only in memory. The file holds names, notes and which
 // agents may ask for a secret (none of that is secret), and the encrypted values.
-import { readFileSync, writeFileSync, renameSync, existsSync, chmodSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, chmodSync, mkdirSync, unlinkSync } from 'node:fs';
 import { randomBytes, randomUUID, scryptSync, createCipheriv, createDecipheriv, timingSafeEqual } from 'node:crypto';
 import path from 'node:path';
 
@@ -54,11 +54,47 @@ const cleanKey = (v) => String(v).replace(/\r\n?/g, '\n').trim() + '\n';
 export const envName = (name) => 'APIARY_SECRET_' + String(name).toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
 
 export class Vault {
-  constructor(file) {
-    this.file = file;
+  // keyFile (optional) is where the auto-unlock key lives. It is kept apart from the vault, so copying or
+  // exporting the data folder does not carry the key with it.
+  constructor(file, keyFile = '') {
+    this.file = file; this.keyFile = keyFile;
     mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
     this.data = null; this.key = null; this.values = new Map(); this.users = new Map(); this._fails = 0;
     if (existsSync(file)) { try { this.data = JSON.parse(readFileSync(file, 'utf8')); } catch (e) { console.error('Could not read the vault file:', e.message); } }
+    this.autoProblem = '';
+    this._tryAuto();
+  }
+  // 'off', 'on', or 'broken' (turned on, but the key file is missing or does not match this vault)
+  get auto() { return !this.data?.auto ? 'off' : this.autoProblem ? 'broken' : 'on'; }
+  _tryAuto() {
+    if (!this.data?.auto || !this.keyFile) return;
+    try {
+      const wrap = readFileSync(this.keyFile); if (wrap.length !== 32) throw new Error('bad key file');
+      const key = unb64(open(wrap, this.data.auto, 'autounlock'));
+      if (open(key, this.data.verify, 'verify') !== CHECK) throw new Error('bad');
+      this._open(key); this.autoProblem = '';
+    } catch { this.autoProblem = 'Auto-unlock is on, but its key file is missing or does not belong to this vault. Unlock with your passphrase and turn it on again.'; }
+  }
+  _open(key) {
+    this.key = key; this.values.clear(); this.users.clear();
+    for (const it of Object.values(this.data.items)) { try { const x = unpack(open(key, it, it.id)); this.values.set(it.id, x.value); if (x.user) this.users.set(it.id, x.user); } catch { /* skip a damaged item */ } }
+  }
+  // Keep the unlock key on this machine (private file, only this user) so a restart does not lock the vault.
+  enableAuto(pass) {
+    this._need();
+    if (!this.keyFile) throw err(400, 'Auto-unlock is not available here.');
+    const key = this._derive(pass, unb64(this.data.salt));
+    try { if (open(key, this.data.verify, 'verify') !== CHECK) throw new Error('bad'); } catch { throw err(403, 'Wrong passphrase'); }
+    const wrap = randomBytes(32);
+    mkdirSync(path.dirname(this.keyFile), { recursive: true, mode: 0o700 });
+    const tmp = this.keyFile + '.tmp'; writeFileSync(tmp, wrap, { mode: 0o600 }); renameSync(tmp, this.keyFile);
+    try { chmodSync(this.keyFile, 0o600); chmodSync(path.dirname(this.keyFile), 0o700); } catch { /* best effort */ }
+    this.data.auto = seal(wrap, b64(key), 'autounlock'); this.autoProblem = ''; this._save();
+  }
+  disableAuto() {
+    if (this.data) { delete this.data.auto; this._save(); }
+    this.autoProblem = '';
+    try { if (this.keyFile) unlinkSync(this.keyFile); } catch { /* already gone */ }
   }
   get exists() { return !!this.data; }
   get unlocked() { return !!this.key; }
@@ -83,8 +119,7 @@ export class Vault {
     const key = this._derive(pass, unb64(this.data.salt));
     try { if (open(key, this.data.verify, 'verify') !== CHECK) throw new Error('bad'); }
     catch { this._fails++; throw err(403, 'Wrong passphrase'); }
-    this._fails = 0; this.key = key; this.values.clear(); this.users.clear();
-    for (const it of Object.values(this.data.items)) { try { const x = unpack(open(key, it, it.id)); this.values.set(it.id, x.value); if (x.user) this.users.set(it.id, x.user); } catch { /* skip a damaged item */ } }
+    this._fails = 0; this._open(key);
   }
   lock() { this.key?.fill(0); this.key = null; this.values.clear(); this.users.clear(); }
 

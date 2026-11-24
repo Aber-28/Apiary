@@ -740,7 +740,7 @@ async function refreshUpdate() { try { S.update = await api('/api/update'); rend
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
 // A full-screen view of the installation, so nobody thinks it has frozen.
 // ---------- install the AI tools from inside Apiary ----------
-const TOOLNAME = { claude: 'Claude Code', codex: 'Codex' };
+const TOOLNAME = { claude: 'Claude Code', codex: 'Codex', gh: 'the GitHub tool' };
 function installOverlay(ids, after) {
   if (document.getElementById('inst-overlay')) return;
   const bar2 = h('span', { style: 'width:0%' }), log = h('pre', { class: 'term upd-log', tabindex: '0', 'aria-label': 'Install log' }), list = h('ol', { class: 'upd-steps' });
@@ -765,6 +765,7 @@ function installOverlay(ids, after) {
         actions.replaceChildren(h('button', { class: 'btn', onclick: close }, 'Close'), h('button', { class: 'btn primary', onclick: () => { clearInterval(tick); ov.remove(); installOverlay(ids, after); } }, 'Try again')); return;
       }
       if (st.state === 'done') {
+        if (ids.length === 1 && ids[0] === 'gh') { await loadState().catch(() => {}); await refreshConns(); close(); if (after) after(); else route(); return; }
         stop = true; clearInterval(tick); bar2.style.width = '100%'; title.textContent = 'Installed'; sub.textContent = 'One last step: sign in once, so Apiary can use your account.';
         await loadState().catch(() => {}); await refreshConns();
         next.replaceChildren(...ids.flatMap((i) => [h('p', { style: 'margin:10px 0 4px' }, h('b', {}, TOOLNAME[i]), ': run this in a terminal on this computer. It shows a link to open in your browser.'), cmdBox(CINFO[i].login)]), h('p', { class: 'hint' }, 'You can also use a web API key instead of signing in: open Connections.'));
@@ -1077,7 +1078,38 @@ const CINFO = {
   claude: { title: 'Claude Code', login: 'claude', install: 'curl -fsSL https://claude.ai/install.sh | bash', key: 'Anthropic API key', keyUrl: 'console.anthropic.com' },
   codex: { title: 'Codex', login: 'codex login', install: 'npm install -g @openai/codex', key: 'OpenAI API key', keyUrl: 'platform.openai.com' },
   github: { title: 'GitHub', login: 'gh auth login', install: 'See cli.github.com', key: 'Personal access token' },
+  gh: { title: 'GitHub tool', login: 'gh auth login', install: 'See cli.github.com' },
 };
+// Sign in to GitHub from the page: the person gets a short code, types it at github.com, and Apiary waits.
+function ghSignIn(c, onDone = () => route()) {
+  const box = h('div', {}); let timer = null, shownDone = false;
+  const redraw = () => { timer = null; onDone(); };
+  const poll = async () => {
+    if (!box.isConnected) return;
+    let st; try { st = await api('/api/github/login'); } catch { timer = setTimeout(poll, 2500); return; }
+    draw(st);
+    if (st.state === 'waiting' || st.state === 'starting') timer = setTimeout(poll, 1500);
+    else if (st.state === 'done' && !shownDone) { shownDone = true; toast('Signed in to GitHub'); refreshConns().then(redraw); }
+  };
+  const start = guard(async () => { box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Getting a code from GitHub…')); draw(await api('/api/github/login', 'POST')); clearTimeout(timer); timer = setTimeout(poll, 1200); });
+  const signInBtn = (label) => h('button', { class: 'btn primary big', onclick: start }, label);
+  const draw = (st) => {
+    if (st.state === 'waiting' || st.state === 'starting') {
+      box.replaceChildren(
+        h('p', { style: 'margin:0 0 6px' }, h('b', {}, '1.'), ' Open GitHub and type this code:'),
+        h('div', { class: 'cmd mono', style: 'justify-content:center;font-size:1.7em;letter-spacing:.14em' }, h('code', { 'aria-label': 'One-time code' }, st.code || '…'), st.code ? h('button', { type: 'button', onclick: () => copy(st.code) }, 'Copy') : null),
+        h('div', { class: 'kv', style: 'margin:10px 0' }, h('a', { class: 'btn primary', href: st.url || 'https://github.com/login/device', target: '_blank', rel: 'noopener' }, 'Open github.com'),
+          h('button', { class: 'btn', onclick: guard(async () => { await api('/api/github/login', 'DELETE'); clearTimeout(timer); draw({ state: 'idle' }); }) }, 'Cancel')),
+        h('p', { class: 'hint', role: 'status' }, h('b', {}, '2.'), ' Approve it on GitHub. This page updates by itself.'));
+    } else if (st.state === 'failed') {
+      box.replaceChildren(h('p', { class: 'pill err', role: 'alert', style: 'white-space:normal' }, st.message || 'The sign-in did not finish.'), h('div', { class: 'kv', style: 'margin-top:8px' }, signInBtn('Try again')));
+    } else if (st.state === 'done') {
+      box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Signed in. Checking…'));
+    } else box.replaceChildren(signInBtn('Sign in with GitHub'), h('p', { class: 'hint' }, 'GitHub shows a short code. You type it on github.com and press approve. Apiary never sees your password.'));
+  };
+  draw({ state: 'idle' }); poll();
+  return box;
+}
 function connCard(c, full = false) {
   const info = CINFO[c.id], isGh = c.id === 'github', webM = isGh ? 'token' : 'api';
   const ok = isGh ? c.status?.ok : c.ready;
@@ -1085,17 +1117,26 @@ function connCard(c, full = false) {
   const model = isGh ? null : h('input', { type: 'text', value: c.api.model || '', placeholder: c.id === 'codex' ? 'Model name (required for web)' : 'claude-sonnet-5-5' });
   const result = h('p', { class: 'hint', role: 'status' });
   const setMethod = guard(async (m) => { await api('/api/connections/' + c.id, 'PUT', { method: m }); await refreshConns(); route(); });
-  const body = c.method === 'cli'
+  const ghBody = () => h('div', {},
+    c.status?.ok ? h('p', {}, h('span', { class: 'pill ok' }, `Signed in as ${c.status.account || 'unknown'}`)) : null,
+    !c.cli.found
+      ? h('div', {}, h('p', {}, 'Apiary needs the free GitHub tool to sign in. It installs for this user only, with no password needed.'), h('div', { class: 'kv' }, installBtn('gh', () => route(), 'Install GitHub tool for me')),
+          h('p', { class: 'hint' }, 'Prefer to do it yourself? See cli.github.com, or switch to Web · token above.'))
+      : c.status?.ok ? null : ghSignIn(c),
+    c.cli.found && c.cli.version ? h('p', { class: 'hint mono' }, c.cli.version) : null,
+    c.cli.found && !c.status?.ok && c.status?.reason && !/Not signed in/.test(c.status.reason) ? h('p', { class: 'hint' }, c.status.reason) : null,
+    h('details', { style: 'margin-top:10px' }, h('summary', { class: 'hint' }, 'Prefer the terminal?'), h('p', { class: 'hint' }, 'Run this once. Apiary reuses the login:'), cmdBox(info.login)));
+  const body = isGh && c.method === 'cli' ? ghBody() : c.method === 'cli'
     ? h('div', {}, h('p', {}, c.cli.found ? h('span', {}, h('span', { class: 'pill ok' }, 'Found'), ' ', h('span', { class: 'mono hint' }, `${c.cli.path}${c.cli.version ? ' · ' + c.cli.version : ''}`)) : h('span', {}, h('span', { class: 'pill err' }, 'Not installed'))),
       c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(c.id, () => route())), h('p', { class: 'hint' }, isGh ? 'Install it:' : 'Or run it yourself:'), cmdBox(info.install)),
       h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal. Apiary reuses that login:' : 'Log in once in a terminal. Apiary reuses that login — no key needed:'), cmdBox(info.login),
       isGh && c.status ? h('p', { class: 'hint' }, c.status.ok ? `Signed in as ${c.status.account || 'unknown'}` : c.status.reason) : null)
-    : h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? 'Needs “repo” access. Stored only on this machine in a private file.' : `From ${info.keyUrl}. Stored only on this machine in a private file. Web agents can chat but cannot edit files.`)), model ? h('label', { class: 'f' }, 'Model', model) : null,
+    : h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? h('span', {}, 'Needs “repo” access. Stored only on this machine in a private file. ', h('a', { href: 'https://github.com/settings/tokens/new?scopes=repo&description=Apiary', target: '_blank', rel: 'noopener', style: 'text-decoration:underline' }, 'Create one on GitHub (the form is filled in for you)')) : `From ${info.keyUrl}. Stored only on this machine in a private file. Web agents can chat but cannot edit files.`)), model ? h('label', { class: 'f' }, 'Model', model) : null,
       h('button', { class: 'btn', onclick: guard(async () => { const p = { method: webM }; if (key.value) p[isGh ? 'token' : 'apiKey'] = key.value; if (model) p.model = model.value; await api('/api/connections/' + c.id, 'PUT', p); toast('Saved'); await refreshConns(); route(); }) }, 'Save'));
   return h('div', { class: 'card' },
     h('div', { class: 'kv', style: 'justify-content:space-between;margin-bottom:14px' }, h('h2', { style: 'margin:0' }, info.title), h('span', { class: 'pill ' + (ok ? 'ok' : 'err') }, ok ? 'Connected' : 'Not connected')),
     h('div', { class: 'seg', role: 'group', 'aria-label': 'Connection method', style: 'margin-bottom:16px' },
-      h('button', { 'aria-pressed': String(c.method === 'cli'), onclick: () => c.method !== 'cli' && setMethod('cli') }, 'Terminal'),
+      h('button', { 'aria-pressed': String(c.method === 'cli'), onclick: () => c.method !== 'cli' && setMethod('cli') }, isGh ? 'Sign in' : 'Terminal'),
       h('button', { 'aria-pressed': String(c.method === webM), onclick: () => c.method !== webM && setMethod(webM) }, isGh ? 'Web · token' : 'Web · API key')),
     body,
     h('div', { class: 'kv', style: 'margin-top:12px' }, h('button', { class: 'btn', onclick: guard(async (e) => { const b = e.currentTarget; b.disabled = true; result.textContent = 'Testing…'; try { const r = await api(`/api/connections/${c.id}/test`, 'POST', {}); result.textContent = r.ok ? '✔ ' + r.detail : '✘ ' + r.error; result.style.color = r.ok ? 'var(--ok-text)' : 'var(--err)'; } finally { b.disabled = false; } }) }, 'Test connection'), result));
@@ -1862,7 +1903,13 @@ async function openSetup(startAt = 0) {
       if (t.state === 'checking') { box.replaceChildren(head, h('p', { class: 'hint' }, 'Making a tiny test request to confirm you are signed in…')); return; }
       if (t.ok) { box.replaceChildren(head, h('p', {}, `✔ ${t.detail || 'Works'}`, h('span', { class: 'hint' }, ` · via ${c.method === 'cli' ? 'terminal' : 'web'}`)), h('button', { class: 'btn', onclick: () => { W.tests[id] = { ok: false, error: '' }; draw(); } }, 'Change how it connects')); return; }
       const key = h('input', { type: 'password', autocomplete: 'off', placeholder: isGh ? 'ghp_… or github_pat_…' : 'Paste your key', 'aria-label': info.key });
-      const terminal = h('div', {}, c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(id, () => { refreshConns().then(() => go(1)); })), h('p', { class: 'hint' }, `${info.title.replace(' Code', '')} is not installed. ${isGh ? 'Install it:' : 'Or run it yourself:'}`), cmdBox(info.install)),
+      const ghTerminal = () => h('div', {},
+        !c.cli.found
+          ? h('div', {}, h('p', {}, 'Apiary needs the free GitHub tool to sign in. It installs for this user only.'), h('div', { class: 'kv' }, installBtn('gh', () => { refreshConns().then(draw); }, 'Install GitHub tool for me')))
+          : ghSignIn(c, test),
+        h('details', { style: 'margin-top:10px' }, h('summary', { class: 'hint' }, 'Prefer the terminal?'), h('p', { class: 'hint' }, 'Run this once, then press Check again:'), cmdBox(info.login),
+          h('div', { class: 'kv', style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: guard(test) }, 'I have signed in. Check again'))));
+      const terminal = isGh ? ghTerminal() : h('div', {}, c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(id, () => { refreshConns().then(() => go(1)); })), h('p', { class: 'hint' }, `${info.title.replace(' Code', '')} is not installed. ${isGh ? 'Install it:' : 'Or run it yourself:'}`), cmdBox(info.install)),
         h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal:' : 'Sign in once in a terminal (Apiary then reuses that login):'), cmdBox(info.login),
         h('div', { class: 'kv', style: 'margin-top:10px' }, h('button', { class: 'btn primary', onclick: guard(test) }, 'I have signed in. Check again')));
       const web = h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? 'Needs “repo” access. Stored only on this machine in a private file.' : 'Stored only on this machine in a private file. Web agents can chat but cannot edit files.')),
@@ -1870,7 +1917,7 @@ async function openSetup(startAt = 0) {
       box.replaceChildren(head,
         t.error ? h('p', { class: 'hint', style: 'color:var(--err)' }, t.error) : null,
         h('div', { class: 'seg', role: 'group', 'aria-label': 'Connection method', style: 'margin-bottom:14px' },
-          h('button', { 'aria-pressed': String(c.method === 'cli'), onclick: guard(() => setMethod('cli')) }, 'Terminal'),
+          h('button', { 'aria-pressed': String(c.method === 'cli'), onclick: guard(() => setMethod('cli')) }, isGh ? 'Sign in' : 'Terminal'),
           h('button', { 'aria-pressed': String(c.method === webM), onclick: guard(() => setMethod(webM)) }, isGh ? 'Web · token' : 'Web · API key')),
         c.method === 'cli' ? terminal : web);
     }

@@ -1428,6 +1428,57 @@ let orgIds;
   assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Turn on auto-unlock/);
 }
 
+// ---- sign in to GitHub from the page (fake `gh`, no network) ----
+{
+  const fs = await import('node:fs');
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-ghlogin-')), bin = path.join(dir, 'bin'); fs.mkdirSync(bin);
+  const go = path.join(dir, 'go'), fail = path.join(dir, 'fail'), signed = path.join(dir, 'signed'), seenEnv = path.join(dir, 'env');
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh
+case "$1 $2" in
+  "auth login") echo "TOKEN=\${GH_TOKEN:-none} ARGS=$*" > "${seenEnv}"
+    echo "! First copy your one-time code: ABCD-1234" >&2
+    echo "Open this URL to continue in your web browser: https://github.com/login/device" >&2
+    while [ ! -f "${go}" ]; do sleep 0.1; done
+    if [ -f "${fail}" ]; then echo "authentication failed: access_denied" >&2; exit 1; fi
+    touch "${signed}"; echo "Authentication complete."; exit 0;;
+  "auth status") [ -f "${signed}" ] && exit 0; echo "You are not logged in" >&2; exit 1;;
+  "api user") echo example-user; exit 0;;
+esac
+[ "$1" = "--version" ] && echo "gh version 0.0.0 (fake)"
+exit 0
+`, { mode: 0o755 });
+  const oldPath = process.env.PATH, oldTok = process.env.GH_TOKEN;
+  process.env.PATH = bin + path.delimiter + oldPath; process.env.GH_TOKEN = 'must-not-reach-gh';
+  try {
+    const wait = async (state) => { for (let i = 0; i < 60; i++) { const st = (await call('/api/github/login')).body; if (st.state === state) return st; await new Promise((r) => setTimeout(r, 100)); } throw new Error('never reached ' + state + ': ' + JSON.stringify((await call('/api/github/login')).body)); };
+    assert.equal((await call('/api/github/login')).body.state, 'idle');
+    const st = await call('/api/github/login', 'POST'); assert.equal(st.status, 202);
+    const waiting = await wait('waiting');
+    assert.equal(waiting.code, 'ABCD-1234'); assert.equal(waiting.url, 'https://github.com/login/device');
+    assert.match(fs.readFileSync(seenEnv, 'utf8'), /TOKEN=none .*auth login --hostname github\.com --git-protocol https --web/, 'a stray GH_TOKEN is not passed on, and the sign-in is the web flow');
+    // cancelling stops it and a new try works
+    assert.equal((await call('/api/github/login', 'DELETE')).body.state, 'cancelled');
+    await call('/api/github/login', 'POST'); await wait('waiting');
+    // approving on GitHub finishes it and the connection shows as connected
+    fs.writeFileSync(go, '');
+    await wait('done');
+    const gh = (await call('/api/connections')).body.find((c) => c.id === 'github');
+    assert.equal(gh.method, 'cli'); assert.equal(gh.status.ok, true); assert.equal(gh.status.account, 'example-user');
+    // a refused sign-in gives a plain message
+    fs.rmSync(signed); fs.writeFileSync(fail, ''); await call('/api/github/login', 'POST');
+    const bad = await wait('failed'); assert.match(bad.message, /cancelled on GitHub/); assert.ok(!bad.code);
+    // no gh tool: a clear message, not a crash
+    process.env.PATH = '/nonexistent'; const none = await call('/api/github/login', 'POST'); process.env.PATH = bin + path.delimiter + oldPath;
+    assert.equal(none.status, 400); assert.match(none.body.error || none.body.message || '', /not installed/);
+  } finally { process.env.PATH = oldPath; if (oldTok === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = oldTok; }
+  // the installer knows how to fetch the GitHub tool, and its script is valid shell
+  const { RECIPES } = await import('../src/tools.js'); const { spawnSync } = await import('node:child_process');
+  assert.ok(RECIPES.gh && RECIPES.gh.cmd === 'bash'); assert.equal(spawnSync('bash', ['-n', '-c', RECIPES.gh.args[1]]).status, 0, 'installer script parses');
+  assert.ok(!/sudo/.test(RECIPES.gh.args[1]), 'installs for the current user only');
+  const { explainLogin } = await import('../src/ghlogin.js'); assert.match(explainLogin('dial tcp: lookup github.com: no such host'), /Could not reach github\.com/);
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /Sign in with GitHub/); assert.match(app, /Install GitHub tool for me/);
+}
+
 // ---- infrastructure map ----
 {
   const net = await import('node:net');

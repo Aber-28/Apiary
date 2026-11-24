@@ -10,7 +10,7 @@ import path from 'node:path';
 import { which } from './providers.js';
 
 const HOME_BIN = path.join(os.homedir(), '.local', 'bin');
-const LABEL = { claude: 'Claude Code', codex: 'Codex' };
+const LABEL = { claude: 'Claude Code', codex: 'Codex', gh: 'GitHub tool' };
 const strip = (s) => String(s).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r/g, '\n');
 
 export const RECIPES = {
@@ -25,6 +25,21 @@ export const RECIPES = {
     needs: [['npm', 'npm is needed to install it. It comes with Node.js: sudo apt-get install -y nodejs npm']],
     cmd: 'npm', args: ['install', '-g', '--prefix', path.join(os.homedir(), '.local'), '@openai/codex', '--no-fund', '--no-audit', '--loglevel', 'http'],
     login: 'codex login',
+  },
+  gh: {
+    label: 'GitHub tool',
+    needs: [['curl', 'curl is needed to download it. Install it with: sudo apt-get install -y curl'], ['tar', 'tar is needed to unpack it. Install it with: sudo apt-get install -y tar']],
+    // GitHub's own release, unpacked into ~/.local/bin for this user only (no sudo)
+    cmd: 'bash', args: ['-c', [
+      'set -e',
+      'case "$(uname -m)" in x86_64) a=amd64;; aarch64|arm64) a=arm64;; armv7l|armv6l) a=armv6;; *) echo "This kind of computer is not supported: $(uname -m)"; exit 1;; esac',
+      'url=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest | grep -o \'https://[^"]*_linux_\'"$a"\'\\.tar\\.gz\' | head -1)',
+      '[ -n "$url" ] || { echo "Could not find the download on github.com"; exit 1; }',
+      'tmp=$(mktemp -d); trap \'rm -rf "$tmp"\' EXIT',
+      'echo "Downloading $url"; curl -fsSL "$url" -o "$tmp/gh.tgz"; tar -xzf "$tmp/gh.tgz" -C "$tmp"',
+      'mkdir -p "$HOME/.local/bin"; install -m 755 "$tmp"/gh_*/bin/gh "$HOME/.local/bin/gh"; echo "Installed to $HOME/.local/bin/gh"',
+    ].join('\n')],
+    login: 'gh auth login',
   },
 };
 

@@ -290,6 +290,11 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
           return;
         }
       }
+      if (url.pathname === '/api/github/login') {
+        if (req.method === 'GET') return json(res, 200, engine.ghLogin.status);
+        if (req.method === 'POST') { const st = engine.ghLogin.start(); engine.connections.update('github', { method: 'cli' }); return json(res, 202, st); }
+        if (req.method === 'DELETE') return json(res, 200, engine.ghLogin.cancel());
+      }
       if (req.method === 'GET' && url.pathname === '/api/github/repos') {
         return json(res, 200, await github.listRepos(engine.connections.get('github'), url.searchParams.get('q') || ''));
       }

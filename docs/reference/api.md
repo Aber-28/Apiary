@@ -136,3 +136,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 ## Task IDs
 
 Tasks returned by `GET /api/tasks` have `code` (for example `T-0042`), `num`, `parent` (id of the task they are a subtask of), `parentCode`, `subtasks` (`code`, `title`, `status`, `assignee`), `waitingFor` (codes of subtasks still open), and, once done, `closedBy` and `closure` (for example `Closed by Router Rex. Refer to T-0042.`).
+
+## GitHub sign-in
+
+`GET /api/github/login` returns the state: `idle`, `starting`, `waiting` (with `code` and `url`), `done`, `failed` (with `message`) or `cancelled`. `POST` starts the browser sign-in (400 if the GitHub tool is missing), `DELETE` cancels it. The tool can be installed with `POST /api/tools/install` and `{"tools":["gh"]}`.

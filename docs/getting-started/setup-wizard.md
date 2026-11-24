@@ -27,7 +27,7 @@ If both AIs are connected, you also choose **which one leads new projects** by d
 
 ## Step 3: GitHub (optional)
 
-Connect through `gh auth login` or a personal access token, or skip it. See [Connect GitHub](../github/connect.md).
+Press **Sign in with GitHub** and type the code it shows on github.com (no terminal needed), or use a personal access token, or skip it. See [Connect GitHub](../github/connect.md).
 
 ## Step 4: Run automatically?
 

@@ -34,7 +34,7 @@ You opened Apiary using a name or address it was not told to accept. Start it wi
 Open the full link once (`/?token=…`). Run `apiary token` on the server to see it again.
 
 ## GitHub: “Not signed in”
-Run `gh auth login`, or save a token under Connections → GitHub.
+Open Connections → GitHub and press Sign in with GitHub, or save a token there.
 
 ## “Could not open the pull request”
 Push needs write access and an `origin` remote on GitHub. Check the token scopes ([Connect GitHub](../github/connect.md)).

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.25.0
+
+- **Connect GitHub without a terminal.** Connections → GitHub now has a **Sign in with GitHub** button: Apiary shows a one-time code, you type it on github.com, and the page updates by itself. Apiary never sees a password.
+- **Install the GitHub tool from the page.** If it is missing, one button installs GitHub's official release into your home folder (no sudo).
+- **Clear failure messages** (no internet, expired code, cancelled) with Try again, and a one-click link that opens GitHub's token form already filled in.
+
 ## 0.24.1
 
 - **Fix:** standing team members now see the Infrastructure map (names, types, addresses, what runs on what, and vault secret names, never secret values). Before, only leads and the CEO did, so a job handed to a teammate could fail with "no address" even though the device was on the map.

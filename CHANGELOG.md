@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.7.0
+- Fixed: after an in-app update the service now restarts by itself (it used to stay stopped until restarted by hand)
 - **Update progress screen**: progress bar, steps, live log and timer while updating, automatic rollback if it fails, page refreshes when done
 - **Secrets**: optional username next to the password, token or key (`APIARY_SECRET_<NAME>_USER`)
 - **Model per agent**: dropdown on each agent, filled in for its provider (Claude, Codex…), with "Other…"

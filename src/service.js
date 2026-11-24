@@ -21,7 +21,7 @@ export async function status() {
 
 export function unitText({ lan = false } = {}) {
   const lines = ['[Unit]', 'Description=Apiary', 'After=network-online.target', '', '[Service]',
-    `ExecStart=${q(process.execPath)} ${q(BIN)} start${lan ? ' --lan' : ''}`, 'Restart=on-failure',
+    `ExecStart=${q(process.execPath)} ${q(BIN)} start${lan ? ' --lan' : ''}`, 'Restart=always', 'RestartSec=1',
     // so the service finds claude, codex and gh exactly as this session does
     `Environment=${q('PATH=' + (process.env.PATH || '/usr/local/bin:/usr/bin:/bin'))}`];
   if (process.env.APIARY_HOME) lines.push(`Environment=${q('APIARY_HOME=' + process.env.APIARY_HOME)}`);

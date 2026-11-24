@@ -1105,5 +1105,11 @@ let orgIds;
   } finally { child.kill(); }
 }
 
+// ---- 0.10.4: the dashboard must learn from the server that the CEO already exists ----
+{
+  const st = (await call('/api/state')).body; assert.equal(st.orgDone, true, 'server reports the CEO is set up');
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /orgDone: !!st\.orgDone/, 'the page copies orgDone from the server state');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

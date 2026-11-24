@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.10.4
+
+* Fixed the dashboard asking you to set up your CEO after you already had. The page never picked up that the CEO existed, so the banner always showed and the Organisation tab stayed hidden.
+
 ## 0.10.3
 
 * Fixed the installer saying Apiary was not running when it was (it could not tell, because a network-enabled Apiary asks for the access token first).

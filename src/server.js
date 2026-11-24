@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // HTTP + SSE server. Binds to localhost by default because agents can run commands on this machine.
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { CONNECTION_IDS } from './connections.js';
 import { github } from './github.js';
@@ -11,6 +11,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { Store } from './store.js';
 import { Engine } from './engine.js';
+import { Updater } from './updater.js';
+import { authArgs } from './github.js';
+import * as orgfiles from './orgfiles.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -21,7 +24,7 @@ const TOKEN = process.env.APIARY_TOKEN || '';
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const EXTRA_HOSTS = new Set((process.env.APIARY_ALLOWED_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean));
 
-export function createServer(engine) {
+export function createServer(engine, { updater = null, restart = () => {} } = {}) {
   const clients = new Set();
   engine.on('event', (ev) => {
     const data = `data: ${JSON.stringify(ev)}\n\n`;
@@ -86,17 +89,17 @@ export function createServer(engine) {
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate });
         if (req.method === 'PUT') {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
           if (b.memory !== undefined) engine.setMemoryEnabled(b.memory);
           engine.setSettings(b);
-          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate });
         }
       }
       if (req.method === 'GET' && url.pathname === '/api/approvals') return json(res, 200, engine.approvals());
@@ -186,6 +189,49 @@ export function createServer(engine) {
         if (req.method === 'PUT') { const b = await readBody(req); return json(res, 200, engine.writeFile(r[1], rel, b.content)); }
         if (req.method === 'DELETE') { engine.deleteFile(r[1], rel); return json(res, 200, { ok: true }); }
       }
+      if (req.method === 'POST' && url.pathname === '/api/interview') return json(res, 200, await engine.interview(await readBody(req)));
+      if (req.method === 'POST' && url.pathname === '/api/org') return json(res, 201, await engine.createOrg(await readBody(req)));
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/profile$/))) {
+        if (req.method === 'GET') return json(res, 200, engine.profile(r[1]));
+        if (req.method === 'PUT') return json(res, 200, engine.setProfile(r[1], await readBody(req)));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/meetings') {
+        const names = { org: 'Organisation' }; for (const a of Object.values(engine.agents)) if (!a.parentId && a.kind !== 'general') names[a.id] = a.name;
+        return json(res, 200, orgfiles.listMinutes().map((x) => ({ ...x, scopeName: names[x.scope] || x.scope })).slice(0, 100));
+      }
+      if ((r = m(/^\/api\/meetings\/([\w-]+)\/(\d{4}-\d{2}-\d{2})$/)) && req.method === 'GET') { let text; try { text = orgfiles.readMinutes(r[1], r[2]); } catch { throw Object.assign(new Error('No such meeting'), { status: 404 }); } return json(res, 200, { text }); }
+      if (req.method === 'POST' && url.pathname === '/api/meetings/run') {
+        const b = await readBody(req);
+        const root = b.projectId ? engine.agents[b.projectId] : await engine.general();
+        if (!root || root.parentId) throw Object.assign(new Error('No such project'), { status: 404 });
+        if (engine._roster(root).length < 1) throw Object.assign(new Error('A meeting needs at least two people on the team'), { status: 409 });
+        engine.runMeeting(root.id).catch((e) => engine._log(root, `! team meeting failed: ${e.message}`));
+        return json(res, 202, { started: true });
+      }
+      if (url.pathname === '/api/vault' && req.method === 'GET') return json(res, 200, { exists: engine.vault.exists, unlocked: engine.vault.unlocked, secrets: engine.vault.list(), eligible: engine.eligibleAgents() });
+      if (url.pathname.startsWith('/api/vault/')) {
+        const vb = req.method === 'GET' ? {} : await readBody(req), v = engine.vault;
+        if (req.method === 'POST' && url.pathname === '/api/vault/init') { v.init(vb.passphrase); return json(res, 201, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/unlock') { await v.unlock(vb.passphrase); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/lock') { v.lock(); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && url.pathname === '/api/vault/secrets') { const it = v.add(vb.name, vb.value, vb.note); return json(res, 201, vb.assigned ? v.update(it.id, { assigned: vb.assigned }) : it); }
+        if ((r = m(/^\/api\/vault\/secrets\/([\w-]+)$/))) {
+          if (req.method === 'PUT') return json(res, 200, v.update(r[1], vb));
+          if (req.method === 'DELETE') { v.remove(r[1]); return json(res, 200, { ok: true }); }
+        }
+      }
+      if (url.pathname === '/api/update' && req.method === 'GET') return json(res, 200, updater ? updater.status : { state: 'unsupported', error: 'Updates are not available here.' });
+      if (url.pathname === '/api/update/check' && req.method === 'POST') { if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 }); return json(res, 200, await updater.check()); }
+      if (url.pathname === '/api/update/install' && req.method === 'POST') {
+        if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });
+        const ub = await readBody(req);
+        const busy = Object.values(engine.agents).filter((a) => a.status === 'working' || a.status === 'waiting').length;
+        if (busy && !ub.force) return json(res, 409, { error: `${busy} agent${busy > 1 ? 's are' : ' is'} working right now. Installing restarts Apiary and interrupts them.`, busy });
+        const r2 = await updater.install();
+        json(res, 200, { ok: true, version: r2.version, restarting: true });
+        setTimeout(restart, 400);
+        return;
+      }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
         res.write(': hello\n\n');
@@ -247,7 +293,21 @@ export function main(links = []) {
   const store = new Store();
   const engine = new Engine(store);
   if (!engine.available.length) console.warn('No AI connected yet. Open the web UI > Connections, or install the `claude` / `codex` CLI.');
-  const server = createServer(engine);
+  const updater = new Updater({ dir: fileURLToPath(new URL('..', import.meta.url)), current: VERSION, authArgs: () => authArgs(engine.connections.get('github')) });
+  const restart = () => {
+    store.flush(); engine.memory.flush();
+    const svc = spawnSync('systemctl', ['--user', 'is-active', '--quiet', 'apiary']).status === 0;
+    const child = svc ? spawn('sh', ['-c', 'sleep 1; systemctl --user restart apiary'], { detached: true, stdio: 'ignore' })
+      : spawn('sh', ['-c', 'sleep 1; exec "$@"', 'sh', process.execPath, ...process.argv.slice(1)], { detached: true, stdio: 'ignore', env: process.env, cwd: process.cwd() });
+    child.unref();
+    setTimeout(() => process.exit(0), 200);
+  };
+  const server = createServer(engine, { updater, restart });
+  setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  if (process.env.APIARY_NO_UPDATE_CHECK !== '1') {
+    const auto = () => { if (engine.autoUpdate) updater.check().catch(() => {}); };
+    setTimeout(auto, 20000).unref(); setInterval(auto, 6 * 3600000).unref();
+  }
   server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set APIARY_PORT to another port.` : e.message); process.exit(1); });
   server.listen(PORT, HOST, () => {
     console.log(`Apiary ${VERSION} running at http://${HOST}:${PORT}${TOKEN ? `/?token=${TOKEN}` : ''}`);

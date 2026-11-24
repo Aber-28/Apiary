@@ -29,3 +29,8 @@ Git branches that agents created (`apiary/...`) stay in your repositories. List 
 git branch --list 'apiary/*'
 git branch -D <name>
 ```
+
+
+## Updating from inside Apiary (0.5.0 and later)
+
+Settings → Updates checks GitHub (automatically every few hours too). A new version is **downloaded but not installed**; an **Update ready** chip appears and **Install** sits next to **Check for updates**. Install restarts Apiary and your browser refreshes itself. If agents are working you are asked before they are stopped. Installs that are not a git checkout cannot self-update.

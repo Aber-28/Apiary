@@ -19,3 +19,8 @@ Start it with `apiary start --lan`. This enables an access token and accepts req
 ## Reporting a problem
 
 Open a private security advisory on the GitHub repository.
+
+
+## Secrets
+
+Secrets live only in the encrypted vault (AES-256-GCM, key derived with scrypt from your passphrase, which is never stored). Agents can use a secret only when it is assigned to them and you approve (once or always). Values reach only the running command and are redacted from chat, logs, memory and meeting minutes.

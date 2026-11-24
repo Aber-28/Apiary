@@ -10,7 +10,7 @@
 // each turn, and the parent merges them when they report back.
 import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, realpathSync, existsSync, statSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, mkdirSync, realpathSync, existsSync, statSync, readdirSync, writeFileSync, unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { providers, which } from './providers.js';
 import { HOME } from './store.js';
@@ -18,7 +18,9 @@ import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
-import { buildProfile, DEPARTMENTS } from './roles.js';
+import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
+import { Vault, envName, redactPairs } from './vault.js';
+import * as orgfiles from './orgfiles.js';
 
 const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
@@ -30,6 +32,7 @@ const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], 
 const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
+const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
 const id8 = () => randomUUID().slice(0, 8);
@@ -49,6 +52,8 @@ export class Engine extends EventEmitter {
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
     this.peerCounts = new Map();// project id -> agent-to-agent messages sent
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
+    this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'));
+    this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
     this.seedTeams();
     for (const r of Object.values(store.data.approvals)) if (r.status === 'pending') r.status = 'expired'; // nobody is waiting any more
@@ -85,20 +90,24 @@ export class Engine extends EventEmitter {
   setApprovalsDefault(v) { this.store.data.settings.approvalsDefault = !!v; this.store.save(); return this.approvalsDefault; }
 
   // ---------- approvals ----------
-  approvals() { return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt); }
+  // Decisions stay in view for a day, then count as archived.
+  approvals() {
+    const cut = Date.now() - 24 * 3600000;
+    return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, archived: r.status !== 'pending' && (r.decidedAt || r.createdAt) < cut }));
+  }
   _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }
   _ask(agent, fields) {
     const id = id8();
     const rec = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields };
     this.store.data.approvals[id] = rec;
     const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
-    for (const r of decided.slice(100)) delete this.store.data.approvals[r.id];
+    for (const r of decided.slice(500)) delete this.store.data.approvals[r.id];
     this.emit('event', { type: 'approval', approval: rec });
     this._log(agent, `? waiting for your approval: ${rec.title}`);
     this.store.save();
     return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
   }
-  decide(id, { decision, note, only } = {}) {
+  decide(id, { decision, note, only, names, mode } = {}) {
     const rec = this.store.data.approvals[id];
     if (!rec) throw httpErr(404, 'No such approval');
     if (rec.status !== 'pending' || !this.pending.has(id)) throw httpErr(409, 'This request was already answered or has expired');
@@ -107,17 +116,36 @@ export class Engine extends EventEmitter {
     rec.status = decision === 'approve' ? 'approved' : 'denied';
     rec.note = String(note || '').slice(0, 1000);
     if (decision === 'approve' && only) rec.only = only;
+    if (decision === 'approve' && rec.kind === 'secret') rec.mode = mode === 'always' ? 'always' : 'once';
+    if (decision === 'approve' && rec.kind === 'hire' && names && typeof names === 'object') {
+      rec.names = {};
+      for (const [i, n] of Object.entries(names)) { const t = String(n || '').trim().slice(0, 40); if (t && rec.items?.[Number(i)]) rec.names[Number(i)] = t; }
+    }
     rec.decidedAt = Date.now();
     const p = this.pending.get(id); this.pending.delete(id);
     this.emit('event', { type: 'approval', approval: rec });
     this.store.save();
-    p.resolve({ decision, note: rec.note, only: rec.only });
+    p.resolve({ decision, note: rec.note, only: rec.only, names: rec.names, mode: rec.mode });
     return rec;
   }
 
   get defaultProvider() { const p = this.store.data.settings.defaultProvider; return this.available.some((x) => x.id === p) ? p : ''; }
   get onboardingDone() { return !!this.store.data.settings.onboardingDone; }
-  setSettings({ defaultProvider, onboardingDone }) {
+  get orgDone() { return !!this.store.data.settings.orgDone; }
+  get autoUpdate() { return this.store.data.settings.autoUpdate !== false; }
+  get meeting() { return { frequency: 'off', time: '00:00', weekday: 0, last: 0, ...(this.store.data.settings.meeting || {}) }; }
+  setMeeting(p = {}) {
+    const m = { ...this.meeting };
+    if (p.frequency !== undefined) { if (!['off', 'daily', 'weekly'].includes(p.frequency)) throw httpErr(400, 'frequency must be off, daily or weekly'); m.frequency = p.frequency; }
+    if (p.time !== undefined) { if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(p.time)) throw httpErr(400, 'time must look like 00:00'); m.time = p.time; }
+    if (p.weekday !== undefined) { const d = Number(p.weekday); if (!Number.isInteger(d) || d < 0 || d > 6) throw httpErr(400, 'weekday must be 0 (Sunday) to 6'); m.weekday = d; }
+    if (p.frequency !== undefined && p.frequency !== 'off' && !m.last) m.last = Date.now();   // first meeting at the next scheduled time, not immediately
+    this.store.data.settings.meeting = m; this.store.save();
+    return this.meeting;
+  }
+  setSettings({ defaultProvider, onboardingDone, autoUpdate, meeting }) {
+    if (autoUpdate !== undefined) this.store.data.settings.autoUpdate = !!autoUpdate;
+    if (meeting) this.setMeeting(meeting);
     const st = this.store.data.settings;
     if (defaultProvider !== undefined) { if (defaultProvider && !['claude', 'codex'].includes(defaultProvider)) throw httpErr(400, 'Unknown provider'); st.defaultProvider = defaultProvider; }
     if (onboardingDone !== undefined) st.onboardingDone = !!onboardingDone;
@@ -129,9 +157,9 @@ export class Engine extends EventEmitter {
   _pkey(a) { const r = this.rootOf(a); return r.git?.repo || r.cwd || r.id; }
   // Remember one finished task for this agent, its project, and (through the project) its teammates.
   _record(agent, userText, from, final) {
-    if (!this.memoryEnabled || !final || !String(final).trim()) return;
+    if (!this.memoryEnabled || !final || !String(final).trim() || from?.id === 'meeting') return;
     const asked = from ? `${from.name} asked` : 'Task';
-    this.memory.add({ kind: 'episode', agent: this._mkey(agent), project: this._pkey(agent), who: agent.name, text: `${asked}: ${userText.replace(/\s+/g, ' ').slice(0, 500)} → ${String(final).replace(/\s+/g, ' ').slice(0, 800)}` });
+    this.memory.add({ kind: 'episode', agent: this._mkey(agent), project: this._pkey(agent), who: agent.name, text: this._redact(`${asked}: ${userText.replace(/\s+/g, ' ').slice(0, 500)} → ${String(final).replace(/\s+/g, ' ').slice(0, 800)}`) });
   }
   memoryPreview(agentId, q = '') {
     const a = this.agents[agentId];
@@ -197,7 +225,7 @@ export class Engine extends EventEmitter {
   org(rootId) {
     const root = this.agents[rootId];
     if (!root) throw httpErr(404, 'No such project');
-    const node = (a) => ({ id: a.id, name: a.name, role: a.role, department: a.department || null, departmentLabel: a.department ? DEPARTMENTS[a.department]?.label : null, status: a.status, hired: !!a.hiredAt, reason: a.profile?.reason || '', reports: [] });
+    const node = (a) => ({ id: a.id, name: a.name, title: a.title || '', role: a.role, department: a.department || null, departmentLabel: a.department ? DEPARTMENTS[a.department]?.label : null, status: a.status, hired: !!a.hiredAt, reason: a.profile?.reason || '', reports: [] });
     const members = this._roster(root), byId = new Map([[root.id, node(root)], ...members.map((m) => [m.id, node(m)])]);
     for (const m of members) { const up = byId.get(m.reportsTo) || byId.get(root.id); up.reports.push(byId.get(m.id)); }
     byId.get(root.id).helpers = Object.values(this.agents).filter((a) => a.parentId && !a.member && this.rootOf(a).id === root.id).length;
@@ -256,46 +284,248 @@ export class Engine extends EventEmitter {
   }
 
   // ---------- hiring ----------
+  _scope(root) { return root.kind === 'general' ? 'org' : root.id; }
+  _standing(agent) { return (agent.mdFile && orgfiles.readStanding(agent.mdFile)) || agent.instructions || ''; }
+
+  // Create a permanent team member: name (comic-book style unless given), full profile, Markdown file.
+  async _makeMember(root, spec) {
+    const roster = this._roster(root);
+    const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
+    const title = String(spec.title || spec.name || 'Specialist').trim().slice(0, 60);
+    const dept = DEPARTMENTS[spec.department] ? spec.department : inferDepartment(title, spec.role);
+    let name = String(spec.name || '').trim().slice(0, 40) || pickName(dept, taken);
+    if (taken.has(name.toLowerCase())) { let i = 2; while (taken.has(`${name} ${i}`.toLowerCase())) i++; name = `${name} ${i}`; }
+    const profile = buildProfile({ name, title, role: spec.role, department: dept, reason: spec.reason, instructions: spec.instructions, guardrails: spec.guardrails });
+    const boss = this.agents[spec.reportsTo] || root;
+    const child = await this._makeChild(root, { name, title, role: profile.role, instructions: profile.instructions, provider: spec.provider || root.provider, model: spec.model, member: true, consult: spec.consult !== false, memKey: slug(title), department: profile.department, profile, reportsTo: boss.id, hiredAt: Date.now() });
+    child.mdFile = orgfiles.writeAgent(this._scope(root), child.memKey, { name, title, department: profile.departmentLabel, reportsTo: boss.name, reason: spec.reason, instructions: profile.instructions, hired: child.hiredAt });
+    this.store.save();
+    return child;
+  }
+
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
   async _hire(proposer, hires, notes) {
     const root = this.rootOf(proposer);
     const roster = this._roster(root);
+    const titles = new Set(roster.map((m) => (m.title || m.name).toLowerCase()));
     const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
     const ok = [];
     for (const h of hires.slice(0, 8)) {
-      const name = String(h.name).trim().slice(0, 40);
-      if (taken.has(name.toLowerCase())) { notes.push(`"${name}" is already on the team, so no one was hired for that. Use apiary-assign to give them work.`); continue; }
-      if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { notes.push(`Could not hire "${name}": the team is at its size limit.`); continue; }
+      const title = String(h.title || h.name).trim().slice(0, 60);
+      if (titles.has(title.toLowerCase())) { notes.push(`There is already a ${title} on the team, so no one was hired for that. Use apiary-assign to give them work.`); continue; }
+      if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { notes.push(`Could not hire a ${title}: the team is at its size limit.`); continue; }
+      titles.add(title.toLowerCase());
+      const dept = DEPARTMENTS[h.department] ? h.department : inferDepartment(title, h.role);
+      const given = h.title && h.name ? String(h.name).trim().slice(0, 40) : '';
+      const name = given && !taken.has(given.toLowerCase()) ? given : pickName(dept, taken);
       taken.add(name.toLowerCase());
       const provider = this.available.some((p) => p.id === h.provider) ? h.provider : root.provider;
       const want = String(h.reportsTo || '').toLowerCase();
-      const up = [root, ...roster].find((m) => m.name.toLowerCase() === want) || ok.find((o) => o.name.toLowerCase() === want) || (proposer.member ? proposer : root);
-      ok.push({ name, provider, reportsTo: up.id || null, reportsToName: up.name, profile: buildProfile({ name, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails }) });
+      const same = (m) => m.name.toLowerCase() === want || (m.title || '').toLowerCase() === want;
+      const up = [root, ...roster].find(same) || ok.find((o) => o.name.toLowerCase() === want || o.title.toLowerCase() === want) || (proposer.member ? proposer : root);
+      ok.push({ title, name, provider, spec: { ...h, title, department: dept }, reportsTo: up.id || null, reportsToName: up.name, profile: buildProfile({ name, title, role: h.role, department: dept, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails }) });
     }
     if (!ok.length) return;
-    let chosen = ok;
+    let chosen = ok.map((x, i) => ({ x, i })), names = {};
     if (this._needsApproval(proposer)) {
       this._setStatus(proposer, 'waiting');
       this.emit('event', { type: 'activity', agentId: proposer.id, text: 'Waiting for your approval to hire' });
       const r = await this._ask(proposer, {
         kind: 'hire', title: `${proposer.name} suggests hiring ${ok.length} ${ok.length > 1 ? 'people' : 'person'}`,
-        items: ok.map((x) => ({ name: x.name, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails })),
+        items: ok.map((x) => ({ name: x.name, title: x.title, role: x.profile.role, department: x.profile.department, departmentLabel: x.profile.departmentLabel, reason: x.profile.reason, provider: x.provider, reportsTo: x.reportsToName, instructions: x.profile.instructions, guardrails: x.profile.guardrails })),
       });
       if (r.decision === 'deny') { notes.push(`The human did not approve these hires${r.note ? ': ' + r.note : ''}. Carry on without them or propose something different.`); return; }
-      if (r.only) { const skipped = ok.length - r.only.length; chosen = ok.filter((_, i) => r.only.includes(i)); if (skipped) notes.push(`The human approved only some hires; ${skipped} were not hired.`); }
+      if (r.only) { const skipped = ok.length - r.only.length; chosen = chosen.filter(({ i }) => r.only.includes(i)); if (skipped) notes.push(`The human approved only some hires; ${skipped} were not hired.`); }
+      names = r.names || {};
       if (r.note) notes.push(`Human note: ${r.note}`);
     }
-    const hired = [];
-    const made = new Map();
-    for (const x of chosen) {
+    const hired = [], made = new Map();
+    for (const { x, i } of chosen) {
       // a manager proposed in the same batch only counts if they were actually hired
-      const boss = x.reportsTo || [...made].find(([n]) => n === x.reportsToName)?.[1] || root.id;
-      const child = await this._makeChild(root, { name: x.name, role: x.profile.role, instructions: x.profile.instructions, provider: x.provider, member: true, consult: true, memKey: slug(x.name), department: x.profile.department, profile: x.profile, reportsTo: boss, hiredAt: Date.now() });
+      const boss = x.reportsTo || made.get(x.reportsToName) || root.id;
+      const child = await this._makeMember(root, { ...x.spec, name: names[i] || x.name, provider: x.provider, reportsTo: boss });
       made.set(x.name, child.id);
-      this._msg(root, { role: 'system', text: `Hired ${child.name} (${x.profile.departmentLabel}), reporting to ${x.reportsToName}`, agentId: child.id });
-      hired.push(`${child.name} (${x.profile.departmentLabel})`);
+      this._msg(root, { role: 'system', text: `Hired ${child.name}, ${x.title} (${x.profile.departmentLabel}), reporting to ${x.reportsToName}`, agentId: child.id });
+      hired.push(`${child.name} (${x.title})`);
     }
     if (hired.length) notes.push(`Hired: ${hired.join(', ')}. They are now permanent team members: hand them work with apiary-assign.`);
+  }
+
+  // The standing organisation, offered as a team for new projects.
+  _orgTeamDef() {
+    const g = Object.values(this.agents).find((x) => x.kind === 'general');
+    const members = g ? this._roster(g) : [];
+    if (!members.length) return null;
+    return { id: 'org', name: 'My organisation', lead: { name: g.name, role: g.role, instructions: this._standing(g) },
+      members: members.map((m) => ({ name: m.name, title: m.title || m.name, role: m.role, department: m.department, instructions: m.profile?.custom || '', provider: m.provider, model: m.model, consult: m.consult !== false })) };
+  }
+
+  // ---------- organisation: the CEO and the standing team ----------
+  // One short question at a time, written by the AI, until it knows enough to propose a team.
+  async interview({ answers = [], ceoName = '' } = {}) {
+    answers = (Array.isArray(answers) ? answers : []).slice(0, 12).map((a) => ({ q: String(a.q || '').slice(0, 400), a: String(a.a || '').slice(0, 1500) }));
+    const MAX = 8;
+    const transcript = answers.map((a, i) => `Q${i + 1}: ${a.q}\nA${i + 1}: ${a.a}`).join('\n\n');
+    const system = `ONBOARDING INTERVIEW. You are helping a person set up their personal organisation of AI agents: a CEO and a few specialists. Interview them to learn their setup and goals. Ask ONE short question at a time, each building on earlier answers (their infrastructure and network, servers and hosting, websites, tools they use, what they want help with, how much the agents may change without asking, how they like to be kept informed). Offer 2 to 5 short quick-answer choices. Never ask for passwords, keys or tokens: those go in an encrypted vault later. Ask at most ${MAX} questions in total${answers.length >= MAX - 1 ? '; you have asked enough, so finish now' : ''}.\n` +
+      'Reply with JSON only, no other text. To ask: {"question":"...","choices":["..."]}. When you know enough: {"done":true,"overview":"markdown summary of their setup and goals, no secrets","team":[{"title":"Job title","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","role":"what they do","reason":"why this person needs them","instructions":"specifics for this setup"}]} with 3 to 6 specialists that fit what they said and no one they do not need.';
+    let out;
+    try { out = await this._oneShot(system, transcript ? `Interview so far:\n\n${transcript}\n\nContinue.` : 'Start the interview.'); }
+    catch (e) { out = null; this._lastInterviewError = e.message; }
+    let j = null;
+    try { const m = /\{[\s\S]*\}/.exec(out || ''); if (m) j = JSON.parse(m[0]); } catch { j = null; }
+    if (!j || (!j.done && !j.question)) j = fallbackInterview(answers);
+    if (answers.length >= MAX && !j.done) j = fallbackInterview(answers, true);
+    if (!j.done) return { question: String(j.question).slice(0, 400), choices: [].concat(j.choices || []).map(String).slice(0, 5).map((c) => c.slice(0, 80)), asked: answers.length + 1, max: MAX };
+    const taken = new Set([ceoName].filter(Boolean));
+    const team = (Array.isArray(j.team) ? j.team : []).slice(0, 6).filter((t) => t && String(t.title || '').trim()).map((t) => {
+      const title = String(t.title).trim().slice(0, 60), dept = DEPARTMENTS[t.department] ? t.department : inferDepartment(title, t.role);
+      const name = pickName(dept, taken); taken.add(name.toLowerCase());
+      const profile = buildProfile({ name, title, role: t.role, department: dept, reason: t.reason, instructions: t.instructions });
+      return { name, title, department: dept, departmentLabel: profile.departmentLabel, role: String(t.role || '').slice(0, 300), reason: String(t.reason || '').slice(0, 400), custom: String(t.instructions || '').slice(0, 2000), instructions: profile.instructions, guardrails: profile.guardrails };
+    });
+    return { done: true, overview: String(j.overview || '').slice(0, 5000), team, suggestedCeoName: ceoName || pickName('leadership', taken) };
+  }
+  // A single question to the AI with no project, tools or memory. Used for the interview.
+  async _oneShot(system, prompt) {
+    const provider = this.defaultProvider || this.available.find((p) => p.id !== 'mock')?.id || this.available[0]?.id;
+    if (!provider) throw httpErr(400, 'Connect an AI first (Connections).');
+    const cwd = path.join(HOME, 'workspaces', 'interview');
+    mkdirSync(cwd, { recursive: true });
+    const agent = { id: 'interview', name: 'Interviewer', role: '', provider, method: this.resolveMethod(provider), model: this.defaultModel(provider), cwd, access: 'safe', depth: 0 };
+    const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 180000);
+    try {
+      const res = await providers.pick(agent).run({ agent, prompt, system, signal: ctl.signal, history: [], conn: agent.method === 'api' ? this.connections.get(provider) : null, onText() {}, onActivity() {}, onLog() {} });
+      return res.text;
+    } finally { clearTimeout(timer); }
+  }
+
+  // Turn the interview into the CEO (the main chat agent) and its team. Safe to run again: it only adds.
+  async createOrg({ ceoName, overview, team = [] } = {}) {
+    const g = await this.general();
+    const name = String(ceoName || '').trim().slice(0, 40) || pickName('leadership', new Set());
+    if (this.store.data.settings.orgDone && g.name !== name && Object.values(this.agents).some((a) => a.id !== g.id && a.name.toLowerCase() === name.toLowerCase())) throw httpErr(409, `Someone is already called ${name}`);
+    Object.assign(g, { name, title: 'CEO', role: 'Chief executive: understands what you need, hands each job to the right specialist, and reports back', department: 'leadership', team: { id: 'org', name: 'My organisation', leadName: name }, org: true, memKey: 'ceo' });
+    const ov = String(overview || '').trim();
+    if (ov) orgfiles.writeCompany(`# About my setup\n\n${ov}\n`);
+    g.mdFile = orgfiles.writeAgent('org', 'ceo', { name, title: 'CEO', department: 'Leadership', reportsTo: 'you', reason: '', instructions: 'You are the CEO of this person\'s organisation. Decide who should do each job, hand it over, and give the human a short, clear summary when it is done. Do not do specialist work yourself when a team member can. Use the overview of their setup (shown below as "About the human\'s setup") to make good decisions.', hired: g.createdAt });
+    this.emit('event', { type: 'agent', agent: g });
+    const made = [];
+    for (const t of (Array.isArray(team) ? team : []).slice(0, 8)) {
+      if (!t || !String(t.title || '').trim()) continue;
+      if (this._roster(g).some((m) => (m.title || m.name).toLowerCase() === String(t.title).trim().toLowerCase())) continue;
+      made.push(await this._makeMember(g, { title: t.title, name: t.name, role: t.role, department: t.department, reason: t.reason, instructions: t.custom ?? t.instructions, provider: g.provider, reportsTo: g.id }));
+    }
+    this.store.data.settings.orgDone = true; this.store.save();
+    return { ceo: g, hired: made.length, org: this.org(g.id) };
+  }
+
+  // ----- profiles (the Markdown file behind each agent) -----
+  profile(agentId) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    let text = ''; try { if (a.mdFile) text = readFileSync(a.mdFile, 'utf8'); } catch { /* none yet */ }
+    return { id: a.id, name: a.name, title: a.title || '', role: a.role, department: a.department || '', file: a.mdFile || null, text };
+  }
+  setProfile(agentId, { name, text } = {}) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    if (name !== undefined) {
+      const n = String(name).trim().slice(0, 40);
+      if (!n) throw httpErr(400, 'Give the agent a name');
+      const root = this.rootOf(a);
+      if (this.tree(root.id).some((i) => i !== a.id && this.agents[i]?.name.toLowerCase() === n.toLowerCase())) throw httpErr(409, `Someone on this team is already called ${n}`);
+      if (n !== a.name) {
+        a.name = n;
+        if (a.mdFile) { try { const t = readFileSync(a.mdFile, 'utf8').replace(/^name:.*$/m, `name: ${n}`).replace(/^# .*?( — .*)?$/m, (_, r) => `# ${n}${r || ''}`); orgfiles.writeRaw(a.mdFile, t); } catch { /* file missing */ } }
+        this.emit('event', { type: 'agent', agent: a });
+      }
+    }
+    if (text !== undefined) {
+      if (!a.mdFile) throw httpErr(409, 'This agent has no profile file');
+      if (String(text).length > 20000) throw httpErr(413, 'That profile is too long');
+      orgfiles.writeRaw(a.mdFile, String(text));
+    }
+    this.store.save();
+    return this.profile(agentId);
+  }
+
+  // ---------- team meetings ----------
+  // Everyone reports what they did, then everyone hears everyone else's report. Minutes are saved as Markdown.
+  async runMeeting(rootId, { since } = {}) {
+    const root = this.agents[rootId];
+    if (!root) throw httpErr(404, 'No such project');
+    const people = [root, ...this._roster(root)];
+    if (people.length < 2) throw httpErr(409, 'A meeting needs at least two people on the team');
+    const from = { id: 'meeting', name: 'Team meeting' };
+    const now = new Date(), date = now.toLocaleDateString('en-CA');
+    since = since || Math.max(this.meeting.last || 0, Date.now() - 7 * 86400000);
+    const label = (a) => `${a.name}${a.title ? ` (${a.title})` : ''}`;
+    const ask = (a, text) => this.send(a.id, text, from).then((t) => (t || '').trim() || '(no update)', (e) => `(no update: ${e.message})`);
+    const upd = await Promise.all(people.map((a) => {
+      const mine = this.memory.items.filter((m) => m.kind === 'episode' && m.agent === this._mkey(a) && m.ts >= since).slice(-8).map((m) => `- ${new Date(m.ts).toLocaleString()}: ${m.text.slice(0, 220)}`).join('\n');
+      return ask(a, `TEAM MEETING, update round (${date}). Tell the team in 3 to 6 short lines: what you did since ${new Date(since).toLocaleString()}, anything others must know (changes you made, decisions, risks), and anything you are blocked on or need from someone. Do not start new work and do not use apiary-send, apiary-assign or apiary-spawn.\n\nWhat Apiary recorded for you in that time:\n${mine || '(nothing recorded)'}`);
+    }));
+    const report = people.map((a, i) => `### ${label(a)}\n${upd[i]}`).join('\n\n');
+    const replies = await Promise.all(people.map((a) => ask(a, `TEAM MEETING, everyone's updates (${date}):\n\n${report}\n\nIn 1 to 3 lines: what affects your work, any conflict or gap you can see, and any follow-up you will take. If nothing, say "Noted."`)));
+    const follow = people.map((a, i) => `- **${label(a)}**: ${replies[i].replace(/\s+/g, ' ')}`).join('\n');
+    const md = `# Team meeting, ${date}\n\n${root.kind === 'general' ? 'Organisation' : `Project: ${root.name}`}\n\n## Updates\n\n${report}\n\n## Reactions and follow-ups\n\n${follow}\n`;
+    const file = orgfiles.writeMinutes(this._scope(root), date, this._redact(md));
+    this.memory.add({ kind: 'episode', agent: null, project: this._pkey(root), who: 'Team meeting', text: this._redact(`Team meeting ${date}. ${people.map((a, i) => `${a.name}: ${upd[i].replace(/\s+/g, ' ').slice(0, 160)}`).join(' | ')}`).slice(0, 1500) });
+    return { file, date, scope: this._scope(root) };
+  }
+  // Called every minute by the server: holds the meeting when the chosen time has passed.
+  async tickMeetings(now = new Date()) {
+    const m = this.meeting;
+    if (m.frequency === 'off') return null;
+    const [hh, mm] = m.time.split(':').map(Number);
+    const due = new Date(now); due.setHours(hh, mm, 0, 0);
+    if (m.frequency === 'weekly') { due.setDate(due.getDate() - ((due.getDay() - m.weekday + 7) % 7)); }
+    if (due > now) { if (m.frequency === 'daily') due.setDate(due.getDate() - 1); else due.setDate(due.getDate() - 7); }
+    if ((m.last || 0) >= due.getTime()) return null;
+    const since = m.last || due.getTime() - 86400000;
+    this.store.data.settings.meeting = { ...m, last: now.getTime() }; this.store.save();
+    const ran = [];
+    for (const root of Object.values(this.agents).filter((a) => !a.parentId)) {
+      if (this._roster(root).length < 1 || (root.kind !== 'general' && !this.memory.items.some((e) => e.project === this._pkey(root) && e.ts >= since))) continue;
+      try { ran.push(await this.runMeeting(root.id, { since })); } catch (e) { this._log(root, `! team meeting failed: ${e.message}`); }
+    }
+    return ran;
+  }
+
+  // ---------- secrets ----------
+  _leaseEnv(agent) {
+    const mp = this.leases.get(agent.id);
+    return mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {};
+  }
+  // An agent asked for secrets with apiary-secret. Needs: vault unlocked, secret assigned to this agent, and the human's yes.
+  async _secrets(agent, reqs, notes) {
+    for (const r of reqs) {
+      const it = this.vault.byName(r.name);
+      if (!this.vault.unlocked) { notes.push(`The secrets vault is locked, so "${r.name}" is not available. Ask the human to unlock it (Secrets page).`); continue; }
+      if (!it || !(agent.member || !agent.parentId)) { notes.push(`There is no secret called "${r.name}" that you can use.`); continue; }
+      const key = this._mkey(agent), asg = it.assigned?.[key];
+      if (!asg) { notes.push(`"${r.name}" has not been assigned to you. Ask the human to assign it to you on the Secrets page; do not look for it elsewhere.`); continue; }
+      let allowed = asg.grant === 'always';
+      if (!allowed) {
+        this._setStatus(agent, 'waiting');
+        this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval to use a secret' });
+        const d = await this._ask(agent, { kind: 'secret', title: `${agent.name} wants to use the secret "${it.name}"`, detail: r.why ? `Reason given: ${r.why}` : 'No reason was given.', secret: it.name });
+        if (d.decision === 'deny') { notes.push(`The human did not allow use of "${it.name}"${d.note ? ': ' + d.note : ''}.`); continue; }
+        allowed = true;
+        if (d.mode === 'always') this.vault.setGrant(it.id, key, 'always');
+      }
+      const val = this.vault.value(it.id);
+      if (val === null) { notes.push(`"${it.name}" could not be read.`); continue; }
+      (this.leases.get(agent.id) || this.leases.set(agent.id, new Map()).get(agent.id)).set(it.name, val);
+      this._log(agent, `🔑 using secret "${it.name}"${asg.grant === 'always' ? ' (always allowed)' : ''}`);
+      notes.push(`The secret "${it.name}" is available to your commands as the environment variable $${envName(it.name)} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
+    }
+  }
+  // Who can be given a secret: the CEO, project leads and standing team members, by role (so renaming does not break access).
+  eligibleAgents() {
+    const seen = new Map();
+    for (const a of Object.values(this.agents)) if (a.member || !a.parentId) { const k = this._mkey(a); if (!seen.has(k)) seen.set(k, { key: k, label: `${a.title ? a.title : a.name}${a.kind === 'general' ? ' (CEO)' : a.member ? '' : ' (project lead)'}` }); }
+    return [...seen.values()].sort((x, y) => x.label.localeCompare(y.label));
   }
 
   // ---------- teams ----------
@@ -339,7 +569,7 @@ export class Engine extends EventEmitter {
 
   // ---------- public API ----------
   async createLead({ name, provider, model, cwd, access, goal, source, base, approvals, team }) {
-    const tdef = team ? this.teams[team] : null;
+    const tdef = team === 'org' ? this._orgTeamDef() : team ? this.teams[team] : null;
     if (team && !tdef) throw httpErr(400, 'That team no longer exists');
     if (!this.available.some((p) => p.id === provider)) throw httpErr(400, `Provider "${provider}" is not available. Connect it first.`);
     const method = this.resolveMethod(provider);
@@ -386,8 +616,7 @@ export class Engine extends EventEmitter {
     if (tdef) {
       for (const m of tdef.members) {
         const prov = this.available.some((p) => p.id === m.provider) ? m.provider : provider;
-        const profile = buildProfile({ name: m.name, role: m.role, instructions: m.instructions, reason: `${tdef.name} needs a ${m.name.toLowerCase()} specialist` });
-        await this._makeChild(agent, { name: m.name, role: m.role, instructions: profile.instructions, provider: prov, model: m.model || undefined, member: true, consult: m.consult !== false, memKey: slug(m.name), department: profile.department, profile, reportsTo: agent.id, hiredAt: Date.now() });
+        await this._makeMember(agent, { title: m.title || m.name, name: m.title ? m.name : undefined, role: m.role, department: m.department, instructions: m.instructions, reason: `${tdef.name} needs a ${(m.title || m.name).toLowerCase()} specialist`, provider: prov, model: m.model || undefined, consult: m.consult !== false, reportsTo: agent.id });
       }
     }
     if (goal) this.send(agent.id, goal).catch(() => {});
@@ -500,7 +729,12 @@ export class Engine extends EventEmitter {
     this.emit('event', { type: 'agent', agent });
     this.store.save();
   }
+  _redact(text) {
+    const extra = [...this.leases].flatMap(([, mp]) => [...mp]);
+    return this.vault.exists ? this.vault.redact(text, extra) : redactPairs(text, extra);
+  }
   _msg(agent, m) {
+    if (typeof m.text === 'string') m = { ...m, text: this._redact(m.text) };
     const msg = { id: id8(), ts: Date.now(), ...m };
     this.messages(agent.id).push(msg);
     this.emit('event', { type: 'message', agentId: agent.id, message: msg });
@@ -508,6 +742,7 @@ export class Engine extends EventEmitter {
     return msg;
   }
   _log(agent, line) {
+    line = this._redact(line);
     const l = this.logs(agent.id);
     l.push(line);
     if (l.length > MAX_LOG) l.splice(0, l.length - MAX_LOG);
@@ -523,7 +758,8 @@ export class Engine extends EventEmitter {
   _system(agent) {
     const names = this.available.filter((p) => p.id !== 'mock').map((p) => p.id).join(', ') || agent.provider;
     let s = `You are "${agent.name}" (${agent.role}), one agent in a small team coordinated by Apiary. Work in your current directory unless told otherwise.\n`;
-    if (agent.instructions) s += `\nStanding instructions for you:\n${agent.instructions}\n`;
+    const standing = this._standing(agent);
+    if (standing) s += `\nStanding instructions for you:\n${standing}\n`;
     if (agent.method === 'api') s += 'You are connected through a web API: you cannot read files or run commands. Answer in text only.\n';
     if (agent.git) s += `You are working on git branch ${agent.git.branch} in your own checkout. Your changes are committed for you after each turn; do not switch branches or push.\n`;
     s += agent.parentId
@@ -533,16 +769,18 @@ export class Engine extends EventEmitter {
     if (this.memoryEnabled) s += 'You have a long-term memory, shown below as MEMORY when there is something to show. To keep something for next time, put ```apiary-remember\n{"text":"what to remember","scope":"agent"}\n``` in your reply (scope: "agent" for you alone, "project" for the whole team on this project, "global" for everyone). Save lasting facts, decisions and preferences, not chatter.\n';
     const roster = this._roster(agent);
     if (roster.length) {
-      s += `\nYou lead the team "${agent.team?.name || 'your team'}". Its members stay on this project, remember past work and talk to each other:\n` + roster.map((m) => `- ${m.name}: ${m.role}`).join('\n') +
+      s += `\nYou lead the team "${agent.team?.name || 'your team'}". Its members stay on this project, remember past work and talk to each other:\n` + roster.map((m) => `- ${m.name}${m.title ? ` (${m.title})` : ''}: ${m.role}`).join('\n') +
         '\n\nDo not do the specialists\' work yourself. Decide which member is best placed and hand it over with:\n\n```apiary-assign\n{"to":"Member name","task":"Complete instructions that stand alone"}\n```\n\n' +
         'Apiary then makes that member check with the other members first. If a teammate needs something done before the work can start, it is done first; if one blocks the work, you are told why and nothing is changed. You then get the member\'s report to summarise for the human. Hand independent jobs to different members in the same reply; otherwise one at a time. If no member fits, say so or do it yourself.\n';
     }
-    if (agent.kind === 'general') s += '\nYou are the person\'s everyday assistant: answer questions, think things through and do quick tasks here. When something is a real piece of work with its own files and goals (a website, an app, a report series), suggest they create a project for it in Projects so it gets its own space, team and documents.\n';
-    if (!agent.parentId && agent.kind !== 'general') {
+    if (agent.org) s += '\nYou are the CEO of this person\'s organisation. Questions you can answer yourself; real jobs go to the right team member.\n' + (orgfiles.readCompany() ? `\nAbout the human\'s setup (written during setup; the human may edit it):\n${orgfiles.readCompany()}\n` : '');
+    else if (agent.kind === 'general') s += '\nYou are the person\'s everyday assistant: answer questions, think things through and do quick tasks here. When something is a real piece of work with its own files and goals (a website, an app, a report series), suggest they create a project for it in Projects so it gets its own space, team and documents.\n';
+    if (!agent.parentId) {
       s += '\nYou can propose permanent hires when this project needs a specialist that the team lacks. Apiary shows your proposal to the human with your reasons, writes each hire\'s profile and guardrails from its department, and adds approved people to the team (visible in the organisation chart). Propose like this:\n\n' +
-        '```apiary-hire\n{"name":"Short name","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","reportsTo":"Optional existing member name"}\n```\n\n' +
-        'Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
+        '```apiary-hire\n{"title":"Job title","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","reportsTo":"Optional existing member name or title"}\n```\n\n' +
+        'Every hire automatically gets a comic-book style codename (the human can change it), so give a job title, not a name. Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
     }
+    if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if (agent.member) {
       const lead = this.agents[agent.parentId];
       s += `\nYou are a standing member of the team "${lead?.team?.name || 'team'}" led by ${lead?.name || 'the lead'}. Before a teammate does a task, Apiary may ask you for a pre-check from your area. Then reply in exactly this shape and do no work yet:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first (one line per item, only with CONDITIONS)\n` +
@@ -583,9 +821,9 @@ export class Engine extends EventEmitter {
       const res = await runner.run({
         agent, prompt, system: this._system(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : ''), signal: ctl.signal,
         history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
-        onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text }),
+        onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }),
         onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
-        onLog: (line) => this._log(agent, line),
+        onLog: (line) => this._log(agent, line), env: this._leaseEnv(agent),
       });
       if (res.sessionId) agent.sessionId = res.sessionId;
       if (agent.method === 'api') {
@@ -613,16 +851,16 @@ export class Engine extends EventEmitter {
     this.stopped.delete(agent.id);
     this._msg(agent, { role: 'user', text: userText, from: from ? { id: from.id, name: from.name } : null });
     // A message from a teammate (not the parent handing over a task) is labelled so the agent knows who is asking.
-    let prompt = from && from.id !== agent.parentId ? `Message from teammate ${from.name}:\n\n${userText}` : userText, final = '';
+    let prompt = from && from.id !== agent.parentId && from.id !== 'meeting' ? `Message from teammate ${from.name}:\n\n${userText}` : userText, final = '';
     try {
       for (let round = 0; round <= this.limits.maxRounds; round++) {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
-        if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: n.text, who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, errors } = parseSpawns(mem.clean);
+        if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
+        const { clean, spawns, sends, assigns, hires, secrets, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
-        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !errors.length) || round === this.limits.maxRounds) break;
+        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !errors.length) || round === this.limits.maxRounds) break;
 
         const notes = [...errors];
         let runnable = [];
@@ -647,6 +885,7 @@ export class Engine extends EventEmitter {
           }
         }
         if (hires.length) await this._hire(agent, hires, notes);
+        if (secrets.length) await this._secrets(agent, secrets, notes);
         if (agent.git) await this._commit(agent, 'work before delegating');
         this._setStatus(agent, 'waiting');
 
@@ -676,11 +915,13 @@ export class Engine extends EventEmitter {
         this._msg(agent, { role: 'report', text: body });
         prompt = body;
       }
+      this.leases.delete(agent.id);   // a secret lasts for one task only
       await this._commit(agent, userText);
       this._record(agent, userText, from, final);
       this._setStatus(agent, 'idle');
       return final;
     } catch (e) {
+      this.leases.delete(agent.id);
       this.waitingOn.delete(agent.id);
       if (e.name === 'AbortError') {
         await this._commit(agent, 'stopped');
@@ -701,7 +942,7 @@ export class Engine extends EventEmitter {
     for (let tries = 0; tries < 10; tries++) {   // a just-spawned teammate may not exist yet
       if (t === 'parent' && agent.parentId) return { peer: this.agents[agent.parentId] };
       if (t === 'lead') return { peer: root };
-      const hits = this.tree(root.id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t));
+      const hits = this.tree(root.id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t || (a.title || '').toLowerCase() === t));
       if (hits.length === 1) return { peer: hits[0] };
       if (hits.length > 1) return { error: `More than one teammate is called "${to}". Use a more specific name.` };
       await new Promise((r) => setTimeout(r, 100));
@@ -758,7 +999,7 @@ export class Engine extends EventEmitter {
       provider, method, model: def?.model || spec.model || (provider === parent.provider ? parent.model : this.defaultModel(provider)),
       cwd: parent.cwd, access: parent.access, parentId: parent.id, depth: parent.depth + 1,
     };
-    if (spec.member) Object.assign(fields, { member: true, consult: spec.consult !== false, memKey: spec.memKey, department: spec.department, profile: spec.profile, reportsTo: spec.reportsTo || parent.id, hiredAt: spec.hiredAt });
+    if (spec.member) Object.assign(fields, { title: spec.title, member: true, consult: spec.consult !== false, memKey: spec.memKey, department: spec.department, profile: spec.profile, reportsTo: spec.reportsTo || parent.id, hiredAt: spec.hiredAt });
     // Each CLI agent in a git project gets its own checkout, branched from its parent.
     if (parent.git && method === 'cli') {
       const g = parent.git;
@@ -788,8 +1029,8 @@ export class Engine extends EventEmitter {
   async _assignJob(lead, a, notes) {
     const roster = this._roster(lead);
     const want = String(a.to).trim().toLowerCase();
-    const worker = roster.find((m) => m.id === a.to || m.name.toLowerCase() === want);
-    if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => m.name).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
+    const worker = roster.find((m) => m.id === a.to || m.name.toLowerCase() === want || (m.title || '').toLowerCase() === want);
+    if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => `${m.name} (${m.title || m.role})`).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
     this._edge(lead.id, worker.id);
     this._msg(lead, { role: 'system', text: `Assigned to ${worker.name}: ${a.task.slice(0, 160)}${a.task.length > 160 ? '…' : ''}`, agentId: worker.id });
     const finish = (text) => { this.waitingOn.get(lead.id)?.delete(worker.id); return { kind: 'report', name: worker.name, text }; };
@@ -798,7 +1039,7 @@ export class Engine extends EventEmitter {
       const advisers = roster.filter((m) => m.id !== worker.id && m.consult !== false);
       const checks = await Promise.all(advisers.map((adv) => this._consult(worker, adv, a.task)));
       if (this.stopped.has(lead.id)) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
-      const summary = checks.map((c) => `- ${c.adviser.name}: ${c.verdict}${c.reason ? ' — ' + c.reason : ''}${c.prerequisites.length ? ` (prerequisites: ${c.prerequisites.join('; ')})` : ''}`);
+      const summary = checks.map((c) => `- ${c.adviser.name} (${c.adviser.title || c.adviser.role}): ${c.verdict}${c.reason ? ' — ' + c.reason : ''}${c.prerequisites.length ? ` (prerequisites: ${c.prerequisites.join('; ')})` : ''}`);
       this._msg(lead, { role: 'system', text: `Pre-check for ${worker.name}'s task:\n${summary.join('\n') || '(no one to consult)'}` });
       const blockers = checks.filter((c) => c.verdict === 'BLOCK');
       if (blockers.length) return finish(`NOT STARTED. ${blockers.map((c) => `${c.adviser.name} blocked it: ${c.reason || 'no reason given'}`).join(' ')}\nNothing was changed. Pre-check results:\n${summary.join('\n')}\nDecide whether to change the plan or ask the human.`);
@@ -888,12 +1129,17 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], errors = [];
+  reply = reply.replace(SECRET_RE, (_, body) => {
+    try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || !String(x.name || '').trim()) { errors.push('An apiary-secret block needs a "name".'); continue; } secrets.push({ name: String(x.name), why: String(x.why || '').slice(0, 300) }); } }
+    catch (err) { errors.push(`An apiary-secret block was not valid JSON (${err.message}).`); }
+    return '';
+  });
   reply = reply.replace(HIRE_RE, (_, body) => {
     try {
       for (const h of [].concat(JSON.parse(body.trim()))) {
-        if (!h || !String(h.name || '').trim()) { errors.push('An apiary-hire block needs a "name".'); continue; }
-        hires.push({ name: String(h.name), role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo });
+        if (!h || !String(h.title || h.name || '').trim()) { errors.push('An apiary-hire block needs a "title".'); continue; }
+        hires.push({ name: String(h.name || h.title), title: h.title, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo });
       }
     } catch (err) { errors.push(`An apiary-hire block was not valid JSON (${err.message}).`); }
     return '';
@@ -935,7 +1181,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
@@ -954,3 +1200,24 @@ export function parseVerdict(text) {
 }
 
 export function httpErr(status, message) { return Object.assign(new Error(message), { status }); }
+
+// Used when the AI cannot be reached or answers unusably: fixed questions and a team picked by keywords.
+const FALLBACK_QS = [
+  ['What do you mainly want help with?', ['My home network and servers', 'Websites and content', 'Software projects', 'Research and planning']],
+  ['What does your infrastructure look like (network, servers, hosting)?', ['Home lab / self-hosted', 'Cloud servers', 'Mostly laptops and cloud apps', 'Not much yet']],
+  ['Which tools and services do you already use?', ['Proxmox or Docker', 'WordPress', 'GitHub', 'Home automation']],
+  ['How much may the agents change without asking you?', ['Nothing: always ask', 'Small, reversible things', 'Most things, tell me after']],
+  ['How would you like to be kept informed?', ['A daily summary', 'Only when something needs me', 'Everything as it happens']],
+];
+export function fallbackInterview(answers, force = false) {
+  if (!force && answers.length < FALLBACK_QS.length) return { question: FALLBACK_QS[answers.length][0], choices: FALLBACK_QS[answers.length][1] };
+  const text = answers.map((a) => a.a).join(' ').toLowerCase();
+  const team = [];
+  const add = (title, department, role, reason) => team.push({ title, department, role, reason, instructions: '' });
+  if (/network|server|proxmox|docker|home ?lab|infra|hosting|vpn|firewall|dns/.test(text)) { add('Network Engineer', 'networking', 'Looks after the network, DNS, VPN and reverse proxies', 'You run your own network and servers'); add('Security Engineer', 'security', 'Reviews every change for risk before it happens', 'Infrastructure changes need a second pair of eyes'); }
+  if (/website|wordpress|content|blog|marketing/.test(text)) { add('Web Developer', 'engineering', 'Builds and maintains websites', 'You maintain websites'); add('Content Writer', 'marketing', 'Writes and edits content', 'Your sites need regular content'); }
+  if (/software|code|github|app|programming/.test(text)) add('Software Engineer', 'engineering', 'Writes, tests and reviews code', 'You work on software');
+  if (!team.length || /research|plan/.test(text)) add('Researcher', 'research', 'Finds facts and compares options', 'Good decisions need good information');
+  const overview = answers.map((a) => `**${a.q}** ${a.a}`).join('\n\n');
+  return { done: true, overview, team: team.slice(0, 6) };
+}

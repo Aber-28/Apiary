@@ -24,7 +24,7 @@ async function rest(token, pathname, init = {}) {
   return body;
 }
 // git over HTTPS with a token, without writing the token into .git/config
-const authArgs = (conn) => conn.method === 'token' && conn.token
+export const authArgs = (conn) => conn.method === 'token' && conn.token
   ? ['-c', `http.extraheader=Authorization: Basic ${Buffer.from(`x-access-token:${conn.token}`).toString('base64')}`] : [];
 const ghEnv = (conn) => (conn.method === 'token' && conn.token ? { GH_TOKEN: conn.token } : {});
 

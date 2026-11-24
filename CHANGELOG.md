@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.8.2
+- Updates now run `systemctl --user restart apiary` for you (the same command you would type), and only exit with an error code if that command fails
+
 ## 0.8.1
 - Fixed: the service restart after an update no longer depends on `systemctl` working from inside the service
 

@@ -852,7 +852,7 @@ function pageRepos() {
   const draw = async () => {
     const [repos, st] = await Promise.all([api('/api/repos'), api('/api/state').catch(() => null)]);
     const who = S.agents.filter((a) => a.member || !a.parentId).map((a) => ({ id: a.id, label: a.title ? `${a.name} (${a.title})` : a.kind === 'general' ? `${a.name} (CEO)` : `${a.name} (project lead)` }));
-    const src = h('input', { type: 'text', placeholder: 'owner/name, https://github.com/…, or a folder on this computer', 'aria-label': 'Repository address or folder' }), nm = h('input', { type: 'text', placeholder: 'Name (optional)', 'aria-label': 'Name' }), br = h('input', { type: 'text', placeholder: 'Branch (optional)', 'aria-label': 'Branch' }), nt = h('input', { type: 'text', placeholder: 'What should agents use it for?', 'aria-label': 'What it is for' });
+    const src = h('input', { type: 'text', placeholder: 'Paste a URL (https://github.com/owner/name), owner/name, or a folder', 'aria-label': 'Repository address or folder' }), nm = h('input', { type: 'text', placeholder: 'Name (optional)', 'aria-label': 'Name' }), br = h('input', { type: 'text', placeholder: 'Branch (optional)', 'aria-label': 'Branch' }), nt = h('input', { type: 'text', placeholder: 'What should agents use it for?', 'aria-label': 'What it is for' });
     const btn = h('button', { class: 'btn primary', onclick: guard(async () => { btn.disabled = true; btn.textContent = 'Adding…'; try { await api('/api/repos', 'POST', { source: src.value, name: nm.value, branch: br.value, notes: nt.value }); } finally { btn.disabled = false; btn.textContent = 'Add repository'; } draw(); }) }, 'Add repository');
     const card = (r) => {
       const save = guard(async (p) => { await api('/api/repos/' + r.id, 'PUT', p); });

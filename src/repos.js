@@ -9,6 +9,18 @@ import { git } from './git.js';
 import { github, validateSource, authArgs } from './github.js';
 
 const err = (status, message) => Object.assign(new Error(message), { status });
+// Accept the ways people copy a repository address: browser URLs (with /tree/branch or trailing slash), .git URLs, owner/name, git@ addresses.
+export function normalizeSource(raw) {
+  let t = String(raw || '').trim().replace(/\/+$/, '');
+  let branch = '';
+  const ssh = /^git@([^:\s]+):(.+?)(?:\.git)?$/.exec(t);
+  if (ssh) t = `https://${ssh[1]}/${ssh[2]}`;
+  t = t.replace(/^http:\/\//, 'https://').replace(/^https:\/\/www\.github\.com\//, 'https://github.com/');
+  const gh = /^https:\/\/github\.com\/([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:\/(?:tree|blob)\/([^/?#]+)[^?#]*)?(?:[?#].*)?$/.exec(t);
+  if (gh) { branch = gh[3] || ''; t = `${gh[1]}/${gh[2]}`; }   // owner/name goes through the connected GitHub login
+  else t = t.replace(/[?#].*$/, '').replace(/\/(?:-\/)?tree\/[^/]+.*$/, '');
+  return { source: t, branch };
+}
 const slugify = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'repo';
 
 export class Repos {
@@ -18,6 +30,7 @@ export class Repos {
   get(id) { const r = this.all[id]; if (!r) throw err(404, 'No such repository'); return r; }
 
   async add({ source, name = '', branch = '', notes = '' } = {}) {
+    const norm = normalizeSource(source); source = norm.source; branch = branch || norm.branch;
     const v = validateSource(source);
     if (v.kind === 'url' && /^https:\/\/[^/]*@/.test(v.spec)) throw err(400, 'Do not put a password or token in the address. Connect GitHub under Connections instead.');
     const label = String(name).trim().slice(0, 60) || (v.kind === 'path' ? path.basename(v.spec) : v.spec.replace(/^https?:\/\/[^/]+\//, '').replace(/\.git$/, ''));

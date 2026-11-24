@@ -481,6 +481,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return json(res, 201, await engine.createLead(b));
       }
       if (req.method === 'GET' && (r = m(/^\/api\/agents\/([\w-]+)\/mentionables$/))) return json(res, 200, engine.mentionables(r[1]));
+      if (req.method === 'POST' && url.pathname === '/api/agents/trust-all') return json(res, 200, engine.setTrustAll(await readBody(req)));
       if (req.method === 'POST' && (r = m(/^\/api\/agents\/([\w-]+)\/trust$/))) return json(res, 200, engine.setTrust(r[1], await readBody(req)));
       if ((r = m(/^\/api\/agents\/([\w-]+)\/messages$/))) {
         const id = r[1];

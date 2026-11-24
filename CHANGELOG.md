@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.31.0
+
+- **One slider for all agents.** The Access and safety page has an "All agents at once" slider above the list. Move it to set every agent to the same position, then move any single agent's slider to change just that one.
+
 ## 0.30.0
 
 - **Agents talk freely in any direction.** A message to a teammate no longer holds the sender's chat until the teammate has finished. The message is delivered, and the reply comes back as a new message in the sender's own chat. Before, Bruce's chat sat at "waiting for Neo" until Neo's turn ended, and anything you sent to Bruce queued behind it. A child agent is no longer refused for asking its parent.

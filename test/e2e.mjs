@@ -1416,6 +1416,14 @@ let orgIds;
     assert.deepEqual(await run(5, 'git status'), { asked: false, allowed: false }, 'a Deny rule beats level 5');
     for (const [c, r] of [['ls -la', 0], ['ls | grep x', 1], ['systemctl restart ssh', 2], ['rm -rf /tmp/x', 3]]) assert.equal(riskOf(c), r, c);
   }
+  { // the master trust slider sets every agent at once; single agents can still be moved afterwards
+    assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);
+    assert.equal(engine.setTrustAll({ level: 2 }).count, Object.keys(engine.agents).length);
+    assert.ok(Object.values(engine.agents).every((a) => a.trust === 2), 'every agent is at position 2');
+    engine.setTrust(Object.keys(engine.agents)[0], { level: 4 });
+    assert.equal(Object.values(engine.agents)[0].trust, 4, 'one agent moved on its own');
+    assert.equal(Object.values(engine.agents)[1].trust, 2, 'the others stay where the master put them');
+  }
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
 }

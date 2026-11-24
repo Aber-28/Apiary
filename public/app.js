@@ -1912,14 +1912,36 @@ function pageAccess() {
 // The six slider positions. Keep in step with TRUST_LEVELS in src/command-rules.js.
 const TRUST_LABELS = ['Ask me for every command', 'Read-only commands run; everything else asks', 'Simple commands run; chains, scripts and changes ask', 'Chains and scripts run too; changes and destructive commands ask', 'Everything runs except deleting, rebooting and destroying', 'Everything runs without asking'];
 function trustCard() {
+  const levels = S.agents.map((a) => Math.trunc(Number(a.trust)) || 0);
+  const common = levels.length && levels.every((l) => l === levels[0]) ? levels[0] : null;
+  const rows = [];   // one per agent, so the master slider can move them all
+  const paint = (label, level) => { label.textContent = `${level}: ${TRUST_LABELS[level]}`; };
+  const masterLabel = h('small', { class: 'hint', 'aria-live': 'polite' }, common !== null ? `All agents: ${common}: ${TRUST_LABELS[common]}` : 'Agents are at different positions. Move this to set them all.');
+  const refreshMaster = () => {
+    const vals = rows.map((x) => Number(x.slider.value));
+    if (vals.length && vals.every((v) => v === vals[0])) { master.value = String(vals[0]); masterLabel.textContent = `All agents: ${vals[0]}: ${TRUST_LABELS[vals[0]]}`; }
+    else masterLabel.textContent = 'Agents are at different positions. Move this to set them all.';
+  };
+  const master = h('input', { type: 'range', min: '0', max: '5', step: '1', value: String(common ?? 0), style: 'width:100%', 'aria-label': 'How much all agents may do without asking',
+    oninput: (e) => { masterLabel.textContent = `All agents: ${e.target.value}: ${TRUST_LABELS[Number(e.target.value)]}`; },
+    onchange: guard(async (e) => {
+      const level = Number(e.target.value);
+      const r = await api('/api/agents/trust-all', 'POST', { level });
+      for (const x of rows) { x.slider.value = String(level); paint(x.label, level); }
+      for (const a of S.agents) a.trust = level;
+      masterLabel.textContent = `All agents: ${level}: ${TRUST_LABELS[level]}`;
+      toast(`All ${r.count} agents: ${r.text}`);
+    }) });
   const card = h('div', { class: 'card', style: 'max-width:720px;margin-top:16px' }, h('h2', { style: 'margin-top:0' }, 'How much may each agent do without asking?'),
-    h('p', { class: 'hint' }, 'Move the slider all the way left and every command asks you. Move it all the way right and everything runs. Deny rules on Approval rules always win. An agent on Full access runs everything, whatever its slider says.'));
+    h('p', { class: 'hint' }, 'Move the slider all the way left and every command asks you. Move it all the way right and everything runs. Deny rules on Approval rules always win. An agent on Full access runs everything, whatever its slider says.'),
+    h('div', { style: 'margin:14px 0;padding-bottom:12px;border-bottom:1px solid var(--line, #ddd)' }, h('b', {}, 'All agents at once'), master, masterLabel));
   for (const a of S.agents) {
     const level = Math.trunc(Number(a.trust)) || 0;
     const label = h('small', { class: 'hint', 'aria-live': 'polite' }, `${level}: ${TRUST_LABELS[level]}`);
     const slider = h('input', { type: 'range', min: '0', max: '5', step: '1', value: String(level), 'aria-label': `How much ${a.name} may do without asking`, style: 'width:100%',
       oninput: (e) => { label.textContent = `${e.target.value}: ${TRUST_LABELS[Number(e.target.value)]}`; },
-      onchange: guard(async (e) => { const r = await api(`/api/agents/${a.id}/trust`, 'POST', { level: Number(e.target.value) }); a.trust = r.trust; toast(`${a.name}: ${r.text}`); }) });
+      onchange: guard(async (e) => { const r = await api(`/api/agents/${a.id}/trust`, 'POST', { level: Number(e.target.value) }); a.trust = r.trust; toast(`${a.name}: ${r.text}`); refreshMaster(); }) });
+    rows.push({ slider, label });
     card.append(h('div', { style: 'margin:14px 0' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, a.name), a.title ? h('small', { class: 'hint' }, a.title) : null,
       a.access === 'full' ? h('span', { class: 'pill work' }, 'Full access') : null), slider, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('small', { class: 'hint' }, 'Ask me'), h('small', { class: 'hint' }, 'Run everything')), label));
   }

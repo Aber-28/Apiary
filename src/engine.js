@@ -1004,13 +1004,29 @@ export class Engine extends EventEmitter {
   setTrust(id, b = {}) {
     const agent = this.agents[id];
     if (!agent) throw httpErr(404, 'No such agent');
+    const level = this._trustLevel(b);
+    this._applyTrust(agent, level);
+    this.audit.add('system', { actor: 'You', project: this._pname(agent), action: `set how much ${agent.name} may do without asking`, detail: TRUST_LEVELS[level] });
+    this.store.save();
+    return { id, trust: level, text: TRUST_LEVELS[level] };
+  }
+  // The master slider: sets every agent to the same position. Each agent can then be moved on its own.
+  setTrustAll(b = {}) {
+    const level = this._trustLevel(b);
+    const agents = Object.values(this.agents);
+    for (const a of agents) this._applyTrust(a, level);
+    this.audit.add('system', { actor: 'You', action: `set how much all ${agents.length} agents may do without asking`, detail: TRUST_LEVELS[level] });
+    this.store.save();
+    return { trust: level, count: agents.length, text: TRUST_LEVELS[level] };
+  }
+  _trustLevel(b) {
     const level = Number(b.level);
     if (!Number.isInteger(level) || level < 0 || level > 5) throw httpErr(400, 'The level must be a whole number from 0 to 5');
+    return level;
+  }
+  _applyTrust(agent, level) {
     agent.trust = level;
-    this.store.save();
-    this.audit.add('system', { actor: 'You', project: this._pname(agent), action: `set how much ${agent.name} may do without asking`, detail: TRUST_LEVELS[level] });
     this.emit('event', { type: 'agent', agent });
-    return { id, trust: level, text: TRUST_LEVELS[level] };
   }
   async requestCommandApproval(token, body = {}) {
     const run = this.approvalRuns.get(token);

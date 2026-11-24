@@ -148,7 +148,7 @@ function renderSide() {
   });
   side.replaceChildren(
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
-    newBtn, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
+    newBtn, S.onboardingDone && S.account && !S.account.exists ? h('a', { href: '#/signin', class: 'signin-nag', role: 'alert' }, 'No sign-in yet. Anyone who can reach this page can use it. Create one now') : null, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
     h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
     workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
 }
@@ -1832,10 +1832,11 @@ async function openSetup(startAt = 0) {
   const W = { step: startAt, iv: { answers: [], cur: null, busy: false, result: null, err: '' }, ceoName: S.agents.find((a) => a.kind === 'general' && S.orgDone)?.name || 'Captain Atlas', meet: { frequency: S.meeting?.frequency && S.meeting.frequency !== 'off' ? S.meeting.frequency : 'daily', time: S.meeting?.time || '00:00', weekday: S.meeting?.weekday ?? 0 }, tests: {}, models: {}, pick: {}, other: {}, defAI: S.defaultProvider, svc: null, svcWant: true, startNow: false, github: null };
   const root = h('div', { class: 'wizard', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Set up Apiary' });
   document.body.append(root);
-  const NAMES = ['Welcome', 'Connect your AI', 'Default models', 'Your CEO', 'Your team', 'Meetings', 'GitHub', 'Secrets', 'Startup', 'All set'];
+  const NAMES = ['Welcome', 'Connect your AI', 'Default models', 'Your CEO', 'Your team', 'Meetings', 'GitHub', 'Secrets', 'Sign-in', 'Startup', 'All set'];
   const conn = (id) => S.conns.find((c) => c.id === id);
   const okAI = () => ['claude', 'codex'].filter((id) => W.tests[id]?.ok);
   const finish = guard(async () => {
+    if (!S.account?.exists) { go(8); throw new Error('Create your sign-in first.'); }
     await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) });
     S.onboardingDone = true; if (W.defAI) S.defaultProvider = W.defAI;
     root.remove(); await loadState(); await refreshConns(); location.hash = '#/chat'; route();
@@ -1878,7 +1879,7 @@ async function openSetup(startAt = 0) {
   const steps = [
     // 0 Welcome
     () => h('div', {}, h('h1', {}, 'Welcome to Apiary'), h('p', { class: 'sub-title' }, 'A short setup: connect your AI, create your CEO and team through a few questions, choose when your team meets, and decide whether Apiary starts automatically.'),
-      h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: guard(async () => { await api('/api/settings', 'PUT', { onboardingDone: true }); S.onboardingDone = true; root.remove(); toast('You can run setup again from Settings → Setup guide'); if (cur() === '#/setup') location.hash = '#/projects'; }) }, 'Skip for now'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(1) }, 'Start setup'))),
+      h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: guard(async () => { if (!S.account?.exists) { go(8); toast('One thing first: create your sign-in. The rest of setup can wait.', true); return; } await api('/api/settings', 'PUT', { onboardingDone: true }); S.onboardingDone = true; root.remove(); toast('You can run setup again from Settings → Setup guide'); if (cur() === '#/setup') location.hash = '#/projects'; }) }, 'Skip for now'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(1) }, 'Start setup'))),
     // 1 Connect AI
     () => {
       const panels = ['claude', 'codex'].map((id) => connPanel(id, () => { cont.disabled = !okAI().length; }));
@@ -2004,7 +2005,22 @@ async function openSetup(startAt = 0) {
             h('button', { class: 'btn primary', onclick: guard(async () => { err.textContent = ''; if (pass.value !== again.value) { err.textContent = 'The two passphrases differ.'; return; } try { await api('/api/vault/init', 'POST', { passphrase: pass.value }); W.vaultMade = true; await loadState(); draw(); } catch (e) { err.textContent = e.message; } }) }, 'Create the vault')),
         h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(6) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: () => go(8) }, made ? 'Continue' : 'Skip for now')));
     },
-    // 8 Startup
+    // 8 Sign-in (required: set before anything else can end the setup)
+    () => {
+      const have = !!S.account?.exists, f = (label, type, ac) => { const i = h('input', { type, autocomplete: ac, spellcheck: 'false', autocapitalize: 'none' }); return [h('label', { class: 'f' }, label, i), i]; };
+      const [uL, u] = f('Username', 'text', 'username'), [pL, pw] = f('Password', 'password', 'new-password'), [qL, pw2] = f('Type the password again', 'password', 'new-password');
+      const next = h('button', { class: 'btn primary big', disabled: !have, onclick: () => go(9) }, 'Continue');
+      const make = guard(async () => {
+        if (pw.value !== pw2.value) throw new Error('The two passwords are not the same.');
+        const r = await api('/api/account', 'POST', { username: u.value, password: pw.value });
+        S.account = r; renderSignOut(); W.step = 8; draw(); toast('Sign-in created.');
+      });
+      return h('div', {}, h('h1', {}, 'Create your sign-in'), h('p', { class: 'sub-title' }, 'A username and password so only you can open Apiary, from this computer or any other on your network. This step is required.'),
+        h('div', { class: 'card wiz-card' }, have ? h('p', {}, h('span', { class: 'pill ok' }, 'Created'), ' You will sign in as ', h('b', {}, S.account.username), '. You can change the password later under Security > Sign-in.')
+          : h('form', { class: 'stack', onsubmit: (e) => { e.preventDefault(); make(); } }, uL, pL, qL, h('p', { class: 'hint' }, 'At least 10 characters. Three or four random words works well. Forgot it later? On this machine run: apiary user set <name>'), h('button', { class: 'btn primary', type: 'submit' }, 'Create sign-in'))),
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(7) }, 'Back'), h('span', { style: 'flex:1' }), next));
+    },
+    // 9 Startup
     () => {
       const box = h('div', {});
       const draw = () => {
@@ -2021,20 +2037,20 @@ async function openSetup(startAt = 0) {
       api('/api/service').then((s) => { W.svc = s; W.svcWant = s.supported ? (s.enabled || W.svcWant) : false; draw(); }).catch((e) => { W.svc = { supported: false, reason: e.message }; draw(); });
       draw();
       return h('div', {}, h('h1', {}, 'Run Apiary automatically?'), h('p', { class: 'sub-title' }, 'Apiary can start by itself whenever you log in, so it is always ready at its address.'), box,
-        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(7) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(8) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: guard(async () => {
           const sv = W.svc;
           if (sv?.supported) {
             if (W.svcWant && !sv.enabled) {
-              if (W.startNow) { await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) }); }
+              if (W.startNow && S.account?.exists) { await api('/api/settings', 'PUT', { onboardingDone: true, ...(W.defAI ? { defaultProvider: W.defAI } : {}) }); }
               await api('/api/service', 'POST', { enabled: true, startNow: W.startNow });
               if (W.startNow) { root.replaceChildren(h('div', { class: 'wiz-body' }, h('h1', {}, 'Restarting as a service…'), h('p', { class: 'sub-title' }, 'This page will reload in a few seconds.'))); await settle(3500); for (let i = 0; i < 20; i++) { try { await api('/api/state'); break; } catch { await settle(1000); } } location.hash = '#/projects'; location.reload(); return; }
               W.svc = await api('/api/service');
             } else if (!W.svcWant && sv.enabled) W.svc = await api('/api/service', 'POST', { enabled: false });
           }
-          go(9);
+          go(10);
         }) }, 'Continue')));
     },
-    // 9 Done
+    // 10 Done
     () => {
       const rows = [];
       for (const id of ['claude', 'codex']) { const c = conn(id); rows.push(h('li', {}, h('b', {}, CINFO[id].title), W.tests[id]?.ok ? ` connected (${c.method === 'cli' ? 'terminal' : 'web'}), model: ${c.api.model || 'default'}${W.defAI === id ? ', leads new projects' : ''}` : ' not connected yet')); }
@@ -2043,13 +2059,13 @@ async function openSetup(startAt = 0) {
       rows.push(h('li', {}, h('b', {}, 'GitHub'), W.tests.github?.ok ? ` connected${W.tests.github.detail ? ': ' + W.tests.github.detail : ''}` : ' not connected (optional)'));
       rows.push(h('li', {}, h('b', {}, 'Startup'), W.svc?.enabled ? ' starts automatically at login' : ' you start it yourself'));
       return h('div', {}, h('h1', {}, 'You are all set'), h('p', { class: 'sub-title' }, 'You can change any of this later under Connections and Settings.'), h('div', { class: 'card wiz-card' }, h('ul', { class: 'summary' }, rows)),
-        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(8) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: finish }, 'Open Apiary')));
+        h('div', { class: 'wiz-actions' }, h('button', { class: 'btn', onclick: () => go(9) }, 'Back'), h('span', { style: 'flex:1' }), h('button', { class: 'btn primary big', onclick: finish }, 'Open Apiary')));
     },
   ];
   function go(n) { W.step = n; draw(); }
   function draw() {
     root.replaceChildren(h('div', { class: 'wiz-body' },
-      W.step > 0 && W.step < 9 ? h('ol', { class: 'stepper', 'aria-label': 'Progress' }, NAMES.slice(1, 9).map((n, i) => h('li', { 'aria-current': W.step === i + 1 ? 'step' : null, class: W.step > i + 1 ? 'done' : '' }, n))) : null,
+      W.step > 0 && W.step < 10 ? h('ol', { class: 'stepper', 'aria-label': 'Progress' }, NAMES.slice(1, 10).map((n, i) => h('li', { 'aria-current': W.step === i + 1 ? 'step' : null, class: W.step > i + 1 ? 'done' : '' }, n))) : null,
       steps[W.step]()));
     root.scrollTop = 0;
   }

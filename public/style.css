@@ -236,3 +236,5 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .nav-group.nested>button .chev{opacity:.7}.nav-group.nested.has-active>button{color:var(--text);font-weight:600}
 .sub .sub{margin:0 0 4px 12px}
 .doc-top,.live{white-space:nowrap}@media (max-width:1250px){.live{display:none}}
+
+.signin-nag{display:block;margin:8px 0;padding:8px 10px;border-radius:8px;background:var(--err-soft);color:var(--err);font-size:11.5px;font-weight:600;text-decoration:none}

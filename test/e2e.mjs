@@ -1801,5 +1801,6 @@ let orgIds;
 }
 
 { const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /navLeaves/); assert.match(a, /label: 'Security'/); assert.match(a, /id: 'reuse'/); }
+{ const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /Create your sign-in/); assert.match(a, /signin-nag/); assert.ok(a.indexOf('// 8 Sign-in') < a.indexOf('// 9 Startup'), 'sign-in comes before startup'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

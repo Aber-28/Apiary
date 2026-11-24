@@ -25,3 +25,7 @@ On the machine running Apiary: `apiary user set <name>` (or `apiary user remove`
 ## Plain http
 
 Apiary speaks plain http. At home that is usually fine, but the password is not encrypted on the way. Outside a network you trust, reach it through an SSH tunnel (`ssh -L 7777:127.0.0.1:7777 you@server`), Tailscale, or an https reverse proxy (Apiary then marks the cookie Secure when the proxy sends `X-Forwarded-Proto: https`).
+
+## During setup
+
+The setup wizard has a required step, **Create your sign-in**, before the Startup step. Setup cannot be finished or skipped until a username and password exist. If an install has none, a red reminder in the sidebar links to Security > Sign-in.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.1
+
+- **Setup wizard now requires a sign-in.** A new "Create your sign-in" step comes before Startup, and Skip, Open Apiary and the automatic restart all send you back to it until a username and password exist. Existing installs without a sign-in see a red reminder in the sidebar.
+
 ## 0.23.0
 
 - **Menu reorganised** into a tree with folders inside headings (Workspace > Plan and reuse, Agents > Library and Knowledge, Connections > AI tools, Settings > Data and System). New **Security** heading for Sign-in, Secrets vault, Approval rules, Access and safety and Audit log. Counts show on closed headings and folders, and the breadcrumb follows the menu.

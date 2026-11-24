@@ -18,6 +18,7 @@ Apiary needs no config file. Everything is set in the interface or with environm
 
 | Path | Contents |
 | --- | --- |
+| `~/.apiary/memory.json` | Agent memory: notes and task history (mode 0600) |
 | `~/.apiary/state.json` | Projects, chats, logs, saved agents, settings, keys (mode 0600) |
 | `~/.apiary/workspaces/` | Folders for projects without a repository |
 | `~/.apiary/repos/` | Repositories cloned from GitHub |

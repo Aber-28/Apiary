@@ -27,3 +27,12 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `GET/PUT /api/settings` | Delegation limits, default for approvals, `defaultProvider`, `onboardingDone` |
 | `GET /api/connections/:id/models` | Models to offer as the default (from your account when a key is saved, else suggestions) |
 | `GET /api/service`, `POST /api/service` | Status of the auto-start service; body `enabled`, `startNow` |
+| `GET /api/chat` | The main chat agent (created on first use) |
+| `GET /api/projects/:id/org` | Organisation chart of a project (lead, departments, who reports to whom) |
+| `GET /api/agents/:id/files?path=` | List a folder of the project |
+| `GET/PUT/DELETE /api/agents/:id/file?path=` | Read (`raw=1` to download), save (body `content`) or delete a project file |
+| `GET/POST /api/teams`, `PUT/DELETE /api/teams/:id` | Teams (a lead plus members); `POST /api/agents` accepts `team` |
+| `GET/POST /api/memory`, `DELETE /api/memory/:id` | Search (`q`, `agent`, `kind`) and add notes, forget items |
+| `GET /api/memory/preview/:agentId?q=` | The MEMORY text an agent would be given |
+| `PUT /api/settings` | also accepts `memory` (true/false) |
+

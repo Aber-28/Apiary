@@ -86,7 +86,7 @@ export function createServer(engine) {
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
@@ -94,6 +94,7 @@ export function createServer(engine) {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
+          if (b.memory !== undefined) engine.setMemoryEnabled(b.memory);
           engine.setSettings(b);
           return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider });
         }
@@ -121,7 +122,7 @@ export function createServer(engine) {
           json(res, 200, st);
           if (b.enabled && b.startNow && process.env.APIARY_NO_EXIT !== '1') {
             // hand over to the service: restart it shortly, after this process has released the port
-            setTimeout(() => { engine.store.flush(); spawn('sh', ['-c', 'sleep 1; systemctl --user restart apiary'], { detached: true, stdio: 'ignore' }).unref(); process.exit(0); }, 400);
+            setTimeout(() => { engine.store.flush(); engine.memory.flush(); spawn('sh', ['-c', 'sleep 1; systemctl --user restart apiary'], { detached: true, stdio: 'ignore' }).unref(); process.exit(0); }, 400);
           }
           return;
         }
@@ -137,6 +138,53 @@ export function createServer(engine) {
         if (!r && req.method === 'POST') return json(res, 201, engine.saveDef(await readBody(req)));
         if (r && req.method === 'PUT') { if (!engine.defs[r[1]]) throw Object.assign(new Error('No such saved agent'), { status: 404 }); return json(res, 200, engine.saveDef(await readBody(req), r[1])); }
         if (r && req.method === 'DELETE') { engine.removeDef(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if (url.pathname === '/api/teams' || (r = m(/^\/api\/teams\/([\w-]+)$/))) {
+        if (!r && req.method === 'GET') return json(res, 200, Object.values(engine.teams));
+        if (!r && req.method === 'POST') return json(res, 201, engine.saveTeam(await readBody(req)));
+        if (r && req.method === 'PUT') { if (!engine.teams[r[1]]) throw Object.assign(new Error('No such team'), { status: 404 }); return json(res, 200, engine.saveTeam(await readBody(req), r[1])); }
+        if (r && req.method === 'DELETE') { engine.removeTeam(r[1]); return json(res, 200, { ok: true }); }
+      }
+      if (url.pathname === '/api/memory' && req.method === 'GET') {
+        const q = url.searchParams, mem = engine.memory;
+        const items = mem.search(q.get('q') || '', { agent: q.get('agent') || undefined, project: q.get('project') || undefined, kind: q.get('kind') || undefined, limit: 300 });
+        const keys = [...new Set(mem.items.filter((i) => i.agent).map((i) => i.agent))].sort();
+        return json(res, 200, { enabled: engine.memoryEnabled, total: mem.items.length, items, agents: keys });
+      }
+      if (url.pathname === '/api/memory' && req.method === 'POST') {
+        const b = await readBody(req);
+        if (!String(b.text || '').trim()) throw Object.assign(new Error('Write what should be remembered'), { status: 400 });
+        const scope = ['global', 'project', 'agent'].includes(b.scope) ? b.scope : 'global';
+        const ref = b.agentId ? engine.agents[b.agentId] : null;
+        if (scope !== 'global' && !ref) throw Object.assign(new Error('Pick an agent or project for this note'), { status: 400 });
+        return json(res, 201, engine.memory.add({ kind: 'note', text: b.text, who: 'You', agent: scope === 'agent' ? engine._mkey(ref) : null, project: scope === 'project' ? engine._pkey(ref) : null }));
+      }
+      if ((r = m(/^\/api\/memory\/preview\/([\w-]+)$/)) && req.method === 'GET') {
+        if (!engine.agents[r[1]]) throw Object.assign(new Error('No such agent'), { status: 404 });
+        return json(res, 200, { text: engine.memoryPreview(r[1], url.searchParams.get('q') || '') });
+      }
+      if ((r = m(/^\/api\/memory\/([\w-]+)$/)) && req.method === 'DELETE') {
+        if (!engine.memory.remove(r[1])) throw Object.assign(new Error('No such memory'), { status: 404 });
+        return json(res, 200, { ok: true });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/chat') return json(res, 200, await engine.general());
+      if ((r = m(/^\/api\/projects\/([\w-]+)\/org$/)) && req.method === 'GET') return json(res, 200, engine.org(r[1]));
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/files$/)) && req.method === 'GET') return json(res, 200, engine.files(r[1], url.searchParams.get('path') || ''));
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/file$/))) {
+        const rel = url.searchParams.get('path') || '';
+        if (req.method === 'GET') {
+          const f = engine.readFile(r[1], rel);
+          const buf = readFileSync(f.full);
+          const binary = buf.subarray(0, 8000).includes(0);
+          if (url.searchParams.get('raw')) {
+            res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-disposition': `attachment; filename="${f.name.replace(/[^\w.-]/g, '_')}"`, 'x-content-type-options': 'nosniff' });
+            return res.end(buf);
+          }
+          if (binary || f.size > 1_000_000) return json(res, 200, { name: f.name, size: f.size, binary: true });
+          return json(res, 200, { name: f.name, size: f.size, content: buf.toString('utf8') });
+        }
+        if (req.method === 'PUT') { const b = await readBody(req); return json(res, 200, engine.writeFile(r[1], rel, b.content)); }
+        if (req.method === 'DELETE') { engine.deleteFile(r[1], rel); return json(res, 200, { ok: true }); }
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });
@@ -206,7 +254,7 @@ export function main(links = []) {
     if (links.length) { console.log('\nOpen it from another device on your network with:'); for (const l of links) console.log('  ' + l); console.log('Keep these links private: anyone who has one can run commands as you.\n'); }
     console.log('Connected:', engine.available.map((p) => `${p.id} (${p.method})`).join(', ') || 'nothing yet');
   });
-  const bye = () => { store.flush(); process.exit(0); };
+  const bye = () => { store.flush(); engine.memory.flush(); process.exit(0); };
   process.on('SIGINT', bye); process.on('SIGTERM', bye);
 }
 

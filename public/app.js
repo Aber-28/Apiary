@@ -708,7 +708,7 @@ function pageSecrets() {
       const how = h('select', { 'aria-label': 'Kind of access' }, GRANTS.map(([k, t]) => h('option', { value: k }, t)));
       const add = h('div', { class: 'kv', style: 'margin-top:8px;gap:8px;flex-wrap:wrap' }, who, how,
         h('button', { class: 'btn primary', onclick: () => { const ag = without.find((q) => q.key === who.value); if (!ag) return toast('Choose an agent first.', true); save({ ...asg, [ag.key]: { label: ag.label, grant: how.value } }); } }, 'Add'));
-      const picks = [current.length ? current : h('p', { class: 'hint' }, 'No agent can use this yet.'), without.length ? add : (v.eligible.length ? h('p', { class: 'hint' }, 'Every agent already has access.') : h('p', { class: 'hint' }, 'No agents yet.'))];
+      const picks = [...(current.length ? current : [h('p', { class: 'hint' }, 'No agent can use this yet.')]), without.length ? add : (v.eligible.length ? h('p', { class: 'hint' }, 'Every agent already has access.') : h('p', { class: 'hint' }, 'No agents yet.'))];
       const EV = 'APIARY_SECRET_' + x.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '');
       const usage = x.type === 'ssh' ? `Agents use it with: apiary-ssh "${x.name}" -- command` : x.type === 'login' ? `Agents get it as $${EV} and $${EV}_USER` : `Agents get it as $${EV}`;
       const detail = x.type === 'ssh' ? `${x.username || '?'}@${x.host}:${x.port} · ${x.auth === 'key' ? 'private key' : 'password'}` : x.type === 'login' && x.username ? `Username: ${x.username}` : '';

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.2
+
+- Fixed the Secrets vault showing `[object HTMLDivElement]` instead of the agent's name under "Who may use it". Each agent that has access is listed with its access level and a **Remove** button.
+
 ## 0.23.1
 
 - **Setup wizard now requires a sign-in.** A new "Create your sign-in" step comes before Startup, and Skip, Open Apiary and the automatic restart all send you back to it until a username and password exist. Existing installs without a sign-in see a red reminder in the sidebar.

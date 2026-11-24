@@ -98,7 +98,7 @@ applyTheme(document.documentElement.className || 'dark');
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
@@ -147,6 +147,7 @@ const ROUTES = [
   [/^#\/backups$/, () => pageBackups()],
   [/^#\/audit$/, () => pageAudit()],
   [/^#\/health$/, () => pageHealth()],
+  [/^#\/project-templates$/, () => pageProjectTemplates()],
   [/^#\/telegram$/, () => pageTelegram()],
   [/^#\/reset$/, () => pageReset()],
   [/^#\/updates$/, () => pageUpdates()],
@@ -371,6 +372,7 @@ function pageProject(leadId, general = false) {
       a.git ? h('button', { class: 'btn', onclick: () => openReview(a) }, 'Review changes') : null,
       a.method !== 'api' ? h('button', { class: 'btn', onclick: guard(() => takeOver(a)) }, 'Take over') : null,
       l.git && a.id === l.id ? (l.git.prUrl ? h('a', { class: 'btn', href: l.git.prUrl, target: '_blank', rel: 'noopener' }, 'View pull request') : h('button', { class: 'btn', onclick: () => openPrDialog(l) }, 'Open pull request')) : null,
+      a.id === l.id && !general ? h('button', { class: 'btn', title: 'Keep this goal, plan and team to start similar projects', onclick: () => openSaveTemplate(l) }, 'Save as template') : null,
       a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents for good? To keep everything, set the stage to Closed instead. Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
   };
   const TABS = { chat: 'Chat', plan: 'Plan', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
@@ -1345,6 +1347,56 @@ async function pageTelegram() {
   await draw();
   page = { shows: () => true, update: (e) => e.type === 'telegram' && draw() };
 }
+function openSaveTemplate(p) {
+  const name = h('input', { type: 'text', value: p.name, maxlength: '60', 'aria-label': 'Template name' }), desc = h('input', { type: 'text', maxlength: '300', placeholder: 'Optional: what is it for?', 'aria-label': 'Description' });
+  const d = dlgOpen('Save as template', h('p', { class: 'hint' }, 'Keeps the goal, the plan phases and the team roles. Passwords, secrets, folders and specific servers (addresses, links, device names) are never saved.'),
+    h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Description', desc),
+    h('div', { class: 'formrow' }, h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { const t = await api('/api/templates', 'POST', { projectId: p.id, name: name.value, description: desc.value }); d.close(); toast(t.removed ? `Template saved. ${t.removed} specific detail${t.removed === 1 ? ' was' : 's were'} removed.` : 'Template saved'); })(); } }, 'Save')));
+}
+async function pageProjectTemplates() {
+  crumbs('Workspace', 'Project templates');
+  const draw = async () => {
+    let list; try { list = await api('/api/templates'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; }
+    const start = (t) => {
+      const name = h('input', { type: 'text', value: t.name, maxlength: '48', 'aria-label': 'Project name' }), folder = h('input', { type: 'text', placeholder: 'Optional: a folder on this computer, for example /home/you/projects/app', 'aria-label': 'Folder' });
+      const ps = S.providers.filter((p) => p.id !== 'mock' || S.providers.length === 1), prov = h('select', { 'aria-label': 'AI' }, ps.map((p) => h('option', { value: p.id, selected: p.id === S.defaultProvider }, p.label)));
+      const d = dlgOpen(`Start from "${t.name}"`, h('label', { class: 'f' }, 'Project name', name), h('label', { class: 'f' }, 'AI to use', prov), h('label', { class: 'f' }, 'Folder', folder),
+        h('p', { class: 'hint' }, `${t.members.length} team member${t.members.length === 1 ? '' : 's'} and ${t.phases.length} phase${t.phases.length === 1 ? '' : 's'} will be set up. Nothing is shared with the new project except what is in the template.`),
+        h('div', { class: 'formrow' }, h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { e.target.disabled = true; const a = await api(`/api/templates/${t.id}/start`, 'POST', { name: name.value, provider: prov.value, cwd: folder.value.trim() || undefined }); d.close(); location.hash = `#/project/${a.id}`; })().finally(() => { e.target.disabled = false; }); } }, 'Start project')));
+    };
+    const edit = (t) => {
+      const name = h('input', { type: 'text', value: t.name }), desc = h('input', { type: 'text', value: t.description || '' }), goal = h('textarea', { rows: '4' }); goal.value = t.goal || '';
+      const d = dlgOpen('Edit template', h('label', { class: 'f' }, 'Name', name), h('label', { class: 'f' }, 'Description', desc), h('label', { class: 'f' }, 'Goal', goal),
+        h('div', { class: 'formrow' }, h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api(`/api/templates/${t.id}`, 'PUT', { name: name.value, description: desc.value, goal: goal.value }); d.close(); draw(); })(); } }, 'Save')));
+    };
+    view.replaceChildren(h('h1', {}, 'Project templates'), h('p', { class: 'sub-title' }, 'Save a setup you repeat and start new projects from it. A template keeps the goal, plan phases and team roles, never passwords or specific servers. To make one, open a project and press Save as template.'),
+      list.length ? h('div', { class: 'grid' }, list.map((t) => h('div', { class: 'card' }, h('h2', { style: 'margin:0 0 4px' }, t.name), t.description ? h('p', { class: 'hint' }, t.description) : null,
+        h('p', { class: 'hint' }, `${t.phases.length} phase${t.phases.length === 1 ? '' : 's'} · ${t.members.length} team member${t.members.length === 1 ? '' : 's'}${t.fromProject ? ' · from ' + t.fromProject : ''}`),
+        t.phases.length ? h('p', { class: 'hint' }, t.phases.map((p) => p.title).join(' → ')) : null,
+        h('div', { class: 'formrow' }, h('button', { class: 'btn primary', onclick: () => start(t) }, 'Start project'), h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit'),
+          h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete the template "${t.name}"? Projects already made from it are not affected.`)) return; await api(`/api/templates/${t.id}`, 'DELETE'); draw(); }) }, 'Delete'))))) : h('div', { class: 'card empty' }, 'No templates yet. Open a project that has a plan and a team, and press Save as template.'));
+  };
+  await draw(); page = { shows: () => false, update: () => {} };
+}
+// ---------- global search ----------
+(function globalSearchBox() {
+  const form = $('#gsearch'), input = $('#gq'), box = $('#gres'); if (!form) return;
+  let seq = 0, first = null;
+  const close = () => { box.hidden = true; };
+  const run = debounce(async () => {
+    const q = input.value.trim(), my = ++seq; if (!q) { close(); return; }
+    let r; try { r = await api('/api/search?q=' + encodeURIComponent(q)); } catch { return; }
+    if (my !== seq) return;
+    first = r.groups[0]?.items[0] || null;
+    box.replaceChildren(...(r.groups.length ? r.groups.map((g) => h('div', { class: 'gg' }, h('div', { class: 'gh' }, `${g.label}${g.total > g.items.length ? ` (${g.total})` : ''}`), ...g.items.map((it) => h('a', { class: 'gi', href: it.href, onclick: () => { close(); input.value = ''; } }, h('b', {}, it.title), it.sub ? h('small', {}, it.sub) : null)))) : [h('div', { class: 'gh' }, 'Nothing found')]), ...(r.note ? [h('div', { class: 'gh' }, r.note)] : []));
+    box.hidden = false;
+  }, 220);
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Escape') { close(); input.blur(); } });
+  form.addEventListener('submit', (e) => { e.preventDefault(); if (first) { location.hash = first.href; close(); input.value = ''; } });
+  document.addEventListener('click', (e) => { if (!form.contains(e.target)) close(); });
+  document.addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); input.focus(); input.select(); } });
+})();
 async function pageHealth() {
   crumbs('Infrastructure', 'Health');
   const draw = async (st) => {

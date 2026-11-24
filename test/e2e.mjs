@@ -1657,5 +1657,53 @@ let orgIds;
   await new Promise((r) => setTimeout(r, 1300)); tg.close();
 }
 
+// ---- project templates and global search ----
+{
+  const { scrub } = await import('../src/templates.js');
+  await call('/api/infra', 'POST', { name: 'Homelab Proxmox', type: 'server', address: '10.0.0.77' });
+  const src = await engine.createLead({ name: 'Website relaunch', provider: 'mock' });
+  await engine._makeMember(src, { title: 'Web designer', role: 'Designs pages', department: 'design', instructions: 'Log in with password: hunter2 to root@10.0.0.77 and check https://intranet.example.com/admin', provider: 'mock', reportsTo: src.id });
+  src.plan = { goal: 'Relaunch the website on Homelab Proxmox', createdAt: 1, updatedAt: 1, phases: [{ id: 1, title: 'Design', goal: 'Pages', status: 'done', steps: [{ text: 'Mock-ups', done: true }, { text: 'Deploy to 10.0.0.77', done: true }] }, { id: 2, title: 'Build', goal: 'Code', status: 'active', steps: [{ text: 'Write pages', done: false }] }] };
+  // scrub
+  const sc = scrub(engine, 'ssh root@10.0.0.77 then open http://x.test/a, Homelab Proxmox token=abc123'); assert.ok(!/10\.0\.0\.77|x\.test|abc123|Homelab/.test(sc.text) && sc.removed >= 4, sc.text);
+  assert.equal((await call('/api/templates', 'POST', { projectId: 'nope', name: 'x' })).status, 404);
+  const sv = await call('/api/templates', 'POST', { projectId: src.id, name: 'Website', description: 'Relaunch a site' }); assert.equal(sv.status, 201);
+  const tpl = sv.body; assert.ok(tpl.removed >= 3, 'specific details were removed');
+  const raw = JSON.stringify(tpl); assert.ok(!/hunter2|10\.0\.0\.77|intranet\.example|Homelab/.test(raw), 'no passwords or servers in the template: ' + raw);
+  assert.deepEqual(tpl.phases.map((p) => p.title), ['Design', 'Build']); assert.ok(tpl.phases.every((p) => p.steps.length), 'steps kept');
+  assert.equal(tpl.members.length, 1); assert.equal((await call('/api/templates', 'POST', { projectId: src.id, name: 'website' })).status, 409, 'duplicate name');
+  assert.ok(!('cwd' in tpl) && !('source' in tpl), 'no folders');
+  // edit and list
+  assert.equal((await call('/api/templates/' + tpl.id, 'PUT', { description: 'Relaunch a site at 192.168.1.5' })).body.description, 'Relaunch a site at <server>');
+  assert.equal((await call('/api/templates')).body.length, 1);
+  // start
+  assert.equal((await call(`/api/templates/${tpl.id}/start`, 'POST', { name: 'Shop relaunch' })).status, 400, 'provider required');
+  const st = await call(`/api/templates/${tpl.id}/start`, 'POST', { name: 'Shop relaunch', provider: 'mock' }); assert.equal(st.status, 201);
+  const np = engine.agents[st.body.id]; assert.equal(np.name, 'Shop relaunch'); assert.notEqual(np.id, src.id);
+  assert.deepEqual(np.plan.phases.map((p) => [p.title, p.status === 'done']), [['Design', false], ['Build', false]], 'plan starts fresh');
+  assert.ok(np.plan.phases.every((p) => p.steps.every((x) => !x.done)));
+  assert.equal(engine._roster(np).length, 1); assert.equal(engine._roster(np)[0].title, 'Web designer');
+  assert.notEqual(engine._roster(np)[0].id, engine._roster(src)[0].id);
+  assert.equal((await call('/api/templates/' + tpl.id + '/start', 'POST', { name: 'x', provider: 'nope' })).status, 400);
+  // global search
+  const g = async (q) => (await call('/api/search?q=' + encodeURIComponent(q))).body;
+  assert.deepEqual((await g('')).groups, []);
+  let r = await g('relaunch'); assert.ok(r.groups.find((x) => x.type === 'project').items.some((i) => i.title === 'Website relaunch' && i.href === '#/project/' + src.id));
+  assert.ok(r.groups.some((x) => x.type === 'template'));
+  r = await g('homelab'); assert.ok(r.groups.find((x) => x.type === 'device'));
+  r = await g('web designer'); assert.ok(r.groups.find((x) => x.type === 'member'));
+  const tk = (await call('/api/tasks', 'POST', { title: 'Renew certificate for intranet' })).body; r = await g('certificate'); assert.ok(r.groups.find((x) => x.type === 'task'));
+  engine._msg(src, { role: 'user', text: 'Please remember the quokka migration plan' }); r = await g('quokka'); assert.ok(r.groups.find((x) => x.type === 'chat').items[0].title.includes('quokka'));
+  assert.equal((await g('zzzznothing')).groups.length, 0);
+  // secret names, never values; vault locked -> note
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  await call('/api/vault/secrets', 'POST', { name: 'Zebra API key', value: 'v4lu3-s3cr3t-xyz', type: 'token' });
+  r = await g('zebra'); assert.ok(r.groups.find((x) => x.type === 'secret')); assert.ok(!JSON.stringify(await g('v4lu3')).includes('v4lu3-s3cr3t'), 'values are not searched');
+  assert.equal((await g('v4lu3')).groups.length, 0);
+  await call('/api/vault/lock', 'POST', {}); r = await g('zebra'); assert.ok(!r.groups.find((x) => x.type === 'secret') && /locked/.test(r.note));
+  assert.equal((await call('/api/templates/' + tpl.id, 'DELETE')).status, 200); assert.equal((await call('/api/templates')).body.length, 0);
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageProjectTemplates/); assert.match(app, /globalSearchBox/);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

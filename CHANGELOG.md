@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.20.0
+
+- **Project templates** (Workspace > Project templates): save a project's goal, plan phases and team roles, and start new projects from it. Passwords, secrets, folders and specific servers are never saved; they are stripped and you are told how many details were removed.
+- **Global search**: a box in the top bar (Ctrl+K) that finds projects, team members, tasks, devices, templates, past chats and secret names. Secret values are never searched.
+
 ## 0.19.0
 
 - **Telegram alerts** (Settings > Telegram alerts): urgent alerts to your own Telegram bot when an approval is waiting, a health warning appears or a long task finishes. The bot token is stored in the vault. Only the chat you link (with a one-time code) is answered. Alerts only: command output, file contents and secrets are never sent. `/status` in the linked chat gives a one-line summary.

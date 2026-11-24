@@ -23,6 +23,7 @@ import { Infra } from './infra.js';
 import { Audit } from './audit.js';
 import { Health } from './health.js';
 import { Telegram } from './telegram.js';
+import { Templates } from './templates.js';
 import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
@@ -77,6 +78,7 @@ export class Engine extends EventEmitter {
     this.health = new Health(this);
     this.audit = new Audit(path.join(path.dirname(store.file), 'audit.jsonl'), (t) => this._redact(t));
     this.telegram = new Telegram(this);
+    this.templates = new Templates(this);
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'), process.env.APIARY_KEYFILE || path.join(os.homedir(), '.config', 'apiary', 'vault.key'));
     this.usage = new Usage(store);
     this.providerLimits = new Limits();

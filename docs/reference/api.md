@@ -115,3 +115,10 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 - `GET /api/telegram` returns `{ config, status }` (`status`: enabled, linked, hasToken, vaultLocked, lastError, lastOk, linking). The bot token is never returned.
 - `PUT /api/telegram` takes any of `token` (saved to the vault), `enabled`, `events` (`approvals`, `health`, `tasks`) and `longTaskMinutes`.
 - `POST /api/telegram/link` starts linking and returns a one-time code to send to the bot. `POST /api/telegram/unlink` removes the chat. `POST /api/telegram/test` sends a test alert.
+
+## Project templates and search
+
+- `GET /api/templates` lists templates. `POST /api/templates` with `{ projectId, name, description }` saves a project as a template and returns it with `removed` (how many specific details were stripped).
+- `PUT /api/templates/{id}` edits `name`, `description`, `goal`. `DELETE /api/templates/{id}` removes it.
+- `POST /api/templates/{id}/start` with `{ name, provider, cwd }` creates a project with the saved team and plan.
+- `GET /api/search?q=` searches projects, team, tasks, devices, templates, past chats and secret names (never values).

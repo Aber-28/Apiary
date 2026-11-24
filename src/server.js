@@ -15,6 +15,7 @@ import { Store, HOME } from './store.js';
 import { Auth, COOKIE, maxAge } from './auth.js';
 import { Engine } from './engine.js';
 import { Updater } from './updater.js';
+import { search as globalSearch } from './search.js';
 import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
@@ -369,6 +370,14 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- machine usage (top bar) -----
       if (url.pathname === '/api/system' && req.method === 'GET') return json(res, 200, systemSnapshot(path.dirname(engine.store.file)));
       // ----- automatic backups -----
+      if (url.pathname === '/api/search' && req.method === 'GET') return json(res, 200, globalSearch(engine, url.searchParams.get('q') || ''));
+      if (url.pathname === '/api/templates' && req.method === 'GET') return json(res, 200, engine.templates.list());
+      if (url.pathname === '/api/templates' && req.method === 'POST') { const b = await readBody(req); return json(res, 201, engine.templates.save(b.projectId, b)); }
+      if ((r = m(/^\/api\/templates\/([\w-]+)(?:\/(start))?$/))) {
+        if (req.method === 'PUT' && !r[2]) return json(res, 200, engine.templates.update(r[1], await readBody(req)));
+        if (req.method === 'DELETE' && !r[2]) { engine.templates.remove(r[1]); return json(res, 200, { ok: true }); }
+        if (req.method === 'POST' && r[2]) { const b = await readBody(req); if (!b.provider) throw Object.assign(new Error('provider is required'), { status: 400 }); return json(res, 201, await engine.templates.start(r[1], b)); }
+      }
       if (url.pathname === '/api/telegram' && req.method === 'GET') return json(res, 200, { config: engine.telegram.config, status: engine.telegram.status });
       if (url.pathname === '/api/telegram' && req.method === 'PUT') { const status = engine.telegram.setConfig(await readBody(req)); engine.audit.add('system', { actor: 'You', action: 'changed Telegram alert settings' }); return json(res, 200, { config: engine.telegram.config, status }); }
       if (url.pathname === '/api/telegram/test' && req.method === 'POST') { await readBody(req); return json(res, 200, await engine.telegram.test()); }

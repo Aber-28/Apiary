@@ -815,7 +815,7 @@ function pageUsage() {
 }
 
 // ---------- task board ----------
-const TASK_COLS = [['todo', 'To do', 'Will be done soon'], ['backburner', 'Back burner', 'Ideas that need more detail'], ['inprogress', 'In progress', 'Someone is on it'], ['blocked', 'Blocked', 'Stuck. Needs a decision'], ['done', 'Done', 'Finished']];
+const TASK_COLS = [['backburner', 'Back burner', 'Unfinished ideas. Add detail later'], ['todo', 'To do', 'Ready: work can start'], ['inprogress', 'In progress', 'Someone is on it'], ['blocked', 'Blocked', 'Stuck. Needs a decision'], ['done', 'Done', 'Finished']];
 function pageTasks() {
   crumbs('Workspace', 'Tasks');
   let tasks = [], showAllDone = false;
@@ -834,9 +834,9 @@ function pageTasks() {
     h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
   const draw = () => {
     const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });
-    const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'todo' }, 'To do (soon)'), h('option', { value: 'backburner' }, 'Back burner (just an idea)'));
+    const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'backburner' }, 'Back burner (unfinished idea)'), h('option', { value: 'todo' }, 'To do (ready to start)'));
     const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value }); load(); }) }, 'Add');
-    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "To do" will be done soon, "Back burner" is an idea you will fill in later.'))),
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "Back burner" is an unfinished idea you will fill in later; "To do" is ready, so work on it can start.'))),
       h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, add)),
       h('div', { class: 'board' }, TASK_COLS.map(([k, name, sub]) => {
         let list = tasks.filter((t) => t.status === k); const more = k === 'done' && !showAllDone && list.length > 12; if (more) list = list.slice(0, 12);

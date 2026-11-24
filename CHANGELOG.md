@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.0
+- **Tasks** board: To do, Back burner, In progress, Blocked, Done. You add to-do items and back-burner ideas; agents add and move tasks as they work, and team jobs and tickets show up automatically
+- **Usage**: tokens per agent per day as a chart, a table per agent, optional limits per AI, and a usage bar next to each connection in the sidebar. Apiary also notices when an AI says its limit is reached
+- **Model advice**: hires and profiles suggest the model that fits the role and how hard the work is (most capable, balanced, or fast and cheap); you can pick another when approving
+- **Repositories**: point agents at a repository (GitHub or a folder) to read information from; choose who may read it; read-only
+- **Support tickets**: describe a problem; an agent works on it and answers, asks you when it needs to, and you close it when it is fixed
+- **Plain, simple English** by default for every agent (can be turned off under Appearance)
+- Only one sidebar submenu stays open at a time; a Documentation link opens the docs in a new tab
+- **License** changed to a use-only license; the code can only be changed by the owner
+
 ## 0.5.0
 - **Setup wizard creates your CEO**: after connecting your AI, an interview (asked one question at a time by the AI) learns your infrastructure, network and goals, then proposes 4 to 5 team members with a reason, profile and guardrails each, all written for you and saved as Markdown files
 - **Comic-book names** for every agent (original codenames), editable at any time; hire approvals let you rename before approving

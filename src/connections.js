@@ -1,5 +1,8 @@
 // Connection settings: how Apiary reaches each AI and GitHub (terminal/CLI or web/API key).
 // Secrets live in the state file, which is written with owner-only permissions.
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { run } from './exec.js';
 import { which } from './providers.js';
 import { github } from './github.js';
@@ -13,7 +16,7 @@ export const CONNECTION_IDS = Object.keys(DEFAULTS);
 // Suggested choices when the provider can't be asked for its list (terminal logins have no list command).
 const PRESETS = {
   claude: [{ id: 'claude-sonnet-5-5', label: 'Claude Sonnet 5.5: balanced' }, { id: 'claude-opus-5-5', label: 'Claude Opus 5.5: most capable' }, { id: 'claude-haiku-5-5', label: 'Claude Haiku 5.5: fastest' }],
-  codex: [],
+  codex: [{ id: 'gpt-5.5', label: 'GPT-5.5: most capable' }, { id: 'gpt-5.4', label: 'GPT-5.4: balanced' }, { id: 'gpt-5.4-mini', label: 'GPT-5.4 mini: fast and low cost' }],
 };
 const last4 = (s) => (s ? `••••${s.slice(-4)}` : '');
 
@@ -86,8 +89,22 @@ export class Connections {
     } catch (e) { return { ok: false, error: e.message }; }
   }
 
-  // Models known right now without asking anyone (last list from the provider, else the suggestions).
-  known(id) { return this._known?.[id] || PRESETS[id] || []; }
+  // Models Codex has told this computer about (its own cache and config), when it is installed and signed in.
+  _codexLocal() {
+    const out = [], dir = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'));
+    try {
+      const j = JSON.parse(readFileSync(path.join(dir, 'models_cache.json'), 'utf8'));
+      for (const m of j.models || []) if (m.slug && m.visibility !== 'hide') out.push({ id: m.slug, label: m.display_name || m.slug });
+    } catch { /* no cache */ }
+    try { const t = /^\s*model\s*=\s*"([^"]+)"/m.exec(readFileSync(path.join(dir, 'config.toml'), 'utf8')); if (t && !out.some((m) => m.id === t[1])) out.unshift({ id: t[1], label: `${t[1]} (set in your Codex settings)` }); } catch { /* no config */ }
+    return out;
+  }
+  // Models known right now without asking anyone: the last list from the provider, else this computer's own list, else suggestions.
+  known(id) {
+    if (this._known?.[id]) return this._known[id];
+    const local = id === 'codex' ? this._codexLocal() : [];
+    return local.length ? local : PRESETS[id] || [];
+  }
 
   // Models to offer as the default. Asks the provider when an API key is saved, else falls back to suggestions.
   async models(id) {
@@ -106,6 +123,7 @@ export class Connections {
         }
       } catch { /* fall through to suggestions */ }
     }
-    return { source: 'suggestions', models: PRESETS[id] };
+    const local = id === 'codex' ? this._codexLocal() : [];
+    return local.length ? { source: 'this computer', models: local } : { source: 'suggestions', models: PRESETS[id] || [] };
   }
 }

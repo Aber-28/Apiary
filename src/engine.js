@@ -38,6 +38,8 @@ const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
 const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
+const PLAN_RE = /```apiary-plan\s*([\s\S]*?)```/g;
+const PROGRESS_RE = /```apiary-progress\s*([\s\S]*?)```/g;
 const TASK_RE = /```apiary-task\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
 const MAX_LOG = 1000;
@@ -63,6 +65,7 @@ export class Engine extends EventEmitter {
     this.tasks = new Tasks(store);
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
+    this.userLeases = new Map(); // agentId -> Map(secret name -> username), same lifetime as leases
     this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
     this.seedTeams();
@@ -515,7 +518,8 @@ export class Engine extends EventEmitter {
   // ---------- secrets ----------
   _leaseEnv(agent) {
     const mp = this.leases.get(agent.id);
-    return mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {};
+    const us = this.userLeases.get(agent.id);
+    return { ...(mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {}), ...(us ? Object.fromEntries([...us].map(([name, v]) => [envName(name) + '_USER', v])) : {}) };
   }
   // An agent asked for secrets with apiary-secret. Needs: vault unlocked, secret assigned to this agent, and the human's yes.
   async _secrets(agent, reqs, notes) {
@@ -537,10 +541,13 @@ export class Engine extends EventEmitter {
       const val = this.vault.value(it.id);
       if (val === null) { notes.push(`"${it.name}" could not be read.`); continue; }
       (this.leases.get(agent.id) || this.leases.set(agent.id, new Map()).get(agent.id)).set(it.name, val);
+      const uname = this.vault.user(it.id);
+      if (uname) (this.userLeases.get(agent.id) || this.userLeases.set(agent.id, new Map()).get(agent.id)).set(it.name, uname);
       this._log(agent, `🔑 using secret "${it.name}"${asg.grant === 'always' ? ' (always allowed)' : ''}`);
-      notes.push(`The secret "${it.name}" is available to your commands as the environment variable $${envName(it.name)} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
+      notes.push(`The secret "${it.name}" is available to your commands as the environment variable $${envName(it.name)}${uname ? ` (the username is in $${envName(it.name)}_USER)` : ''} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
     }
   }
+  _clearLease(id) { this.leases.delete(id); this.userLeases.delete(id); }
   // Who can be given a secret: the CEO, project leads and standing team members, by role (so renaming does not break access).
   eligibleAgents() {
     const seen = new Map();
@@ -801,6 +808,12 @@ export class Engine extends EventEmitter {
         '```apiary-hire\n{"title":"Job title","role":"What they do","department":"engineering|marketing|design|security|networking|research|data|product|operations|finance|legal","reason":"Why this project needs them","instructions":"Optional specifics for this role","complexity":"simple|normal|hard","reportsTo":"Optional existing member name or title"}\n```\n\n' +
         'Every hire automatically gets a comic-book style codename (the human can change it), so give a job title, not a name. Say how hard the work is ("complexity"): Apiary then suggests the right AI model for the role. Hire only when the work justifies a standing role, and give a real reason. Use apiary-spawn instead for a one-off helper.\n';
     }
+    if (this._planOwner(agent) && (!agent.parentId || agent.member)) {
+      const lead = !agent.parentId;
+      s += this._planContext(agent);
+      if (lead && !this._planOwner(agent).plan) s += '\nBIG PROJECTS: this is a project, so the work is usually large and long. Do not start building straight away. First propose a phased plan the human can approve: ```apiary-plan\n{"goal":"What done looks like","phases":[{"title":"Short phase name","goal":"What this phase achieves","steps":["Concrete step","Another step"]}]}\n```. Use 3 to 7 phases (for example research and requirements, design, build, test, launch), each with concrete steps. Small one-off questions do not need a plan.\n';
+      s += '\nProgress: when you finish a step (or get stuck), tell Apiary so the human can see where the project stands: ```apiary-progress\n{"phase":1,"step":2,"status":"done","note":"Optional short note"}\n```. "phase" and "step" are numbers or exact names; status is done, active or blocked. Omit "step" to update the whole phase.' + (lead ? ' If the plan needs to change, send a new apiary-plan block; finished work is kept.' : '') + '\n';
+    }
     s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if (agent.member) {
@@ -867,6 +880,90 @@ export class Engine extends EventEmitter {
     const u = res.usage;
     if (u && (u.input || u.output)) this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: u.input, output: u.output });
     else this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: estimateTokens(system, prompt), output: estimateTokens(res.text), estimated: true });
+  }
+
+  // ----- project plans: big projects are done in phases, and the human can see where they stand -----
+  _planOwner(agent) { const r = this.rootOf(agent); return r.kind === 'general' ? null : r; }
+  _planFix(plan) {
+    // finished phases stay finished; exactly one unfinished phase is current
+    for (const p of plan.phases) {
+      const all = p.steps.length > 0 && p.steps.every((x) => x.done);
+      if (all && p.status !== 'done') { p.status = 'done'; p.doneAt = Date.now(); }
+      if (!all && p.status === 'done' && p.steps.length) { p.status = 'pending'; delete p.doneAt; }
+    }
+    if (!plan.phases.some((p) => p.status === 'active' || p.status === 'blocked')) { const next = plan.phases.find((p) => p.status !== 'done'); if (next) { next.status = 'active'; next.startedAt ||= Date.now(); } }
+    plan.updatedAt = Date.now();
+  }
+  planStats(plan) {
+    if (!plan) return null;
+    const total = plan.phases.reduce((n, p) => n + p.steps.length, 0) || plan.phases.length, done = plan.phases.reduce((n, p) => n + (p.steps.length ? p.steps.filter((x) => x.done).length : p.status === 'done' ? 1 : 0), 0);
+    const cur = plan.phases.find((p) => p.status === 'active' || p.status === 'blocked');
+    return { total, done, pct: total ? Math.round((done / total) * 100) : 0, current: cur?.title || null, phasesDone: plan.phases.filter((p) => p.status === 'done').length, phases: plan.phases.length };
+  }
+  async _plan(agent, np, notes) {
+    const root = this._planOwner(agent);
+    if (!root) { notes.push('Plans belong to projects. For something big, suggest the human creates a project for it.'); return; }
+    if (agent.id !== root.id) { notes.push('Only the project lead makes the plan. Tell the lead what you think the plan should include.'); return; }
+    if (this._needsApproval(agent)) {
+      this._setStatus(agent, 'waiting');
+      this.emit('event', { type: 'activity', agentId: agent.id, text: 'Waiting for your approval of the plan' });
+      const r = await this._ask(agent, { kind: 'plan', title: `${agent.name} proposes a plan with ${np.phases.length} phase${np.phases.length > 1 ? 's' : ''}`, detail: np.goal, phases: np.phases });
+      if (r.decision === 'deny') { notes.push(`The human did not approve the plan${r.note ? ': ' + r.note : ''}. Change it and propose it again.`); return; }
+      if (r.note) notes.push(`Human note on the plan: ${r.note}`);
+    }
+    const old = root.plan, now = Date.now();
+    root.plan = { goal: np.goal, createdAt: old?.createdAt || now, updatedAt: now, phases: np.phases.map((p, i) => { const prev = old?.phases.find((o) => o.title.toLowerCase() === p.title.toLowerCase()); return { id: i + 1, title: p.title, goal: p.goal, status: prev?.status || 'pending', startedAt: prev?.startedAt, doneAt: prev?.doneAt, steps: p.steps.map((t) => ({ text: t, done: !!prev?.steps.find((x) => x.text.toLowerCase() === t.toLowerCase() && x.done) })) }; }) };
+    this._planFix(root.plan);
+    this._msg(root, { role: 'system', text: `Project plan ${old ? 'updated' : 'created'}: ${root.plan.phases.map((p) => p.title).join(' → ')}` });
+    this.emit('event', { type: 'agent', agent: root }); this.store.save();
+    notes.push('The plan is saved and the human can see it. Work phase by phase, and report progress with apiary-progress.');
+  }
+  _progress(agent, list, notes) {
+    const root = this._planOwner(agent), plan = root?.plan;
+    if (!plan) { notes.push('There is no plan yet, so progress was not recorded. Make a plan with apiary-plan first.'); return; }
+    for (const x of list.slice(0, 20)) {
+      const key = String(x.phase).trim().toLowerCase(), ph = /^\d+$/.test(key) ? plan.phases[Number(key) - 1] : plan.phases.find((p) => p.title.toLowerCase() === key);
+      if (!ph) { notes.push(`There is no phase "${x.phase}" in the plan.`); continue; }
+      const status = ['pending', 'active', 'done', 'blocked'].includes(x.status) ? x.status : (x.step != null ? 'done' : 'active');
+      if (x.step != null) {
+        const k = String(x.step).trim().toLowerCase(), st = /^\d+$/.test(k) ? ph.steps[Number(k) - 1] : ph.steps.find((t) => t.text.toLowerCase() === k);
+        if (!st) { notes.push(`There is no step "${x.step}" in phase "${ph.title}".`); continue; }
+        st.done = status === 'done';
+        if (status === 'blocked') ph.status = 'blocked';
+      } else if (status === 'done') { ph.steps.forEach((t) => (t.done = true)); ph.status = 'done'; ph.doneAt = Date.now(); }
+      else { ph.status = status; if (status === 'active') ph.startedAt ||= Date.now(); }
+      if (x.note) ph.note = x.note;
+      if (status === 'blocked') ph.status = 'blocked'; else if (ph.status === 'blocked' && status !== 'blocked') ph.status = 'active';
+    }
+    this._planFix(plan);
+    this.emit('event', { type: 'agent', agent: root }); this.store.save();
+  }
+  // The human can tick steps and set phases by hand; the plan is theirs too.
+  editPlan(rootId, { phase, step, done, status, note } = {}) {
+    const root = this.agents[rootId], plan = root?.plan;
+    if (!plan) throw httpErr(404, 'This project has no plan yet');
+    const ph = plan.phases[Number(phase) - 1];
+    if (!ph) throw httpErr(400, 'No such phase');
+    if (step != null) { const st = ph.steps[Number(step) - 1]; if (!st) throw httpErr(400, 'No such step'); st.done = !!done; }
+    if (status !== undefined) { if (!['pending', 'active', 'done', 'blocked'].includes(status)) throw httpErr(400, 'Unknown status'); ph.status = status; if (status === 'done') { ph.steps.forEach((t) => (t.done = true)); ph.doneAt = Date.now(); } }
+    if (note !== undefined) ph.note = String(note).slice(0, 300);
+    this._planFix(plan);
+    this.emit('event', { type: 'agent', agent: root }); this.store.save();
+    return plan;
+  }
+  clearPlan(rootId) { const root = this.agents[rootId]; if (!root) throw httpErr(404, 'No such project'); delete root.plan; this.emit('event', { type: 'agent', agent: root }); this.store.save(); }
+  askPlan(rootId, text = '') {
+    const root = this.agents[rootId];
+    if (!root || root.parentId) throw httpErr(404, 'No such project');
+    if (root.kind === 'general') throw httpErr(400, 'Plans belong to projects');
+    this.send(root.id, `Please make a phased plan for this project${text ? `: ${text}` : ''}. Propose it with apiary-plan (clear phases, concrete steps), then start on the first phase.`).catch(() => {});
+    return { started: true };
+  }
+  _planContext(agent) {
+    const root = this._planOwner(agent), plan = root?.plan;
+    if (!plan) return '';
+    const st = this.planStats(plan);
+    return `\nPROJECT PLAN (where the project stands: ${st.pct}% done${st.current ? `, now in "${st.current}"` : ''}):\n${plan.goal ? 'Goal: ' + plan.goal + '\n' : ''}` + plan.phases.map((p, i) => `${i + 1}. ${p.title} [${p.status}]${p.note ? ' (' + p.note + ')' : ''}${p.steps.length ? '\n' + p.steps.map((t, j) => `   ${j + 1}. [${t.done ? 'x' : ' '}] ${t.text}`).join('\n') : ''}`).join('\n') + '\nStay inside the current phase. When you finish a step, record it with apiary-progress.\n';
   }
 
   // ----- task board, tickets, model advice -----
@@ -945,13 +1042,16 @@ export class Engine extends EventEmitter {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, secrets, tasks, errors } = parseSpawns(mem.clean);
+        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
         if (tasks.length) this._agentTasks(agent, tasks);
-        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !errors.length) || round === this.limits.maxRounds) break;
+        const planNotes = [];
+        if (plans.length) await this._plan(agent, plans.at(-1), planNotes);
+        if (progress.length) this._progress(agent, progress, planNotes);
+        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !errors.length && !plans.length) || round === this.limits.maxRounds) break;
 
-        const notes = [...errors];
+        const notes = [...errors, ...planNotes];
         let runnable = [];
         for (const s of spawns) {
           const label = s.agent || s.name;
@@ -1004,13 +1104,13 @@ export class Engine extends EventEmitter {
         this._msg(agent, { role: 'report', text: body });
         prompt = body;
       }
-      this.leases.delete(agent.id);   // a secret lasts for one task only
+      this._clearLease(agent.id);   // a secret lasts for one task only
       await this._commit(agent, userText);
       this._record(agent, userText, from, final);
       this._setStatus(agent, 'idle');
       return final;
     } catch (e) {
-      this.leases.delete(agent.id);
+      this._clearLease(agent.id);
       this.waitingOn.delete(agent.id);
       if (e.name === 'AbortError') {
         await this._commit(agent, 'stopped');
@@ -1224,7 +1324,20 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], errors = [];
+  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], errors = [];
+  reply = reply.replace(PLAN_RE, (_, body) => {
+    try {
+      const o = JSON.parse(body.trim()), ph = [].concat(o.phases || []).filter((p) => p && String(p.title || '').trim());
+      if (!ph.length) errors.push('An apiary-plan block needs "phases", each with a "title".');
+      else plans.push({ goal: String(o.goal || '').slice(0, 400), phases: ph.slice(0, 12).map((p) => ({ title: String(p.title).trim().slice(0, 80), goal: String(p.goal || '').slice(0, 300), steps: [].concat(p.steps || []).map((x) => String(typeof x === 'string' ? x : x?.text || '').trim().slice(0, 160)).filter(Boolean).slice(0, 15) })) });
+    } catch (err) { errors.push(`An apiary-plan block was not valid JSON (${err.message}).`); }
+    return '';
+  });
+  reply = reply.replace(PROGRESS_RE, (_, body) => {
+    try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || x.phase == null) { errors.push('An apiary-progress block needs a "phase".'); continue; } progress.push({ phase: x.phase, step: x.step, status: x.status, note: String(x.note || '').slice(0, 300) }); } }
+    catch (err) { errors.push(`An apiary-progress block was not valid JSON (${err.message}).`); }
+    return '';
+  });
   reply = reply.replace(TASK_RE, (_, body) => {
     try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || !String(x.title || '').trim()) { errors.push('An apiary-task block needs a "title".'); continue; } tasks.push({ title: String(x.title), notes: String(x.notes || ''), status: x.status }); } }
     catch (err) { errors.push(`An apiary-task block was not valid JSON (${err.message}).`); }
@@ -1281,7 +1394,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, secrets, tasks, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };

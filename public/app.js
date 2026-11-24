@@ -211,11 +211,12 @@ function approvalCard(ap) {
   return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
     h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
     ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
+    ap.kind === 'plan' ? h('ol', { class: 'plan-list' }, (ap.phases || []).map((p) => h('li', {}, h('b', {}, p.title), p.goal ? ` — ${p.goal}` : '', p.steps?.length ? h('ul', {}, p.steps.map((t) => h('li', {}, t))) : null))) :
     ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
     ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
     ap.diff ? diffView(ap.diff) : null,
     isPending && ap.kind === 'secret' ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve', 'once') }, 'Allow once'), h('button', { class: 'btn', onclick: decide('approve', 'always') }, 'Allow always'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
-    : isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'hire' ? 'Approve hiring' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
+    : isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'plan' ? 'Approve plan' : ap.kind === 'hire' ? 'Approve hiring' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
       : ap.note ? h('p', { class: 'hint', style: 'margin-top:8px' }, `Your note: ${ap.note}`) : null);
 }
 function pageApprovals() {
@@ -249,10 +250,38 @@ function pageProjects() {
         h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, a.name), pill(a.status)),
         h('p', { class: 'hint', style: 'margin:8px 0' }, `${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'} · ${kidsOf(a.id).length} sub-agents`),
         a.git ? h('div', { class: 'mono hint' }, a.git.branch) : h('div', { class: 'hint' }, 'Plain folder'),
+        a.plan ? (() => { const st = planStats(a.plan); return h('div', { style: 'margin-top:10px' }, bar(st.pct, `${a.name} progress`), h('small', { class: 'hint' }, `${st.pct}% · ${st.current ? `Phase ${st.index} of ${st.phases}: ${st.current.title}` : 'All phases done'}`)); })() : null,
         h('div', { class: 'hint', style: 'margin-top:6px' }, `Started ${ago(a.createdAt)}`))))
         : h('div', { class: 'card empty' }, h('p', {}, 'No projects yet. Describe a goal and let a lead agent get started.'), h('button', { class: 'btn primary big', onclick: () => openNewProject() }, 'Start your first project')));
   };
   draw(); page = { update: (ev) => ['agent', 'removed'].includes(ev.type) && draw() };
+}
+
+// ---------- project plan: where a big project stands ----------
+const PH = { pending: ['', 'Not started'], active: ['work', 'In progress'], done: ['ok', 'Done'], blocked: ['err', 'Blocked'] };
+function planStats(plan) {
+  if (!plan) return null;
+  const total = plan.phases.reduce((n, p) => n + p.steps.length, 0) || plan.phases.length;
+  const done = plan.phases.reduce((n, p) => n + (p.steps.length ? p.steps.filter((x) => x.done).length : p.status === 'done' ? 1 : 0), 0);
+  const cur = plan.phases.find((p) => p.status === 'active' || p.status === 'blocked');
+  return { total, done, pct: total ? Math.round((done / total) * 100) : 0, current: cur, index: cur ? plan.phases.indexOf(cur) + 1 : plan.phases.length, phases: plan.phases.length };
+}
+const bar = (pct, label, tone = 'ok') => h('div', { class: 'ubar big', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(pct), 'aria-label': label }, h('span', { class: tone, style: `width:${pct}%` }));
+
+// ---------- which model an agent uses: a list that fills itself from the AI it runs on ----------
+S.models = {};
+function modelPicker(a) {
+  if (!a || a.provider === 'mock') return null;
+  const list = S.models[a.provider];
+  if (!list) { api(`/api/connections/${a.provider}/models`).then((r) => { S.models[a.provider] = r.models || []; page?.redrawHead?.(); }).catch(() => { S.models[a.provider] = []; }); }
+  const opts = [...(list || [])]; if (a.model && !opts.some((m) => m.id === a.model)) opts.unshift({ id: a.model, label: a.model });
+  const sel = h('select', { class: 'model-pick', 'aria-label': `AI model for ${a.name}`, title: 'Which AI model this agent uses', onchange: guard(async (e) => {
+    let v = e.target.value;
+    if (v === '__other') { v = (prompt('Type the model name exactly as the provider calls it') || '').trim(); if (!v) { e.target.value = a.model || ''; return; } }
+    await api(`/api/agents/${a.id}/model`, 'PUT', { model: v }); toast(v ? `${a.name} now uses ${v}` : `${a.name} now uses the default model`);
+  }) }, h('option', { value: '' }, 'Default model'), opts.map((m) => h('option', { value: m.id, selected: m.id === a.model }, m.label || m.id)), h('option', { value: '__other' }, 'Other…'));
+  sel.value = a.model || '';
+  return h('label', { class: 'model-box' }, h('small', {}, 'Model'), sel);
 }
 
 async function ensureMsgs(id) {
@@ -277,6 +306,8 @@ function pageProject(leadId, general = false) {
     const a = sel(), l = S.agents.find((x) => x.id === leadId) || lead;
     el.head.replaceChildren(...[
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
+      !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
+      modelPicker(a),
       pill(a.status),
       a.kind === 'general' || a.title || a.mdFile ? h('button', { class: 'btn', onclick: () => openProfile(a) }, 'Edit profile') : null,
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
@@ -285,7 +316,7 @@ function pageProject(leadId, general = false) {
       l.git && a.id === l.id ? (l.git.prUrl ? h('a', { class: 'btn', href: l.git.prUrl, target: '_blank', rel: 'noopener' }, 'View pull request') : h('button', { class: 'btn', onclick: () => openPrDialog(l) }, 'Open pull request')) : null,
       a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents? Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
   };
-  const TABS = { chat: 'Chat', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
+  const TABS = { chat: 'Chat', plan: 'Plan', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
   const drawTabs = () => el.tabs.replaceChildren(...(general ? (S.orgDone ? ['chat', 'org'] : ['chat']) : Object.keys(TABS)).map((t) => h('button', { role: 'tab', 'aria-selected': String(S.tab === t), onclick: () => { S.tab = t; drawTabs(); drawBody(); } }, TABS[t])));
   if (general && !S.orgDone) el.tabs.style.display = 'none';
   const drawTeam = () => {
@@ -375,8 +406,26 @@ function pageProject(leadId, general = false) {
         : h('div', { class: 'card empty' }, 'This folder is empty.'));
   };
 
+  const drawPlan = () => {
+    const l = S.agents.find((x) => x.id === leadId) || lead, plan = l.plan, st = planStats(plan);
+    const call = guard(async (body) => { await api(`/api/projects/${leadId}/plan`, 'PUT', body); });
+    if (!plan) return h('div', {}, h('h2', {}, 'Plan'), h('div', { class: 'card empty' }, h('p', {}, 'No plan yet.'), h('p', { class: 'hint' }, 'Big projects work best in phases. Ask the lead to plan it: you will see the phases and approve them before any work starts.'),
+      h('button', { class: 'btn primary', onclick: guard(async () => { await api(`/api/projects/${leadId}/plan/ask`, 'POST', {}); S.tab = 'chat'; drawTabs(); drawBody(); toast('The lead is making a plan'); }) }, 'Ask the lead to make a plan')));
+    return h('div', {}, h('div', { class: 'kv', style: 'justify-content:space-between;align-items:baseline' }, h('h2', { style: 'margin:0' }, 'Plan'), h('b', {}, `${st.pct}% done`)),
+      bar(st.pct, 'Project progress', plan.phases.some((p) => p.status === 'blocked') ? 'warn' : 'ok'),
+      h('p', { class: 'hint' }, `${st.current ? `Phase ${st.index} of ${st.phases}: ${st.current.title}` : 'All phases are done.'} · ${st.done} of ${st.total} steps finished`), plan.goal ? h('p', {}, h('b', {}, 'Goal: '), plan.goal) : null,
+      plan.phases.map((p, i) => { const [tone, label] = PH[p.status] || PH.pending;
+        return h('section', { class: 'card phase' + (p.status === 'active' ? ' current' : ''), style: 'margin-bottom:10px', 'aria-label': `Phase ${i + 1}: ${p.title}` },
+          h('div', { class: 'kv', style: 'justify-content:space-between' }, h('b', {}, `${i + 1}. ${p.title}`), h('span', { class: 'pill ' + tone }, label)),
+          p.goal ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, p.goal) : null, p.note ? h('p', { class: 'hint', style: 'margin:0 0 8px' }, `Note: ${p.note}`) : null,
+          p.steps.map((t, j) => h('label', { class: 'check step' + (t.done ? ' done' : '') }, h('input', { type: 'checkbox', checked: t.done, 'aria-label': t.text, onchange: (e) => call({ phase: i + 1, step: j + 1, done: e.target.checked }) }), ` ${t.text}`)),
+          h('div', { class: 'kv', style: 'margin-top:8px' }, p.status !== 'done' ? h('button', { class: 'btn', onclick: () => call({ phase: i + 1, status: 'done' }) }, 'Mark phase done') : null, p.status === 'blocked' ? h('button', { class: 'btn', onclick: () => call({ phase: i + 1, status: 'active' }) }, 'Unblock') : p.status !== 'done' ? h('button', { class: 'btn', onclick: () => { const n = prompt('Why is it blocked?') ; if (n !== null) call({ phase: i + 1, status: 'blocked', note: n }); } }, 'Mark blocked') : null));
+      }),
+      h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/projects/${leadId}/plan/ask`, 'POST', { text: prompt('What should change in the plan?') || '' }); S.tab = 'chat'; drawTabs(); drawBody(); }) }, 'Ask the lead to revise it'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm('Remove the plan? The work already done is kept.')) return; await api(`/api/projects/${leadId}/plan`, 'DELETE'); }) }, 'Remove plan')));
+  };
   const drawBody = () => {
     const a = sel();
+    if (S.tab === 'plan') { msgsEl = null; termEl = null; el.body.replaceChildren(h('div', { class: 'pane' }, drawPlan())); return; }
     if (S.tab === 'org') { msgsEl = null; termEl = null; el.body.replaceChildren(h('div', { class: 'pane' }, drawOrg())); return; }
     if (S.tab === 'files') { msgsEl = null; termEl = null; drawFiles().catch((e) => toast(e.message, true)); return; }
     if (S.tab === 'terminal') {
@@ -398,12 +447,13 @@ function pageProject(leadId, general = false) {
   const load = guard(async () => { await Promise.all(S.agents.filter((a) => rootOf(a).id === leadId).map((a) => ensureMsgs(a.id))); drawAll(); });
   drawAll(); load();
   page = {
+    redrawHead: () => drawHead(),
     update(ev) {
       if (ev.type === 'agent' || ev.type === 'removed') { if (!S.agents.find((a) => a.id === leadId)) { location.hash = '#/projects'; return; } drawHead(); drawTeam(); if (ev.agent && !S.msgs[ev.agent.id]) ensureMsgs(ev.agent.id).then(drawAll).catch(() => {}); }
       if (['message', 'delta', 'activity', 'agent'].includes(ev.type)) { drawMsgs(); if (ev.type === 'activity') drawTeam(); }
       if (ev.type === 'log') drawTerm();
       if (ev.type === 'approval') { drawMsgs(); drawHead(); }
-      if (S.tab === 'org' && ['agent', 'approval', 'removed'].includes(ev.type)) drawBody();
+      if (['org', 'plan'].includes(S.tab) && ['agent', 'approval', 'removed'].includes(ev.type)) drawBody();
     },
     shows: (ap) => ap.projectId === leadId,
   };
@@ -476,15 +526,15 @@ function pageSecrets() {
       const go = guard(async () => { await api('/api/vault/unlock', 'POST', { passphrase: a.value }); draw(); });
       view.replaceChildren(head, h('div', { class: 'card' }, h('h2', {}, 'The vault is locked'), h('p', { class: 'hint' }, 'It locks whenever Apiary restarts. Agents cannot use secrets while it is locked.'), h('label', { class: 'f' }, 'Passphrase', a), h('button', { class: 'btn primary', onclick: go }, 'Unlock'))); return;
     }
-    const nm = h('input', { type: 'text', placeholder: 'Name, e.g. GITHUB_TOKEN', 'aria-label': 'Secret name' }), val = h('input', { type: 'password', autocomplete: 'off', placeholder: 'Value', 'aria-label': 'Secret value' }), note = h('input', { type: 'text', placeholder: 'What is it for? (optional)', 'aria-label': 'Note' });
+    const nm = h('input', { type: 'text', placeholder: 'Name, e.g. Router login', 'aria-label': 'Secret name' }), usr = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Username (optional)', 'aria-label': 'Username, optional' }), val = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Password, token or key', 'aria-label': 'Password, token or key' }), note = h('input', { type: 'text', placeholder: 'What is it for? (optional)', 'aria-label': 'Note' });
     const rows = v.secrets.map((x) => {
       const asg = x.assigned || {};
       const picks = v.eligible.map((a) => { const g = asg[a.key]?.grant; const sel = h('select', { 'aria-label': `${a.label} access to ${x.name}`, onchange: guard(async () => { const next = { ...asg }; if (sel.value === 'none') delete next[a.key]; else next[a.key] = { label: a.label, grant: sel.value }; await api(`/api/vault/secrets/${x.id}`, 'PUT', { assigned: next }); draw(); }) }, [['none', 'No access'], ['ask', 'Ask me each time'], ['always', 'Always allowed']].map(([k, t]) => h('option', { value: k, selected: (g || 'none') === k }, t))); return h('div', { class: 'kv', style: 'justify-content:space-between;margin:4px 0' }, h('span', {}, a.label), sel); });
-      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null),
-        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nv = prompt(`New value for ${x.name}`); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Value replaced'); } }) }, 'Replace value'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', { class: 'mono' }, x.name), x.username ? h('small', { style: 'display:block' }, `Username: ${x.username}`) : null, x.note ? h('small', { class: 'hint', style: 'display:block' }, x.note) : null, h('small', { class: 'hint mono', style: 'display:block' }, `Agents get it as $APIARY_SECRET_${x.name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '')}${x.hasUsername ? ' and …_USER' : ''}`)),
+        h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { const nu = prompt(`Username for ${x.name} (leave empty for none)`, x.username || ''); if (nu !== null) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { username: nu }); draw(); } }) }, 'Username'), h('button', { class: 'btn', onclick: guard(async () => { const nv = prompt(`New password, token or key for ${x.name}`); if (nv) { await api(`/api/vault/secrets/${x.id}`, 'PUT', { value: nv }); toast('Replaced'); } }) }, 'Replace secret'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete ${x.name}?`)) return; await api(`/api/vault/secrets/${x.id}`, 'DELETE'); draw(); }) }, 'Delete'))),
         h('details', { open: Object.keys(asg).length > 0 }, h('summary', {}, 'Who may use it'), picks.length ? picks : h('p', { class: 'hint' }, 'No agents yet.')));
     });
-    view.replaceChildren(head, h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), h('div', { class: 'kv' }, nm, val, note, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/vault/secrets', 'POST', { name: nm.value, value: val.value, note: note.value }); draw(); }) }, 'Save to vault'))), rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
+    view.replaceChildren(head, h('div', { class: 'card', style: 'margin-bottom:16px' }, h('h2', {}, 'Add a secret'), h('div', { class: 'formrow' }, nm, usr), h('div', { class: 'formrow', style: 'margin-top:8px' }, val, note, h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/vault/secrets', 'POST', { name: nm.value, value: val.value, note: note.value, username: usr.value }); draw(); }) }, 'Save to vault')), h('small', { class: 'hint' }, 'A token or key only needs the last field. A login needs a username too.')), rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
   };
   draw(); page = { shows: () => true };
 }
@@ -499,6 +549,38 @@ function renderUpdateChip() {
 }
 async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
+// A full-screen view of the installation, so nobody thinks it has frozen.
+function updateOverlay(from) {
+  if (document.getElementById('upd-overlay')) return;
+  const bar2 = h('span', { style: 'width:0%' }), log = h('pre', { class: 'term upd-log', tabindex: '0', 'aria-label': 'Update log' }), list = h('ol', { class: 'upd-steps' }), title = h('h2', {}, 'Updating Apiary'), sub = h('p', { class: 'hint', role: 'status' }, 'Please keep this page open. It refreshes by itself when the update is done.');
+  const secs = h('small', { class: 'hint' }), close = h('button', { class: 'btn', style: 'display:none', onclick: () => ov.remove() }, 'Close');
+  const ov = h('div', { id: 'upd-overlay', class: 'upd-overlay', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Updating Apiary' }, h('div', { class: 'card upd-card' }, title, sub, h('div', { class: 'ubar big' }, bar2), list, log, h('div', { class: 'kv', style: 'justify-content:space-between' }, secs, close)));
+  document.body.append(ov);
+  const t0 = Date.now(); let restarting = false, stop = false;
+  const icon = { wait: '○', run: '◐', done: '✔', skip: '–', fail: '✖' };
+  const tick = setInterval(() => { secs.textContent = `${Math.round((Date.now() - t0) / 1000)} s`; }, 500);
+  const poll = async () => {
+    if (stop) return;
+    try {
+      if (restarting) {
+        const st = await fetch('/api/state', { cache: 'no-store' }).then((r) => r.json());
+        if (st.version && st.version !== from) { stop = true; clearInterval(tick); bar2.style.width = '100%'; sub.textContent = `Updated to ${st.version}. Refreshing…`; setTimeout(() => location.reload(), 700); return; }
+        if (Date.now() - t0 > 120000) { sub.textContent = 'This is taking longer than usual. Apiary may need a manual restart (systemctl --user restart apiary). You can close this and refresh the page.'; close.style.display = ''; }
+      } else {
+        const u = await fetch('/api/update', { cache: 'no-store' }).then((r) => r.json()), pr = u.progress;
+        if (pr) {
+          bar2.style.width = pr.pct + '%'; bar2.className = pr.failed ? 'err' : '';
+          list.replaceChildren(...pr.steps.map((x) => h('li', { class: 'st-' + x.state }, h('span', { 'aria-hidden': 'true' }, icon[x.state]), ` ${x.label}`)));
+          log.textContent = pr.log.join('\n'); log.scrollTop = log.scrollHeight;
+          if (pr.failed) { stop = true; clearInterval(tick); title.textContent = 'The update did not work'; sub.textContent = 'Nothing was broken: the old version is still in place. You can try again later.'; close.style.display = ''; return; }
+          if (pr.steps[4].state === 'run') { restarting = true; sub.textContent = 'Restarting Apiary. This usually takes a few seconds…'; }
+        }
+      }
+    } catch { if (restarting === false && Date.now() - t0 > 3000) { restarting = true; sub.textContent = 'Restarting Apiary. This usually takes a few seconds…'; } }
+    setTimeout(poll, restarting ? 1200 : 500);
+  };
+  poll();
+}
 function pageUpdates() {
   crumbs('Settings', 'Updates');
   const draw = () => {
@@ -507,12 +589,9 @@ function pageUpdates() {
     const busy = h('p', { class: 'hint', role: 'status' });
     const check = h('button', { class: 'btn', onclick: guard(async () => { busy.textContent = 'Checking GitHub…'; S.update = await api('/api/update/check', 'POST', {}); renderUpdateChip(); draw(); }) }, 'Check for updates');
     const install = u.state === 'ready' ? h('button', { class: 'btn primary big', onclick: guard(async () => {
-      let r;
-      try { r = await api('/api/update/install', 'POST', {}); }
-      catch (e) { if (/busy|working/i.test(e.message) && confirm(`${e.message}\n\nInstall anyway? Running agents will be stopped.`)) r = await api('/api/update/install', 'POST', { force: true }); else throw e; }
-      busy.textContent = 'Installing and restarting. This page will refresh by itself…';
-      const was = S.version; let tries = 0;
-      const t = setInterval(async () => { tries++; try { const st = await fetch('/api/state').then((x) => x.json()); if (st.version && st.version !== was) { clearInterval(t); location.reload(); } else if (tries > 4 && r?.restarted === false) { clearInterval(t); location.reload(); } } catch { /* restarting */ } if (tries > 90) { clearInterval(t); location.reload(); } }, 1500);
+      try { await api('/api/update/install', 'POST', {}); }
+      catch (e) { if (/working right now/i.test(e.message) && confirm(`${e.message}\n\nInstall anyway? Running agents will be stopped.`)) await api('/api/update/install', 'POST', { force: true }); else throw e; }
+      updateOverlay(S.version);
     }) }, `Install ${u.latest}`) : null;
     const auto = h('input', { type: 'checkbox', checked: S.autoUpdate, 'aria-label': 'Check for updates automatically', onchange: guard(async (e) => { await api('/api/settings', 'PUT', { autoUpdate: e.target.checked }); S.autoUpdate = e.target.checked; }) });
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Updates'), h('p', { class: 'sub-title' }, 'Apiary checks GitHub for a new version and downloads it without installing. You decide when to install; it then restarts and your browser refreshes.'))),
@@ -521,7 +600,7 @@ function pageUpdates() {
         h('div', { class: 'kv', style: 'margin-top:12px' }, check, install), busy,
         h('label', { class: 'check', style: 'margin-top:12px' }, auto, ' Check automatically every few hours')));
   };
-  draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); }); page = { shows: () => true };
+  draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };
 }
 
 // ---------- teams ----------
@@ -1164,6 +1243,6 @@ function pageStartup() {
 // ---------- boot ----------
 (async () => {
   try { await loadState(); } catch (e) { toast(e.message, true); }
-  connectEvents(); route(); refreshConns(); loadUsage();
+  connectEvents(); route(); refreshConns(); loadUsage(); if (S.update?.state === 'installing') updateOverlay(S.version);
   if (!S.onboardingDone && cur() !== '#/setup') openSetup();
 })();

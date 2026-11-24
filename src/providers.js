@@ -224,6 +224,11 @@ const mock = {
       else out = JSON.stringify({ done: true, overview: 'They run a home network and a website.', team: /network|server/i.test(prompt)
         ? [{ title: 'Network Engineer', department: 'networking', role: 'Looks after the network', reason: 'They run a home network' }, { title: 'Security Engineer', department: 'security', role: 'Reviews risk', reason: 'Network changes need review' }]
         : [{ title: 'Web Developer', department: 'engineering', role: 'Builds the site', reason: 'They run a website' }, { title: 'Researcher', department: 'research', role: 'Finds facts', reason: 'Decisions need facts' }] });
+    } else if (!agent.parentId && agent.kind !== 'general' && /plan-it/i.test(prompt) && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && !(system || '').includes('PROJECT PLAN (')) {
+      out = 'Here is the plan.\n\n```apiary-plan\n{"goal":"Launch the site","phases":[{"title":"Plan and design","goal":"Know what to build","steps":["Gather requirements","Draft the design"]},{"title":"Build","goal":"Make it work","steps":["Build the pages","Test everything"]}]}\n```';
+    } else if (/progress:\d+:\d+/i.test(prompt) && !/Notes from Apiary:|^Nothing was run/m.test(prompt)) {
+      const [, ph, st] = /progress:(\d+):(\d+)/i.exec(prompt);
+      out = 'Recorded.\n\n```apiary-progress\n{"phase":' + ph + ',"step":' + st + ',"status":"done","note":"done in test"}\n```';
     } else if (prompt.startsWith('Support ticket #')) {
       onActivity('Looking into the ticket');
       out = /unfixable/i.test(prompt) && !/New message from the human/.test(prompt) ? 'NEEDS HUMAN: Which server should I check?' : `RESOLVED: I looked into it and fixed it. ${/New message from the human/.test(prompt) ? '(after your reply)' : ''}`;
@@ -236,7 +241,7 @@ const mock = {
       out = 'Noted.';
     } else if (/environment variable \$APIARY_SECRET_/.test(prompt) && env) {
       const nm = /\$(APIARY_SECRET_[A-Z0-9_]+)/.exec(prompt)[1];
-      out = `Logged in using the secret: ${env[nm]}`;
+      out = `Logged in using the secret: ${env[nm]}${env[nm + '_USER'] ? ' as ' + env[nm + '_USER'] : ''}`;
     } else if (/use-secret:/i.test(prompt) && !/Notes from Apiary:/.test(prompt) && !prompt.startsWith('Message from')) {
       const nm = /use-secret:([^\s"]+)/i.exec(prompt)[1].replace(/_/g, ' ');
       out = 'I need a credential.\n\n```apiary-secret\n{"name":"' + nm + '","why":"to log in"}\n```';

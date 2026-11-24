@@ -20,7 +20,8 @@ export function suggestModel({ provider = 'claude', department = '', role = '', 
     else { tier = 'normal'; why = 'This is everyday work that a balanced model handles well.'; }
   }
   const family = { heavy: /opus|gpt-\d+(\.\d+)?$|o\d|pro|max/i, light: /haiku|mini|nano|flash/i, normal: /sonnet|codex|gpt/i }[tier];
-  const pick = models.find((m) => family.test(m.id)) || null;
+  const full = models.filter((m) => !/mini|nano|flash|haiku/i.test(m.id));
+  const pick = tier === 'normal' && provider !== 'claude' ? full[1] || full[0] || null : models.find((m) => family.test(m.id)) || null;
   const fallback = provider === 'claude' ? { heavy: 'claude-opus-5-5', normal: 'claude-sonnet-5-5', light: 'claude-haiku-5-5' }[tier] : '';
   const model = pick?.id || fallback;
   return { tier, model, why: `${why} Suggested: ${TIER_TEXT[tier]}${model ? ` (${model})` : ''}.` };

@@ -15,6 +15,7 @@ import { Updater } from './updater.js';
 import { authArgs } from './github.js';
 import * as orgfiles from './orgfiles.js';
 import * as transfer from './transfer.js';
+import { EVERY } from './limits.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
@@ -91,17 +92,17 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
         if (req.method === 'PUT') {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
           if (b.memory !== undefined) engine.setMemoryEnabled(b.memory);
           engine.setSettings(b);
-          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, plainEnglish: engine.plainEnglish });
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
         }
       }
       // ----- task board -----
@@ -112,6 +113,8 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         if (req.method === 'DELETE') { engine.tasks.remove(r[1]); return json(res, 200, { ok: true }); }
       }
       // ----- usage -----
+      if (url.pathname === '/api/provider-usage' && req.method === 'GET') { const v = engine.limitsView(); if (v.pending.length) engine.refreshLimits().catch(() => {}); return json(res, 200, v); }
+      if (url.pathname === '/api/provider-usage/refresh' && req.method === 'POST') { const b = await readBody(req); await engine.refreshLimits(b.id || null, true); return json(res, 200, engine.limitsView()); }
       if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, 200, engine.usage.summary(Number(url.searchParams.get('days')) || 14));
       if (url.pathname === '/api/usage/limits' && req.method === 'PUT') { engine.usage.setLimits((await readBody(req)).limits || {}); return json(res, 200, engine.usage.summary()); }
       // ----- repositories -----
@@ -287,7 +290,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         }
       }
       if (url.pathname === '/api/update' && req.method === 'GET') return json(res, 200, updater ? updater.status : { state: 'unsupported', error: 'Updates are not available here.' });
-      if (url.pathname === '/api/update/check' && req.method === 'POST') { if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 }); return json(res, 200, await updater.check()); }
+      if (url.pathname === '/api/update/check' && req.method === 'POST') { if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 }); engine.markUpdateChecked(); return json(res, 200, await updater.check()); }
       if (url.pathname === '/api/update/install' && req.method === 'POST') {
         if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });
         const ub = await readBody(req);
@@ -378,9 +381,12 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setTimeout(() => engine.refreshLimits().catch(() => {}), 8000).unref();
+  setInterval(() => engine.refreshLimits().catch(() => {}), EVERY).unref();   // once an hour
   if (process.env.APIARY_NO_UPDATE_CHECK !== '1') {
-    const auto = () => { if (engine.autoUpdate) updater.check().catch(() => {}); };
-    setTimeout(auto, 20000).unref(); setInterval(auto, 6 * 3600000).unref();
+    // the schedule is the person's choice (daily, weekly, monthly or manual); this only asks whether a check is due
+    const auto = () => { if (engine.updateDue()) { engine.markUpdateChecked(); updater.check().catch(() => {}); } };
+    setTimeout(auto, 20000).unref(); setInterval(auto, 30 * 60000).unref();
   }
   server.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `Port ${PORT} is already in use. Set APIARY_PORT to another port.` : e.message); process.exit(1); });
   server.listen(PORT, HOST, () => {

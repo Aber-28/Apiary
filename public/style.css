@@ -199,3 +199,10 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .choice button[aria-pressed=true] b::before{content:'✔ '}
 
 .stage-closed summary{cursor:pointer;list-style:none}.stage-closed summary h2{display:inline}.stage-closed:not([open]) summary h2::after{content:' ▸'}.stage-closed[open] summary h2::after{content:' ▾'}
+
+/* provider-reported usage */
+.uwin{display:flex;flex-direction:column;gap:3px}.urow{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.icon-btn{border:1px solid var(--line);background:transparent;color:var(--text);border-radius:8px;width:28px;height:28px;font-size:15px;line-height:1;cursor:pointer;flex:none}
+.icon-btn:hover{background:var(--hover)}.icon-btn.spin{animation:spin 1s linear infinite}
+@media (prefers-reduced-motion:reduce){.icon-btn.spin{animation:none;opacity:.5}}
+.uscale{width:100%}

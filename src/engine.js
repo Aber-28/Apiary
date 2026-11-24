@@ -26,6 +26,7 @@ import { Tasks, STATUSES as TASK_STATUSES } from './tasks.js';
 import { Tickets } from './tickets.js';
 import { Repos } from './repos.js';
 import { suggestModel } from './models.js';
+import { Limits } from './limits.js';
 
 const ENV_LIMITS = {
   maxDepth: Number(process.env.APIARY_MAX_DEPTH || 2),     // lead = depth 0
@@ -63,6 +64,7 @@ export class Engine extends EventEmitter {
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.vault = new Vault(path.join(path.dirname(store.file), 'vault.json'));
     this.usage = new Usage(store);
+    this.providerLimits = new Limits();
     this.tasks = new Tasks(store);
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
@@ -150,7 +152,14 @@ export class Engine extends EventEmitter {
   get defaultProvider() { const p = this.store.data.settings.defaultProvider; return this.available.some((x) => x.id === p) ? p : ''; }
   get onboardingDone() { return !!this.store.data.settings.onboardingDone; }
   get orgDone() { return !!this.store.data.settings.orgDone; }
-  get autoUpdate() { return this.store.data.settings.autoUpdate !== false; }
+  // How often Apiary looks for a new version: daily, weekly, monthly, or never by itself (manual).
+  get updateCheck() { const v = this.store.data.settings.updateCheck; return ['daily', 'weekly', 'monthly', 'manual'].includes(v) ? v : (this.store.data.settings.autoUpdate === false ? 'manual' : 'daily'); }
+  get autoUpdate() { return this.updateCheck !== 'manual'; }
+  updateDue(now = Date.now()) {
+    const every = { daily: 86400000, weekly: 7 * 86400000, monthly: 30 * 86400000 }[this.updateCheck];
+    return !!every && now - (this.store.data.settings.lastUpdateCheck || 0) >= every - 60000;
+  }
+  markUpdateChecked() { this.store.data.settings.lastUpdateCheck = Date.now(); this.store.save(); }
   get meeting() { return { frequency: 'off', time: '00:00', weekday: 0, last: 0, ...(this.store.data.settings.meeting || {}) }; }
   setMeeting(p = {}) {
     const m = { ...this.meeting };
@@ -162,8 +171,9 @@ export class Engine extends EventEmitter {
     return this.meeting;
   }
   get plainEnglish() { return this.store.data.settings.plainEnglish !== false; }
-  setSettings({ defaultProvider, onboardingDone, autoUpdate, meeting, plainEnglish, usageLimits }) {
-    if (autoUpdate !== undefined) this.store.data.settings.autoUpdate = !!autoUpdate;
+  setSettings({ defaultProvider, onboardingDone, autoUpdate, updateCheck, meeting, plainEnglish, usageLimits }) {
+    if (autoUpdate !== undefined) { this.store.data.settings.autoUpdate = !!autoUpdate; if (updateCheck === undefined) this.store.data.settings.updateCheck = autoUpdate ? 'daily' : 'manual'; }
+    if (updateCheck !== undefined) { if (!['daily', 'weekly', 'monthly', 'manual'].includes(updateCheck)) throw httpErr(400, 'updateCheck must be daily, weekly, monthly or manual'); this.store.data.settings.updateCheck = updateCheck; this.store.data.settings.autoUpdate = updateCheck !== 'manual'; }
     if (plainEnglish !== undefined) this.store.data.settings.plainEnglish = !!plainEnglish;
     if (usageLimits) this.usage.setLimits(usageLimits);
     if (meeting) this.setMeeting(meeting);
@@ -989,6 +999,21 @@ export class Engine extends EventEmitter {
     if (!plan) return stage;
     const st = this.planStats(plan);
     return stage + `\nPROJECT PLAN (where the project stands: ${st.pct}% done${st.current ? `, now in "${st.current}"` : ''}):\n${plan.goal ? 'Goal: ' + plan.goal + '\n' : ''}` + plan.phases.map((p, i) => `${i + 1}. ${p.title} [${p.status}]${p.note ? ' (' + p.note + ')' : ''}${p.steps.length ? '\n' + p.steps.map((t, j) => `   ${j + 1}. [${t.done ? 'x' : ' '}] ${t.text}`).join('\n') : ''}`).join('\n') + '\nStay inside the current phase. When you finish a step, record it with apiary-progress.\n';
+  }
+
+  // What the AI providers themselves report about subscription usage (cached; refreshed hourly or on request).
+  async refreshLimits(only = null, force = false) {
+    const out = {};
+    for (const p of this.available) {
+      if (p.id === 'mock' || (only && p.id !== only) || !['claude', 'codex'].includes(p.id)) continue;
+      if (p.method === 'api') { this.providerLimits.cache.set(p.id, { id: p.id, ok: false, reason: 'api-key', error: 'This uses a pay-per-use key, which has no subscription limit. Usage shown is counted by Apiary only.', windows: [], fetchedAt: Date.now() }); continue; }
+      out[p.id] = await this.providerLimits.refresh(p.id, { force });
+    }
+    return out;
+  }
+  limitsView() {
+    const now = Object.fromEntries(this.available.filter((p) => ['claude', 'codex'].includes(p.id)).map((p) => [p.id, this.providerLimits.cached(p.id)]));
+    return { limits: Object.fromEntries(Object.entries(now).filter(([, v]) => v)), pending: Object.entries(now).filter(([, v]) => !v).map(([k]) => k) };
   }
 
   // ----- task board, tickets, model advice -----

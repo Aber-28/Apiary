@@ -33,7 +33,7 @@ git branch -D <name>
 
 ## Updating from inside Apiary (0.5.0 and later)
 
-Settings → Updates checks GitHub (automatically every few hours too). A new version is **downloaded but not installed**; an **Update ready** chip appears and **Install** sits next to **Check for updates**. Install opens an **Updating Apiary** screen with a progress bar, a list of steps (download, check, install, verify, restart), a live log and a timer, so you can always see that something is happening. When Apiary is back, the page refreshes itself.
+Settings → Updates checks GitHub. You choose how often: **every day** (the default), **every week**, **every month**, or **only when you press the button**. A new version is **downloaded but not installed**; an **Update ready** chip appears and **Install** sits next to **Check for updates**. Install opens an **Updating Apiary** screen with a progress bar, a list of steps (download, check, install, verify, restart), a live log and a timer, so you can always see that something is happening. When Apiary is back, the page refreshes itself.
 
 If anything goes wrong the old version is put back automatically and you are told. Updating from 0.6.x or older: do the first update with `git pull` and a restart; the progress screen is there from 0.7.0 on.
 

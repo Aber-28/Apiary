@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.9.0
+- **Real usage from the AI itself**: the usage bars show what Claude and Codex report (5-hour session, weekly, reset times) instead of Apiary's own count, so use from other tools is included. Refreshes every hour, or press ↻. Falls back to Apiary's count and says why when the provider cannot be read
+- **Update checks are your choice**: daily, weekly, monthly, or only when you press the button
+
 ## 0.8.2
 - Updates now run `systemctl --user restart apiary` for you (the same command you would type), and only exit with an error code if that command fails
 

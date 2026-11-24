@@ -1,6 +1,6 @@
 # Weekly report
 
-**Workspace > Weekly report** gives you a plain-English summary of the week and how many tokens were used compared with last week. Switch on **Make a report every week**, choose the day and time (default Monday 08:00), and a new report is saved automatically. Past reports stay in the list. **Make one now** creates one on demand.
+**Workspace > Plan and reuse > Weekly report** gives you a plain-English summary of the week and how many tokens were used compared with last week. Switch on **Make a report every week**, choose the day and time (default Monday 08:00), and a new report is saved automatically. Past reports stay in the list. **Make one now** creates one on demand.
 
 ## What is in it
 

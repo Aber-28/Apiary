@@ -23,6 +23,7 @@
 * [Automatic backups](using-apiary/backups.md)
 * [Audit log](using-apiary/audit-log.md)
 * [Project templates](using-apiary/project-templates.md)
+* [The menu](using-apiary/menu.md)
 * [Global search](using-apiary/global-search.md)
 * [Weekly report](using-apiary/weekly-report.md)
 * [Runbooks](using-apiary/runbooks.md)

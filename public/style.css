@@ -231,3 +231,8 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .c0{fill:var(--accent);background:var(--accent)}.c1{fill:var(--info);background:var(--info)}.c2{fill:var(--ok);background:var(--ok)}.c3{fill:var(--err);background:var(--err)}
 .hit{fill:var(--err)}.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--muted);margin-top:6px}.lg{display:inline-flex;align-items:center;gap:5px}
 .sw{display:inline-block;width:10px;height:10px;border-radius:2px}.tri{display:inline-block;width:0;height:0;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:9px solid var(--err)}
+
+.nav-group.nested>button{min-height:36px;padding:0 12px;gap:8px;border-radius:8px;font-weight:500;font-size:inherit}
+.nav-group.nested>button .chev{opacity:.7}.nav-group.nested.has-active>button{color:var(--text);font-weight:600}
+.sub .sub{margin:0 0 4px 12px}
+.doc-top,.live{white-space:nowrap}@media (max-width:1250px){.live{display:none}}

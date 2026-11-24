@@ -1,6 +1,6 @@
 # Audit log
 
-The audit log is a searchable record of who did what in Apiary. Open it from **Settings > Audit log**.
+The audit log is a searchable record of who did what in Apiary. Open it from **Security > Audit log**.
 
 ## What is recorded
 

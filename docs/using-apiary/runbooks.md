@@ -1,6 +1,6 @@
 # Runbooks
 
-A runbook is a short list of steps for a problem that was solved once, so it can be followed again. Open **Workspace > Runbooks**.
+A runbook is a short list of steps for a problem that was solved once, so it can be followed again. Open **Workspace > Plan and reuse > Runbooks**.
 
 ## How they are made
 

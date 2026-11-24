@@ -1,6 +1,6 @@
 # Factory reset
 
-**Settings > Factory reset** deletes everything Apiary holds and starts again from the setup wizard, as on a brand-new install.
+**Settings > Data > Factory reset** deletes everything Apiary holds and starts again from the setup wizard, as on a brand-new install.
 
 ## What is deleted
 

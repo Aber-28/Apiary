@@ -19,7 +19,7 @@ Agents can run commands on your computer, so Apiary is strict by default.
 
 ## Using it beyond your own computer
 
-Start it with `apiary start --lan`. This enables an access token and accepts requests addressed to an IP address (which cannot be used for DNS rebinding). Host names must be listed in `APIARY_ALLOWED_HOSTS`. Put it behind HTTPS or a VPN if it leaves a network you trust. Turn on a username and password (Settings > Sign-in) so you do not need the long link. Plain http sends the password unencrypted, so outside a network you trust use an SSH tunnel, Tailscale or an https reverse proxy. Do **not** expose it directly to the internet: anyone who can sign in can run commands as your user.
+Start it with `apiary start --lan`. This enables an access token and accepts requests addressed to an IP address (which cannot be used for DNS rebinding). Host names must be listed in `APIARY_ALLOWED_HOSTS`. Put it behind HTTPS or a VPN if it leaves a network you trust. Turn on a username and password (Security > Sign-in) so you do not need the long link. Plain http sends the password unencrypted, so outside a network you trust use an SSH tunnel, Tailscale or an https reverse proxy. Do **not** expose it directly to the internet: anyone who can sign in can run commands as your user.
 
 **Plain http is not encrypted.** On your own computer (`localhost`) that does not matter. From another device, the access link, API keys and vault passphrase cross the network readable. Prefer an SSH tunnel (`ssh -L 7777:localhost:7777 you@host`), Tailscale, or an https reverse proxy in front of Apiary. Apiary shows "Not encrypted" in the top bar when you are on plain http from another address.
 

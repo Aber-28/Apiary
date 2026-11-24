@@ -6,6 +6,7 @@ const view = $('#view');
 let page = null; // { update?() } for the current route
 
 const ICON = {
+  shield: 'M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z M9 12l2 2 4-4',
   infra: 'M2 4h20v6H2z M2 14h20v6H2z M6 7h.01 M6 17h.01',
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
   agents: 'M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M23 21v-2a4 4 0 0 0-3-3.87 M16 3.13a4 4 0 0 1 0 7.75',
@@ -97,24 +98,48 @@ applyTheme(document.documentElement.className || 'dark');
 
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
+// A menu entry is [href, label] or { id, label, items: [...] } (a folder; folders can hold folders).
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/project-templates', 'Project templates'], ['#/reports', 'Weekly report'], ['#/runbooks', 'Runbooks'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
-  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
+    { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
+  { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
+    { id: 'library', label: 'Library', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
+    { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories']] }] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
-  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/backups', 'Backups'], ['#/audit', 'Audit log'], ['#/telegram', 'Telegram alerts'], ['#/policy', 'Approval rules'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide'], ['#/reset', 'Factory reset']] },
+  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], { id: 'ai', label: 'AI tools', items: [['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex']] }, ['#/connections/github', 'GitHub']] },
+  { id: 'security', label: 'Security', icon: ICON.shield || ICON.sliders, items: [['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/policy', 'Approval rules'], ['#/access', 'Access and safety'], ['#/audit', 'Audit log']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/telegram', 'Telegram alerts'],
+    { id: 'data', label: 'Data', items: [['#/backups', 'Backups'], ['#/transfer', 'Export and import'], ['#/reset', 'Factory reset']] },
+    { id: 'system', label: 'System', items: [['#/updates', 'Updates'], ['#/startup', 'Startup'], ['#/folders', 'Folders']] }, ['#/setup', 'Setup guide']] },
 ];
+const navLeaves = (items) => items.flatMap((it) => (Array.isArray(it) ? [it] : navLeaves(it.items)));
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
 function renderSide() {
   const side = $('#side');
   const newBtn = h('button', { class: 'btn primary big', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project');
+  const badgeFor = (href) => {
+    if (href === '#/approvals' && pendingCount()) return { n: pendingCount(), label: 'waiting' };
+    if (href === '#/runbooks' && S.runbookDrafts) return { n: S.runbookDrafts, label: 'to review' };
+    if (href === '#/health' && S.health?.count) return { n: S.health.count, label: 'warnings', err: S.health.level === 'err' };
+    return null;
+  };
+  const sumBadge = (items) => { const bs = navLeaves(items).map(([href]) => badgeFor(href)).filter(Boolean); return bs.length ? { n: bs.reduce((x, b) => x + b.n, 0), label: 'need attention', err: bs.some((b) => b.err) } : null; };
+  const badgeEl = (b) => (b ? h('span', { class: 'badge', style: b.err ? 'background:var(--err)' : '', 'aria-label': `${b.n} ${b.label}` }, b.n) : null);
+  S.navOpen ||= {};
+  const draw = (items, depth) => items.map((it) => {
+    if (Array.isArray(it)) { const [href, label] = it; return h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), badgeEl(badgeFor(href))); }
+    const has = navLeaves(it.items).some(([href]) => isActive(href)), open = S.navOpen[it.id] === undefined ? has : S.navOpen[it.id];
+    return h('div', { class: `nav-group nested${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
+      h('button', { 'aria-expanded': String(open), onclick: () => { S.navOpen[it.id] = !open; renderSide(); } }, h('span', { style: 'flex:1' }, it.label), open ? null : badgeEl(sumBadge(it.items)), h('span', { class: 'chev' }, svg(ICON.chev, 14, 2))),
+      h('div', { class: 'sub' }, draw(it.items, depth + 1)));
+  });
   const groups = NAV.map((g) => {
-    const has = g.items.some(([href]) => isActive(href));
+    const has = navLeaves(g.items).some(([href]) => isActive(href));
     const open = S.openGroup === undefined ? has : S.openGroup === g.id;
     return h('div', { class: `nav-group${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
-      h('button', { 'aria-expanded': String(open), onclick: () => { S.openGroup = open ? null : g.id; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
-      h('div', { class: 'sub' }, g.items.map(([href, label]) => h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), href === '#/approvals' && pendingCount() ? h('span', { class: 'badge', 'aria-label': `${pendingCount()} waiting` }, pendingCount()) : null, href === '#/runbooks' && S.runbookDrafts ? h('span', { class: 'badge', 'aria-label': `${S.runbookDrafts} to review` }, S.runbookDrafts) : null, href === '#/health' && S.health?.count ? h('span', { class: 'badge', style: S.health.level === 'err' ? 'background:var(--err)' : '', 'aria-label': `${S.health.count} warnings` }, S.health.count) : null))));
+      h('button', { 'aria-expanded': String(open), onclick: () => { S.openGroup = open ? null : g.id; renderSide(); } }, svg(g.icon), h('span', { style: 'flex:1' }, g.label), open ? null : badgeEl(sumBadge(g.items)), h('span', { class: 'chev' }, svg(ICON.chev, 16, 2))),
+      h('div', { class: 'sub' }, draw(g.items, 1)));
   });
   const conn = (S.conns || []).map((c) => {
     const ok = c.id === 'github' ? c.status?.ok : c.ready;
@@ -127,7 +152,16 @@ function renderSide() {
     h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
     workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
 }
+function navPath(items, label, trail = []) {
+  for (const it of items) {
+    if (Array.isArray(it)) { if (it[1] === label) return [...trail, it[1]]; }
+    else { const r = navPath(it.items, label, [...trail, it.label]); if (r) return r; }
+  }
+  return null;
+}
 function crumbs(...parts) {
+  const last = parts[parts.length - 1];
+  if (parts.length === 2) for (const g of NAV) { const r = navPath(g.items, last, [g.label]); if (r) { parts = r; break; } }   // the trail follows the menu
   $('#crumbs').replaceChildren(...parts.flatMap((p, i) => [i ? h('span', {}, '/') : null, i === parts.length - 1 ? h('b', {}, p) : h('span', {}, p)]).filter(Boolean));
 }
 
@@ -178,7 +212,7 @@ function route() {
   view.className = 'view'; page = null;
   const r = ROUTES.find(([re]) => re.test(hash));
   if (!r) { location.hash = '#/chat'; return; }
-  S.openGroup = NAV.find((g) => g.items.some(([href]) => isActive(href)))?.id ?? S.openGroup; // only one submenu stays open
+  S.openGroup = NAV.find((g) => navLeaves(g.items).some(([href]) => isActive(href)))?.id ?? S.openGroup; // only one submenu stays open
   renderSide();
   r[1](r[0].exec(hash));
 }

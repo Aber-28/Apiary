@@ -1,6 +1,6 @@
 # Project templates
 
-A template saves a setup you repeat, so a new project starts with the same goal, plan and team already in place. Open **Workspace > Project templates**.
+A template saves a setup you repeat, so a new project starts with the same goal, plan and team already in place. Open **Workspace > Plan and reuse > Project templates**.
 
 ## Save one
 

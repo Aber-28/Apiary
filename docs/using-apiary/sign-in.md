@@ -4,7 +4,7 @@ Apiary can ask for a username and password, so you can open it from any laptop o
 
 ## Turn it on
 
-* **In the app:** Settings > Sign-in, choose a username and a password (at least 10 characters; three or four random words works well), then press **Turn on sign-in**.
+* **In the app:** Security > Sign-in, choose a username and a password (at least 10 characters; three or four random words works well), then press **Turn on sign-in**.
 * **From the terminal:** `apiary user set <name>`. The password is typed hidden.
 * **At install:** when you answer *yes* to using Apiary from another device, the installer offers to create one.
 

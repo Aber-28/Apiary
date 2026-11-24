@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.23.0
+
+- **Menu reorganised** into a tree with folders inside headings (Workspace > Plan and reuse, Agents > Library and Knowledge, Connections > AI tools, Settings > Data and System). New **Security** heading for Sign-in, Secrets vault, Approval rules, Access and safety and Audit log. Counts show on closed headings and folders, and the breadcrumb follows the menu.
+
 ## 0.22.0
 
 - **Runbook library** (Workspace > Runbooks): agents save the steps of problems they solved as drafts; you read, edit and approve them. Only approved runbooks are given to agents to follow. Passwords are masked, and an agent can never change an approved runbook.

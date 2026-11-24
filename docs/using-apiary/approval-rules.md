@@ -1,6 +1,6 @@
 # Approval rules
 
-Approval rules let you decide once instead of approving every request. Open **Settings > Approval rules**.
+Approval rules let you decide once instead of approving every request. Open **Security > Approval rules**.
 
 ## What a rule says
 

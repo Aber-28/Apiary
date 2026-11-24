@@ -1800,5 +1800,6 @@ let orgIds;
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /pageRunbooks/); assert.match(app, /pagePolicy/);
 }
 
+{ const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /navLeaves/); assert.match(a, /label: 'Security'/); assert.match(a, /id: 'reuse'/); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

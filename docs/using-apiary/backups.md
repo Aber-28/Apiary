@@ -1,6 +1,6 @@
 # Automatic backups
 
-**Settings > Backups** makes a copy of everything on a schedule, so you do not rely on remembering to export.
+**Settings > Data > Backups** makes a copy of everything on a schedule, so you do not rely on remembering to export.
 
 ## How it works
 
@@ -14,7 +14,7 @@
 
 ## Restore
 
-Download the backup (or find the file in the folder) and use **Settings > Export and import > Import**. Importing makes a safety copy of what was there first. See [Export and import](export-import.md).
+Download the backup (or find the file in the folder) and use **Settings > Data > Export and import > Import**. Importing makes a safety copy of what was there first. See [Export and import](export-import.md).
 
 ## Notes
 

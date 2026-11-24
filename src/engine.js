@@ -560,6 +560,17 @@ export class Engine extends EventEmitter {
       notes.push(`The secret "${it.name}" is available to your commands as the environment variable $${envName(it.name)}${uname ? ` (the username is in $${envName(it.name)}_USER)` : ''} for this task only. Use it in commands; never print it, write it to a file or put it in your reply.`);
     }
   }
+  // Tells an agent which secrets it may ask for (names only, never values) and, for a lead, who else holds which.
+  _secretsNote(agent) {
+    if (!this.vault.unlocked) return 'The secrets vault is locked right now. If a task needs a secret, tell the human to unlock it (Secrets page).\n';
+    const key = this._mkey(agent), items = this.vault.list(), holds = (x, k) => (x.assigned || []).some((a) => a.key === k), mine = items.filter((x) => holds(x, key));
+    let n = mine.length ? `Secrets assigned to you (ask for them by exactly this name): ${mine.map((x) => `"${x.name}"`).join(', ')}.\n` : 'No secret is assigned to you yet.\n';
+    if (agent.kind === 'general' || !agent.parentId) {
+      const others = this.eligibleAgents().filter((e) => e.key !== key).map((e) => ({ e, names: items.filter((x) => holds(x, e.key)).map((x) => `"${x.name}"`) })).filter((o) => o.names.length);
+      if (others.length) n += `Secrets assigned to your teammates: ${others.map((o) => `${o.e.label}: ${o.names.join(', ')}`).join('; ')}. Hand the job to the teammate who holds the secret; they ask for it themselves.\n`;
+    }
+    return n;
+  }
   _clearLease(id) { this.leases.delete(id); this.userLeases.delete(id); }
   // Who can be given a secret: the CEO, project leads and standing team members, by role (so renaming does not break access).
   _agentLabel(a) {
@@ -837,6 +848,7 @@ export class Engine extends EventEmitter {
     }
     s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. The human must have assigned it to you and approves each use. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
+    if ((agent.member || !agent.parentId) && this.vault.exists) s += this._secretsNote(agent);
     if (agent.member) {
       const lead = this.agents[agent.parentId];
       s += `\nYou are a standing member of the team "${lead?.team?.name || 'team'}" led by ${lead?.name || 'the lead'}. Before a teammate does a task, Apiary may ask you for a pre-check from your area. Then reply in exactly this shape and do no work yet:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first (one line per item, only with CONDITIONS)\n` +
@@ -1049,6 +1061,35 @@ export class Engine extends EventEmitter {
         else this.tasks.add({ title: t.title, notes: t.notes, status: status || 'todo', assignee: { id: agent.id, name: agent.name }, project, source: agent.name });
       } catch { /* ignore a bad task from an agent */ }
     }
+  }
+  // Every task has an agent. Without a choice it is the CEO, who can hand it to a specialist.
+  _ceo() { return Object.values(this.agents).find((a) => a.kind === 'general'); }
+  assignable() {
+    const ok = (a) => a.kind === 'general' || ((a.member || !a.parentId) && (this.rootOf(a).kind === 'general' || this.stageOf(this.rootOf(a)) !== 'closed'));
+    return Object.values(this.agents).filter(ok).map((a) => ({ id: a.id, label: this._agentLabel(a), ceo: a.kind === 'general' }))
+      .sort((x, y) => Number(y.ceo) - Number(x.ceo) || x.label.localeCompare(y.label));
+  }
+  _assignee(id) {
+    const a = (id && this.agents[id]) || this._ceo();
+    return a ? { id: a.id, name: a.name } : null;
+  }
+  createTask(b = {}) {
+    return this.tasks.add({ title: b.title, notes: b.notes, status: ['todo', 'backburner'].includes(b.status) ? b.status : 'todo', labels: b.labels, project: b.project || null, assignee: this._assignee(b.assignee) });
+  }
+  updateTask(id, b = {}) {
+    const patch = { ...b };
+    if (patch.assignee !== undefined) patch.assignee = this._assignee(patch.assignee);
+    return this.tasks.update(id, patch);
+  }
+  // Hand the task to its agent now.
+  startTask(id) {
+    const t = this.tasks.get(id), who = (t.assignee && this.agents[t.assignee.id]) || this._ceo();
+    if (!who) throw httpErr(409, 'There is no agent to do this yet. Set up your CEO first.');
+    if (t.status === 'done') throw httpErr(409, 'This task is already done. Move it back to To do first.');
+    if (t.status !== 'inprogress') this.tasks.update(id, { status: 'inprogress', assignee: { id: who.id, name: who.name } }, 'you');
+    const prompt = `Task from the board: ${t.title}\n\n${t.notes || '(no more detail given)'}\n\nDo it, or hand it to the right teammate. Keep the task's status up to date with an apiary-task block.`;
+    this.send(who.id, prompt).catch(() => {});
+    return { started: true, agent: who.name };
   }
   tasksView() { return this.tasks.list.map((t) => ({ ...t, projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
 

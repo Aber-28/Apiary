@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.3
+
+* **Fixed: giving an agent access to a secret never worked from the screen.** The page and the server disagreed about the format, so agents always showed as "No access" and nothing was saved. Fixed, and the server now accepts both formats.
+* Agents are now told the names of the secrets assigned to them (never the values). The CEO and project leads also see who holds which, so "use the router login" is enough.
+* **Every task has an agent.** New tasks go to the CEO by default; pick anyone in "Who does it", and change it later. A new **Start** button sends the task to its agent.
+
 ## 0.11.2
 
 * Security: *Replace secret* no longer uses the browser's plain prompt, which showed the new secret as you typed it. It now opens a dialog with a hidden field (with an optional "Show what I type" tick). The typed value is cleared from the page as soon as it is saved or cancelled.

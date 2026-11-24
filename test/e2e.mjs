@@ -1150,5 +1150,38 @@ let orgIds;
   assert.equal(/prompt\(`New password/.test(src), false, 'no plain prompt asks for a secret');
 }
 
+// ---- 0.11.3: agents know which secrets they hold; every task has an agent ----
+{
+  const { ceo, ne, se } = orgIds;
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  const sec = (await call('/api/vault')).body.secrets[0];
+  await call('/api/vault/secrets/' + sec.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });
+  const mine = engine._system(ne), lead = engine._system(ceo), other = engine._system(se);
+  assert.ok(mine.includes(`Secrets assigned to you (ask for them by exactly this name): "${sec.name}"`), 'the holder is told the name');
+  assert.ok(other.includes('No secret is assigned to you yet'), 'others are told they have none');
+  assert.ok(lead.includes('Secrets assigned to your teammates') && lead.includes(`"${sec.name}"`) && /Network Engineer/.test(lead), 'the CEO learns who holds it');
+  assert.ok(!mine.includes('S3cr3t-Value-123!') && !lead.includes('S3cr3t-Value-123!'), 'never the value');
+  await call('/api/vault/lock', 'POST', {});
+  assert.match(engine._system(ne), /vault is locked right now/);
+  // saving from the screen (a map by key, as the old page sent) works too, and what the server reads back is a list
+  await call('/api/vault/secrets/' + sec.id, 'PUT', { assigned: { 'security-engineer': { label: 'Security Engineer', grant: 'always' } } });
+  assert.deepEqual((await call('/api/vault')).body.secrets.find((x) => x.id === sec.id).assigned.map((a) => [a.key, a.grant]), [['security-engineer', 'always']]);
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Object\.fromEntries\(\(x\.assigned \|\| \[\]\)/, 'the page reads the list');
+  // tasks: the CEO is the default, and can be changed, never left empty
+  const t1 = (await call('/api/tasks', 'POST', { title: 'Renew the certificate', status: 'todo' })).body;
+  assert.equal(t1.assignee.id, ceo.id);
+  const t2 = (await call('/api/tasks', 'POST', { title: 'Check backups', assignee: se.id })).body; assert.equal(t2.assignee.id, se.id);
+  assert.equal((await call('/api/tasks/' + t2.id, 'PUT', { assignee: '' })).body.assignee.id, ceo.id, 'clearing falls back to the CEO');
+  assert.equal((await call('/api/tasks/' + t2.id, 'PUT', { assignee: ne.id })).body.assignee.id, ne.id);
+  const list = (await call('/api/tasks/agents')).body; assert.equal(list[0].id, ceo.id); assert.ok(list.some((a) => a.id === ne.id));
+  // Start hands it to the agent, and it moves to In progress
+  const n0 = engine.messages(ne.id).length;
+  const st = await call('/api/tasks/' + t2.id + '/start', 'POST', {}); assert.equal(st.status, 202); assert.equal(st.body.agent, ne.name);
+  await until(() => engine.messages(ne.id).length > n0 && engine.messages(ne.id).some((m) => m.role === 'user' && /Task from the board: Check backups/.test(m.text)));
+  assert.equal(engine.tasks.get(t2.id).status, 'inprogress');
+  await until(() => engine.agents[ne.id].status === 'idle');
+  engine.tasks.update(t2.id, { status: 'done' }); assert.equal((await call('/api/tasks/' + t2.id + '/start', 'POST', {})).status, 409);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

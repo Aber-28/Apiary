@@ -10,3 +10,7 @@ Passwords, tokens and keys are never stored in plain text.
 - The vault locks when Apiary restarts. Unlock it with your passphrase; agents cannot use secrets while it is locked.
 
 Do not paste secrets into chats: use the vault.
+
+## What agents know about secrets
+
+Each agent is told the **names** of the secrets assigned to it (never the values), so you can just say "use the router login". Your CEO and project leads also see which teammate holds which secret, and hand the job to that person, who asks for the secret themselves.

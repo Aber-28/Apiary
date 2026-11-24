@@ -588,9 +588,9 @@ function pageSecrets() {
     }
     const nm = h('input', { type: 'text', placeholder: 'Name, e.g. Router login', 'aria-label': 'Secret name' }), usr = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Username (optional)', 'aria-label': 'Username, optional' }), val = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Password, token or key', 'aria-label': 'Password, token or key' }), note = h('input', { type: 'text', placeholder: 'What is it for? (optional)', 'aria-label': 'Note' });
     const rows = v.secrets.map((x) => {
-      const asg = x.assigned || {};
+      const asg = Object.fromEntries((x.assigned || []).map((a) => [a.key, a]));   // the server sends a list; this is the same thing by key
       // Agents that already have access are listed (change or remove); everyone else is added from one drop-down.
-      const save = guard(async (next) => { await api(`/api/vault/secrets/${x.id}`, 'PUT', { assigned: next }); draw(); });
+      const save = guard(async (next) => { await api(`/api/vault/secrets/${x.id}`, 'PUT', { assigned: Object.entries(next).map(([key, g]) => ({ key, label: g.label, grant: g.grant })) }); draw(); });
       const GRANTS = [['ask', 'Ask me each time'], ['always', 'Always allowed']];
       const has = v.eligible.filter((a) => asg[a.key]);
       const without = v.eligible.filter((a) => !asg[a.key]);
@@ -1078,26 +1078,28 @@ function pageUsage() {
 const TASK_COLS = [['backburner', 'Back burner', 'Unfinished ideas. Add detail later'], ['todo', 'To do', 'Ready: work can start'], ['inprogress', 'In progress', 'Someone is on it'], ['blocked', 'Blocked', 'Stuck. Needs a decision'], ['done', 'Done', 'Finished']];
 function pageTasks() {
   crumbs('Workspace', 'Tasks');
-  let tasks = [], showAllDone = false;
-  const load = async () => { tasks = (await api('/api/tasks')).tasks; draw(); };
+  let tasks = [], showAllDone = false, agents = [];
+  const load = async () => { [tasks, agents] = [(await api('/api/tasks')).tasks, await api('/api/tasks/agents').catch(() => [])]; draw(); };
+  const agentSel = (value, label) => h('select', { 'aria-label': label }, agents.map((a) => h('option', { value: a.id, selected: a.id === value }, a.label + (a.ceo ? ' (default)' : ''))));
   const edit = (t) => {
     const title = h('input', { type: 'text', value: t.title, 'aria-label': 'Title' }), notes = h('textarea', { rows: '5', 'aria-label': 'Details' }); notes.value = t.notes || '';
-    const labels = h('input', { type: 'text', value: t.labels.join(', '), 'aria-label': 'Labels' }), st = h('select', { 'aria-label': 'Status' }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n)));
-    const d = dlgOpen('Edit task', h('label', { class: 'f' }, 'Title', title), h('label', { class: 'f' }, 'Details', notes), h('label', { class: 'f' }, 'Labels (comma separated)', labels), h('label', { class: 'f' }, 'Status', st),
+    const labels = h('input', { type: 'text', value: t.labels.join(', '), 'aria-label': 'Labels' }), st = h('select', { 'aria-label': 'Status' }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), who = agentSel(t.assignee?.id, 'Who does it');
+    const d = dlgOpen('Edit task', h('label', { class: 'f' }, 'Title', title), h('label', { class: 'f' }, 'Details', notes), h('label', { class: 'f' }, 'Labels (comma separated)', labels), h('label', { class: 'f' }, 'Status', st), h('label', { class: 'f' }, 'Who does it', who),
       t.log?.length ? h('details', {}, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null,
       h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
-        h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value }); d.close(); load(); })(); } }, 'Save')));
+        h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); d.close(); load(); })(); } }, 'Save')));
   };
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, t.title), t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.assignee?.name ? `For ${t.assignee.name}` : '', t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
-    h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
+    h('div', { class: 'kv', style: 'margin-top:8px' }, h('select', { 'aria-label': `Move "${t.title}"`, onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); load(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), t.status !== 'done' ? h('button', { class: 'btn', title: 'Send this task to the agent now', onclick: guard(async () => { const r = await api(`/api/tasks/${t.id}/start`, 'POST', {}); toast(`Sent to ${r.agent}. Follow it in their chat.`); load(); }) }, 'Start') : null, h('button', { class: 'btn', onclick: () => edit(t) }, 'Edit')));
   const draw = () => {
     const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });
     const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'backburner' }, 'Back burner (unfinished idea)'), h('option', { value: 'todo' }, 'To do (ready to start)'));
-    const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value }); load(); }) }, 'Add');
+    const who = agentSel(agents.find((a) => a.ceo)?.id, 'Who does it');
+    const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); load(); }) }, 'Add');
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "Back burner" is an unfinished idea you will fill in later; "To do" is ready, so work on it can start.'))),
-      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, add)),
+      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, who, add)),
       h('div', { class: 'board' }, TASK_COLS.map(([k, name, sub]) => {
         let list = tasks.filter((t) => t.status === k); const more = k === 'done' && !showAllDone && list.length > 12; if (more) list = list.slice(0, 12);
         return h('section', { class: 'col', 'aria-label': name }, h('h3', {}, name, h('span', { class: 'count' }, String(tasks.filter((t) => t.status === k).length))), h('small', { class: 'hint' }, sub), list.length ? list.map(card) : h('p', { class: 'hint empty-col' }, 'Nothing here'), more ? h('button', { class: 'btn', onclick: () => { showAllDone = true; draw(); } }, 'Show all') : null);

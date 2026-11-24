@@ -9,6 +9,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `POST /api/agents` | Create a project. Body: `provider`, `goal`, `name`, `access`, `source`, `base`, `approvals` |
 | `GET /api/agents/:id/messages` | Chat history |
 | `POST /api/agents/:id/messages` | Send a message. Body: `text`. With `@Name` tags, the tagged agents get it and `tagged` lists them |
+| `GET /api/tasks/agents` | Agents a task can be given to (the CEO first) |
+| `POST /api/tasks/:id/start` | Send the task to its agent now |
 | `GET /api/agents/:id/mentionables` | Who can be tagged from this chat |
 | `GET /api/agents/:id/logs` | Terminal log lines |
 | `POST /api/agents/:id/stop` | Stop an agent and its team |

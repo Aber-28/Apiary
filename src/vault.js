@@ -103,7 +103,8 @@ export class Vault {
     if (note !== undefined) it.note = String(note).slice(0, 300);
     if (assigned !== undefined) {
       it.assigned = {};
-      for (const a of [].concat(assigned)) if (a && a.key) it.assigned[String(a.key)] = { label: String(a.label || a.key).slice(0, 80), grant: a.grant === 'always' ? 'always' : 'ask' };
+      const list = Array.isArray(assigned) ? assigned : Object.entries(assigned || {}).map(([key, a]) => ({ ...a, key }));   // a list, or a map by key
+      for (const a of list) if (a && a.key) it.assigned[String(a.key)] = { label: String(a.label || a.key).slice(0, 80), grant: a.grant === 'always' ? 'always' : 'ask' };
     }
     this._save();
     return this.list().find((i) => i.id === id);

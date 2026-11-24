@@ -125,9 +125,11 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       }
       // ----- task board -----
       if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, { tasks: engine.tasksView(), counts: engine.tasks.counts() });
-      if (url.pathname === '/api/tasks' && req.method === 'POST') { const b = await readBody(req); return json(res, 201, engine.tasks.add({ title: b.title, notes: b.notes, status: ['todo', 'backburner'].includes(b.status) ? b.status : 'todo', labels: b.labels, project: b.project || null, assignee: b.assignee ? { id: b.assignee, name: engine.agents[b.assignee]?.name || '' } : null })); }
+      if (url.pathname === '/api/tasks' && req.method === 'POST') return json(res, 201, engine.createTask(await readBody(req)));
+      if (req.method === 'GET' && url.pathname === '/api/tasks/agents') return json(res, 200, engine.assignable());
+      if (req.method === 'POST' && (r = m(/^\/api\/tasks\/([\w-]+)\/start$/))) return json(res, 202, engine.startTask(r[1]));
       if ((r = m(/^\/api\/tasks\/([\w-]+)$/))) {
-        if (req.method === 'PUT') { const b = await readBody(req); if (b.assignee !== undefined) b.assignee = b.assignee ? { id: b.assignee, name: engine.agents[b.assignee]?.name || '' } : null; return json(res, 200, engine.tasks.update(r[1], b)); }
+        if (req.method === 'PUT') return json(res, 200, engine.updateTask(r[1], await readBody(req)));
         if (req.method === 'DELETE') { engine.tasks.remove(r[1]); return json(res, 200, { ok: true }); }
       }
       // ----- usage -----

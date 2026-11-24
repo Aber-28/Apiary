@@ -343,10 +343,15 @@ export function main(links = []) {
   const updater = new Updater({ dir: fileURLToPath(new URL('..', import.meta.url)), current: VERSION, authArgs: () => authArgs(engine.connections.get('github')) });
   const restart = () => {
     store.flush(); engine.memory.flush();
-    const svc = spawnSync('systemctl', ['--user', 'is-active', '--quiet', 'apiary']).status === 0;
-    const child = svc ? spawn('sh', ['-c', 'sleep 1; systemctl --user restart apiary'], { detached: true, stdio: 'ignore' })
-      : spawn('sh', ['-c', 'sleep 1; exec "$@"', 'sh', process.execPath, ...process.argv.slice(1)], { detached: true, stdio: 'ignore', env: process.env, cwd: process.cwd() });
-    child.unref();
+    const svc = spawnSync('systemctl', ['--user', 'is-active', '--quiet', 'apiary']).status === 0 && !!process.env.INVOCATION_ID;
+    if (svc) {
+      // A helper started from inside the service would be killed together with it when we exit.
+      // Exiting with an error code makes systemd (Restart=on-failure) start us again by itself.
+      console.log('Restarting through systemd…');
+      setTimeout(() => process.exit(75), 300);
+      return;
+    }
+    spawn('sh', ['-c', 'sleep 1; exec "$@"', 'sh', process.execPath, ...process.argv.slice(1)], { detached: true, stdio: 'ignore', env: process.env, cwd: process.cwd() }).unref();
     setTimeout(() => process.exit(0), 200);
   };
   const server = createServer(engine, { updater, restart });

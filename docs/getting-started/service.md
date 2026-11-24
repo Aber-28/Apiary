@@ -21,7 +21,8 @@ After=network-online.target
 
 [Service]
 ExecStart=%h/.local/bin/apiary
-Restart=on-failure
+Restart=always
+RestartSec=1
 # Pick up claude, codex and gh from your usual locations
 Environment=PATH=%h/.local/bin:%h/.npm-global/bin:/usr/local/bin:/usr/bin:/bin
 

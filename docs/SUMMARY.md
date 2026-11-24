@@ -44,6 +44,7 @@
 
 * [Connect GitHub](github/connect.md)
 * [Branches, worktrees and pull requests](github/workflow.md)
+* [Repository security checklist](github/security-checklist.md)
 
 ## Reference
 

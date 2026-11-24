@@ -1219,12 +1219,10 @@ let orgIds;
   assert.equal((await call(`/api/projects/${ceo.id}/owner`, 'PUT', { agent: ne.id })).status, 404, 'the main chat is not a project');
   assert.equal((await call(`/api/projects/${proj.id}/owner`, 'PUT', { agent: ne.id })).status, 200);
   assert.equal(engine.ownerOf(root).id, ne.id); assert.ok(engine.projectsOwnedBy(ne).some((r) => r.id === proj.id)); assert.ok(!engine.projectsOwnedBy(ceo).some((r) => r.id === proj.id));
-  assert.match(engine._system(ne), /responsible for these projects[^\n]*Owner test site/); assert.match(engine._system(root), new RegExp(`${ne.name} is responsible for your project`));
+  assert.match(engine._system(ne), /You lead these projects: Owner test site/);
   assert.ok(engine.messages(proj.id).some((m) => /is now responsible for this project/.test(m.text)));
-  // the owner can reach the lead and the lead can reach the owner, which was not possible across teams before
-  assert.equal((await engine._findPeer(ne, 'Owner test site')).peer?.id, proj.id);
-  assert.equal((await engine._findPeer(root, 'owner')).peer?.id, ne.id);
-  assert.equal((await engine._findPeer(orgIds.se, 'Owner test site')).error ? true : false, true, 'others cannot');
+  // the project is led by its responsible agent: the CEO's identity, team and secrets, and the CEO's specialists can be reached
+  assert.equal((await engine._findPeer(ne, 'Owner test site')).peer?.id, proj.id, 'the owner can still reach the project');
   // a vanished owner falls back to the CEO
   root.ownerId = 'gone'; assert.equal(engine.ownerOf(root).id, ceo.id);
   assert.ok((await call('/api/state')).body.agents.find((a) => a.id === proj.id));
@@ -1280,6 +1278,96 @@ let orgIds;
   const { childEnv } = await import('../src/providers.js'); assert.ok(childEnv().PATH.split(path.delimiter)[0].endsWith('bin'), 'agents find apiary-ssh');
   assert.ok(fsStat(helper).mode & 0o111, 'the helper is executable');
   await call('/api/vault/lock', 'POST', {});
+}
+
+// ---- 0.13.0: the CEO leads every project ----
+{
+  const { ceo, ne, se } = orgIds;
+  const proj = (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, name: 'CEO led site', goal: 'say hi' })).body;
+  await until(() => engine.agents[proj.id].status === 'idle');
+  const root = engine.agents[proj.id];
+  assert.equal(engine._persona(root).id, ceo.id, 'the project is led by the CEO'); assert.equal(engine._persona(ne).id, ne.id, 'specialists are themselves');
+  const sys = engine._system(root);
+  assert.ok(sys.includes(`You are "${ceo.name}"`) && sys.includes('leading the project "CEO led site"') && /You lead the team/.test(sys) && sys.includes(ne.name) && sys.includes(se.name), 'CEO identity, project and specialists');
+  assert.ok(!/Lead agent/.test(sys));
+  assert.equal(engine._mkey(root), engine._mkey(ceo), 'same secrets and memory as the CEO');
+  assert.ok(!engine.eligibleAgents().some((a) => /project lead/.test(a.label)) && !engine.assignable().some((a) => a.id === proj.id), 'a project is not an agent you can pick');
+  // a secret given to the CEO works in the project without a prompt
+  await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+  const sk = (await call('/api/vault', 'GET')).body.secrets[0];
+  await call('/api/vault/secrets/' + sk.id, 'PUT', { assigned: [{ key: engine._mkey(ceo), label: 'CEO', grant: 'always' }] });
+  const nts = []; await engine._secrets(root, [{ name: sk.name }], nts);
+  assert.ok(nts.some((n) => /environment variable/.test(n)), 'granted without asking'); assert.equal(engine.approvals().some((a) => a.status === 'pending' && a.kind === 'secret' && a.agentId === proj.id), false);
+  engine._clearLease(root.id);
+  // secrets that were given to the old lead by its own name keep working
+  await call('/api/vault/secrets/' + sk.id, 'PUT', { assigned: [{ key: 'ceo-led-site', label: 'old lead', grant: 'always' }] });
+  const nts2 = []; await engine._secrets(root, [{ name: sk.name }], nts2); assert.ok(nts2.some((n) => /environment variable/.test(n)), 'old assignment still honoured'); engine._clearLease(root.id);
+  await call('/api/vault/secrets/' + sk.id, 'PUT', { assigned: [{ key: 'network-engineer', label: 'Network Engineer', grant: 'ask' }] });
+  await call('/api/vault/lock', 'POST', {});
+  // the CEO hands project work to a specialist, who gets the project folder
+  let seen = null; const orig = engine.send.bind(engine);
+  engine.send = (id, text, from) => { if (id === ne.id) seen = { folder: engine._projectDirs(engine.agents[ne.id]), note: engine._projectNote(engine.agents[ne.id]) }; return orig(id, text, from); };
+  const notes = []; const job = await engine._assignJob(root, { to: ne.name, task: 'check the router config' }, notes);
+  engine.send = orig;
+  assert.ok(job && job.kind === 'report', 'the specialist did the job'); assert.deepEqual(seen.folder, [root.cwd]); assert.match(seen.note, /CEO led site/);
+  assert.equal(engine.projectFor.has(ne.id), false, 'the project is forgotten afterwards'); assert.deepEqual(engine._projectDirs(engine.agents[ne.id]), []);
+  // peers: a project can message the CEO's specialists by name
+  assert.equal((await engine._findPeer(root, ne.name)).peer?.id, ne.id);
+  // the responsible agent can be someone else, and then they are the one acting
+  assert.equal((await call(`/api/projects/${proj.id}/owner`, 'PUT', { agent: se.id })).status, 200);
+  assert.equal(engine._persona(root).id, se.id); assert.ok(engine._system(root).includes(`You are "${se.name}"`));
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /Led by \$\{ownerOf\(a\)/);
+}
+
+// ---- sign-in with a username and password ----
+{
+  const { Auth } = await import('../src/auth.js');
+  const auth = new Auth(path.join(tmp, 'auth-test.json'));
+  const srv = createServer(engine, { auth });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const b = `http://127.0.0.1:${srv.address().port}`;
+  const J = { 'content-type': 'application/json' };
+  const post = (p, body, headers = {}) => fetch(b + p, { method: 'POST', headers: { ...J, ...headers }, body: JSON.stringify(body) });
+  // no account: open as before
+  assert.equal((await fetch(b + '/api/state')).status, 200);
+  assert.equal((await post('/api/account', { username: 'bob', password: 'short' })).status, 400, 'weak password refused');
+  assert.equal((await post('/api/account', { username: 'malcolm', password: 'malcolm-is-the-password' })).status, 400, 'password containing the username refused');
+  const made = await post('/api/account', { username: 'malcolm', password: 'purple lamp seven rivers' });
+  assert.equal(made.status, 200);
+  const setCookie = made.headers.get('set-cookie'); assert.match(setCookie, /HttpOnly/); assert.match(setCookie, /SameSite=Strict/);
+  assert.ok(!JSON.stringify(fsRead(path.join(tmp, 'auth-test.json'), 'utf8')).includes('purple lamp'), 'the password is not stored');
+  assert.equal(fsStat(path.join(tmp, 'auth-test.json')).mode & 0o777, 0o600);
+  // now the portal needs it
+  assert.equal((await fetch(b + '/api/state')).status, 401);
+  const page = await fetch(b + '/', { headers: { accept: 'text/html' }, redirect: 'manual' });
+  assert.equal(page.status, 302); assert.equal(page.headers.get('location'), '/login');
+  assert.equal((await fetch(b + '/login')).status, 200); assert.equal((await fetch(b + '/login.js')).status, 200);
+  assert.equal((await fetch(b + '/app.js')).status, 401, 'the app itself is behind the sign-in');
+  // wrong then right
+  const bad = await post('/api/login', { username: 'malcolm', password: 'nope nope nope' }); assert.equal(bad.status, 401);
+  const ok = await post('/api/login', { username: 'Malcolm', password: 'purple lamp seven rivers' }); assert.equal(ok.status, 200);
+  const cookie = ok.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie } })).status, 200);
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie: cookie.slice(0, -3) + 'abc' } })).status, 401, 'a forged cookie is refused');
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie } }).then((r) => r.json())).account.username, 'malcolm');
+  // changing needs the current password and signs everyone else out
+  assert.equal((await post('/api/account', { password: 'another long phrase here' }, { cookie })).status, 403);
+  const ch = await post('/api/account', { current: 'purple lamp seven rivers', password: 'another long phrase here' }, { cookie });
+  assert.equal(ch.status, 200);
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie } })).status, 401, 'old sessions end when the password changes');
+  const fresh = ch.headers.get('set-cookie').split(';')[0];
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie: fresh } })).status, 200);
+  // too many wrong tries are slowed down
+  let last; for (let i = 0; i < 6; i++) last = await post('/api/login', { username: 'malcolm', password: 'wrong wrong ' + i });
+  assert.equal(last.status, 429); assert.match((await last.json()).error, /Too many/);
+  // a login page with a cross-site origin is blocked
+  assert.equal((await post('/api/login', { username: 'x', password: 'y' }, { origin: 'http://evil.example' })).status, 403);
+  // removal needs the password too
+  assert.equal((await fetch(b + '/api/account', { method: 'DELETE', headers: { ...J, cookie: fresh }, body: JSON.stringify({ current: 'wrong' }) })).status, 403);
+  assert.equal((await fetch(b + '/api/account', { method: 'DELETE', headers: { ...J, cookie: fresh }, body: JSON.stringify({ current: 'another long phrase here' }) })).status, 200);
+  assert.equal((await fetch(b + '/api/state')).status, 200, 'open again after removal');
+  assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /pageSignin/);
+  srv.close();
 }
 
 console.log('all e2e checks passed');

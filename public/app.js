@@ -45,6 +45,7 @@ function toast(msg, err = false) {
 async function api(path, method = 'GET', body) {
   const r = await fetch(path, { method, headers: { 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
   const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && j.error === 'Sign in required') { location.replace('/login'); throw new Error('Signed out. Opening the sign-in page…'); }
   if (!r.ok) throw new Error(j.error || `Request failed (${r.status})`);
   return j;
 }
@@ -99,7 +100,7 @@ const NAV = [
   { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/tickets', 'Support tickets'], ['#/approvals', 'Approvals'], ['#/terminal', 'Terminal sessions']] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'], ['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/repositories', 'Repositories'], ['#/memory', 'Memory'], ['#/rules', 'Delegation rules']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], ['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex'], ['#/connections/github', 'GitHub']] },
-  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
+  { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/updates', 'Updates'], ['#/transfer', 'Export and import'], ['#/startup', 'Startup'], ['#/access', 'Access and safety'], ['#/folders', 'Folders'], ['#/setup', 'Setup guide']] },
 ];
 const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
 const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
@@ -138,6 +139,7 @@ const ROUTES = [
   [/^#\/repositories$/, () => pageRepos()],
   [/^#\/usage$/, () => pageUsage()],
   [/^#\/secrets$/, () => pageSecrets()],
+  [/^#\/signin$/, () => pageSignin()],
   [/^#\/updates$/, () => pageUpdates()],
   [/^#\/transfer$/, () => pageTransfer()],
   [/^#\/teams$/, () => pageTeams()],
@@ -172,8 +174,8 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
-  renderUpdateChip();
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, account: st.account || { exists: false }, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
+  renderUpdateChip(); renderSignOut();
   updateBadge();
 }
 function connectEvents() {
@@ -283,7 +285,7 @@ function pageProjects() {
   const draw = () => {
     const ls = leads();
     view.replaceChildren(
-      h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Projects'), h('p', { class: 'sub-title' }, 'Each project has a lead agent that can create sub-agents.')),
+      h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Projects'), h('p', { class: 'sub-title' }, 'Every project is led by your CEO (or whoever you set as Responsible), who hands work to your specialists.')),
         h('button', { class: 'btn primary big', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project')),
       ls.length ? Object.keys(STAGES).map((k) => { const g = ls.filter((a) => stageOf(a) === k); if (!g.length) return null;
         const grid = h('div', { class: 'grid' }, g.map((a) => h('a', { class: 'card', href: `#/project/${a.id}`, style: 'display:block' },
@@ -294,7 +296,7 @@ function pageProjects() {
         h('div', { class: 'hint', style: 'margin-top:6px' }, `Started ${ago(a.createdAt)}`))));
         const head = h('h2', { style: 'margin:22px 0 4px' }, `${STAGES[k][0]} `, h('small', { class: 'hint' }, `(${g.length})`)), hint = h('p', { class: 'hint', style: 'margin:0 0 10px' }, STAGES[k][1]);
         return k === 'closed' ? h('details', { class: 'stage-closed' }, h('summary', {}, head), hint, grid) : h('section', { 'aria-label': STAGES[k][0] }, head, hint, grid); })
-        : h('div', { class: 'card empty' }, h('p', {}, 'No projects yet. Describe a goal and let a lead agent get started.'), h('button', { class: 'btn primary big', onclick: () => openNewProject() }, 'Start your first project')));
+        : h('div', { class: 'card empty' }, h('p', {}, 'No projects yet. Describe a goal and your CEO gets started.'), h('button', { class: 'btn primary big', onclick: () => openNewProject() }, 'Start your first project')));
   };
   draw(); page = { update: (ev) => ['agent', 'removed'].includes(ev.type) && draw() };
 }
@@ -347,7 +349,7 @@ function pageProject(leadId, general = false) {
   const drawHead = () => {
     const a = sel(), l = S.agents.find((x) => x.id === leadId) || lead;
     el.head.replaceChildren(...[
-      h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
+      h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${!a.parentId && !a.kind && !a.member ? `Led by ${ownerOf(a)?.name || 'your CEO'}` : a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
       modelPicker(a),
       !a.parentId && !a.kind ? stagePicker(a) : null,
@@ -378,7 +380,7 @@ function pageProject(leadId, general = false) {
     const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
     const list = (S.msgs[a.id] || []).map((m) => {
       if (m.role === 'system') return h('div', { class: 'msg system' + (m.error ? ' error' : '') }, m.text);
-      const who = m.role === 'user' ? (m.from ? `From ${m.from.name}` : 'You') : m.role === 'report' ? 'Reports from sub-agents' : m.by ? m.by.name : a.name;
+      const who = m.role === 'user' ? (m.from ? `From ${m.from.name}` : 'You') : m.role === 'report' ? 'Reports from sub-agents' : m.by ? m.by.name : (!a.parentId && !a.kind && !a.member ? ownerOf(a)?.name : null) || a.name;
       return h('div', { class: 'msg ' + m.role }, h('div', { class: 'who' }, who), m.text);
     });
     if (S.stream[a.id]) list.push(h('div', { class: 'msg agent' }, h('div', { class: 'who' }, a.name), S.stream[a.id]));
@@ -499,7 +501,7 @@ function pageProject(leadId, general = false) {
       if (!hits.length) return closePop();
       shown = hits; hi = 0; atStart = before.length - m[2].length - 1; pop.hidden = false; drawPop();
     };
-    input = h('textarea', { rows: '2', placeholder: (a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : 'Tell the lead agent what you need…') + ' Type @ to call a teammate.', 'aria-label': 'Message', oninput: onType, onblur: () => setTimeout(closePop, 120), onkeydown: (e) => {
+    input = h('textarea', { rows: '2', placeholder: (a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : `Tell ${ownerOf(a)?.name || 'your CEO'} what you need…`) + ' Type @ to call a teammate.', 'aria-label': 'Message', oninput: onType, onblur: () => setTimeout(closePop, 120), onkeydown: (e) => {
       if (!pop.hidden && shown.length) {
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hi = (hi + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; drawPop(); return; }
         if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(shown[hi]); return; }
@@ -934,7 +936,7 @@ async function openNewProject() {
   const go = h('button', { class: 'btn primary big', type: 'button' }, 'Start project');
   const dlg = h('dialog', { 'aria-label': 'New project' }, h('form', { method: 'dialog' }, h('h2', { style: 'font-size:20px' }, 'New project'),
     h('label', { class: 'f' }, 'What should the team do?', goal), h('label', { class: 'f' }, 'Project name', name),
-    h('div', { class: 'f' }, 'Lead agent uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, h('div', { class: 'f' }, 'Start with a team?'), teamBox, h('div', { class: 'f' }, 'Access'), accBox, h('label', { class: 'check' }, appr, h('span', {}, h('b', {}, 'Ask me before agents create sub-agents or merge changes'), h('small', { class: 'hint', style: 'display:block' }, 'Recommended. You can review exactly what will happen first.'))), err,
+    h('div', { class: 'f' }, 'Your CEO uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, h('div', { class: 'f' }, 'Start with a team?'), teamBox, h('div', { class: 'f' }, 'Access'), accBox, h('label', { class: 'check' }, appr, h('span', {}, h('b', {}, 'Ask me before agents create sub-agents or merge changes'), h('small', { class: 'hint', style: 'display:block' }, 'Recommended. You can review exactly what will happen first.'))), err,
     h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), go)));
   go.onclick = async () => {
     err.textContent = '';
@@ -1222,10 +1224,48 @@ function pageAppearance() {
     h('div', { class: 'card', style: 'max-width:560px;margin-top:16px' }, h('h2', {}, 'Writing style'), h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: S.plainEnglish, onchange: guard(async (e) => { await api('/api/settings', 'PUT', { plainEnglish: e.target.checked }); S.plainEnglish = e.target.checked; }) }), ' Agents write in plain, simple English'), h('p', { class: 'hint' }, 'On by default: short sentences and everyday words. Turn it off if you prefer technical language.')));
   draw();
 }
+
+// ---------- sign-in account ----------
+async function pageSignin() {
+  crumbs('Settings', 'Sign-in');
+  const info = await api('/api/account');
+  S.account = info; renderSignOut();
+  const field = (label, type, ac, name) => { const i = h('input', { type, autocomplete: ac, name, spellcheck: 'false', autocapitalize: 'none' }); return [h('label', { class: 'f' }, label, i), i]; };
+  const [uL, u] = field('Username', 'text', 'username', 'username'); u.value = info.username || '';
+  const [cL, cur] = field('Current password', 'password', 'current-password', 'current');
+  const [pL, pw] = field(info.exists ? 'New password' : 'Password', 'password', 'new-password', 'password');
+  const [qL, pw2] = field('Type the password again', 'password', 'new-password', 'again');
+  const save = guard(async () => {
+    if (pw.value !== pw2.value) throw new Error('The two passwords are not the same.');
+    await api('/api/account', 'POST', { username: u.value, password: pw.value, current: cur.value });
+    toast(info.exists ? 'Password changed. Other devices are signed out.' : 'Sign-in is on. Other devices will now ask for it.'); pageSignin(); loadState();
+  });
+  const del = guard(async () => {
+    if (!cur.value) throw new Error('Type your current password first.');
+    await api('/api/account', 'DELETE', { current: cur.value }); toast('Sign-in removed.'); pageSignin(); loadState();
+  });
+  const out = guard(async () => { await api('/api/logout', 'POST', {}); location.replace('/login'); });
+  view.replaceChildren(h('h1', {}, 'Sign-in'), h('p', { class: 'sub-title' }, 'A username and password, so you can open Apiary from any laptop on your network.'),
+    h('div', { class: 'card', style: 'max-width:520px' },
+      info.exists ? h('p', {}, h('span', { class: 'pill ok' }, 'On'), ' Signed-in username: ', h('b', {}, info.username)) : h('p', {}, h('span', { class: 'pill' }, 'Off'), ' Only this computer (or someone with the access link) can open Apiary.'),
+      !info.secure ? h('p', { class: 'hint', role: 'alert' }, '⚠ You are on plain http. On a trusted home network that is usually fine, but the password travels unencrypted. For use outside your home, go through an SSH tunnel, Tailscale, or an https reverse proxy.') : null,
+      h('form', { class: 'stack', onsubmit: (e) => { e.preventDefault(); save(); } },
+        uL, info.exists ? cL : null, pL, qL,
+        h('p', { class: 'hint' }, 'At least 10 characters. Three or four random words works well.'),
+        h('div', { class: 'formrow' }, h('button', { class: 'btn primary', type: 'submit' }, info.exists ? 'Change password' : 'Turn on sign-in'),
+          info.exists ? h('button', { class: 'btn', type: 'button', onclick: out }, 'Sign out here') : null,
+          info.exists ? h('button', { class: 'btn danger', type: 'button', onclick: del }, 'Remove sign-in') : null)),
+      h('p', { class: 'hint', style: 'margin-top:12px' }, 'Forgot it? On the machine running Apiary, run: apiary user set <name>')));
+}
+function renderSignOut() {
+  let b = $('#signout');
+  if (!S.account?.exists) { b?.remove(); return; }
+  if (!b) { b = h('button', { id: 'signout', class: 'btn', style: 'padding:4px 12px;font-size:13px', onclick: guard(async () => { await api('/api/logout', 'POST', {}); location.replace('/login'); }) }, 'Sign out'); $('#theme').before(b); }
+}
 function pageAccess() {
   crumbs('Settings', 'Access and safety');
   view.replaceChildren(h('h1', {}, 'Access and safety'), h('p', { class: 'sub-title' }, 'Agents can run commands on this computer, so Apiary is careful about who can reach it.'),
-    h('div', { class: 'card', style: 'max-width:720px' }, h('h2', {}, 'Who can open Apiary'), h('p', {}, 'By default it only listens on this computer (127.0.0.1). To use it from another device, start it with a token:'), cmdBox('APIARY_HOST=0.0.0.0 APIARY_TOKEN=choose-a-long-secret apiary'),
+    h('div', { class: 'card', style: 'max-width:720px' }, h('h2', {}, 'Who can open Apiary'), h('p', {}, 'By default it only listens on this computer (127.0.0.1). To use it from another device, run ', h('code', {}, 'apiary start --lan'), ' and then turn on a username and password under ', h('a', { href: '#/signin' }, 'Sign-in'), '.'),
       h('h2', { style: 'margin-top:20px' }, 'Safe and Full access'), h('p', {}, 'Safe lets an agent edit files in its own folder. Full access lets it run any command without asking. Choose per project when you create it.'),
       h('h2', { style: 'margin-top:20px' }, 'Git projects'), h('p', {}, 'In a git repository every agent works on its own branch and checkout, so your own working copy is never touched. Nothing is pushed until you open a pull request.')));
 }

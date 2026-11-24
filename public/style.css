@@ -214,3 +214,4 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .mention-opt[aria-selected="true"],.mention-opt:hover{background:var(--hover,rgba(245,184,61,.16))}
 .masked{-webkit-text-security:disc;text-security:disc;font-family:var(--mono,monospace)}
 .secret-fields input[type=file]{padding:6px}
+.stack{display:flex;flex-direction:column;gap:12px}

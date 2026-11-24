@@ -68,6 +68,15 @@ if [ -z "$LAN" ]; then
 fi
 LANFLAG=""; [ "$LAN" = yes ] && LANFLAG="--lan"
 
+# For other devices, offer a username and password (so no long link is needed). Skipped when one exists or there is no keyboard.
+if [ "$LAN" = yes ] && { : </dev/tty; } 2>/dev/null && ! "$APIARY" user 2>/dev/null | grep -q 'is on'; then
+  printf '\nCreate a username and password for signing in from other devices? [Y/n] ' >/dev/tty; read -r ua </dev/tty || ua=""
+  case "$ua" in n|N|no|NO) ;; *)
+    printf 'Username: ' >/dev/tty; read -r uname </dev/tty || uname=""
+    [ -n "$uname" ] && { "$APIARY" user set "$uname" </dev/tty || echo "Skipped. You can do it later: apiary user set <name>"; } ;;
+  esac
+fi
+
 # Start it: as a service (starts at every login and restarts itself) when systemd is available, else in the background.
 started=""
 if [ "$SERVICE" = 1 ] && command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; then
@@ -95,7 +104,7 @@ if [ -z "$ready" ]; then
 fi
 echo "✔ Apiary is running$([ "$started" = service ] && echo ' (as a service: it starts by itself and restarts if it stops)')."
 if [ "$LAN" = yes ]; then
-  echo; echo "Open it from your other device with this private link (it contains your access token, so keep it to yourself):"
+  if "$APIARY" user 2>/dev/null | grep -q 'is on'; then echo; echo "Open it from your other device and sign in with your username and password:"; "$APIARY" token | grep -E '^http' | sed -E 's#/\?token=.*#/#'; echo; echo "(Backup: the private link below also works. It contains an access token, so keep it to yourself.)"; else echo; echo "Open it from your other device with this private link (it contains your access token, so keep it to yourself):"; fi
   "$APIARY" token | grep -E '^http' || echo "  (run: $APIARY token)"
   echo "If the page does not open, the firewall may block port $PORT (for example: sudo ufw allow $PORT/tcp)."
 else

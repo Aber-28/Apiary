@@ -7,6 +7,7 @@ Agents can run commands on your computer, so Apiary is strict by default.
 * **Secrets stay put.** API keys and tokens live in `~/.apiary/state.json` (permissions 0600, folder 0700). The interface only ever sees the last four characters.
 * **Tokens are not written into repositories.** GitHub tokens are passed to git per command, not saved in `.git/config`.
 * **Browser protections.** Every response sends a strict Content Security Policy (only Apiary's own scripts run), `X-Frame-Options: DENY`, `nosniff` and `no-referrer`. API answers are never cached.
+* **Sign-in.** An optional username and password (see [Sign-in](../using-apiary/sign-in.md)). Only a salted scrypt hash is stored, in `~/.apiary/auth.json` (0600). The session cookie is HttpOnly and SameSite=Strict, signed, lasts 14 days, and stops working when the password changes. Wrong tries are delayed per address and per username.
 * **Token handling.** The access token is checked in constant time. The first visit through the access link stores it in an HttpOnly, SameSite=Strict cookie and removes it from the address bar.
 * **GitHub token scope.** The token is attached only to requests to `https://github.com/`, never to other servers.
 * **Safe imports.** An import is refused if the file contains special files, hard links leaving the export, or anything stored beneath a link. Only import files you exported yourself.
@@ -18,7 +19,7 @@ Agents can run commands on your computer, so Apiary is strict by default.
 
 ## Using it beyond your own computer
 
-Start it with `apiary start --lan`. This enables an access token and accepts requests addressed to an IP address (which cannot be used for DNS rebinding). Host names must be listed in `APIARY_ALLOWED_HOSTS`. Put it behind HTTPS or a VPN if it leaves a network you trust. Do **not** expose it directly to the internet: anyone with the token can run commands as your user.
+Start it with `apiary start --lan`. This enables an access token and accepts requests addressed to an IP address (which cannot be used for DNS rebinding). Host names must be listed in `APIARY_ALLOWED_HOSTS`. Put it behind HTTPS or a VPN if it leaves a network you trust. Turn on a username and password (Settings > Sign-in) so you do not need the long link. Plain http sends the password unencrypted, so outside a network you trust use an SSH tunnel, Tailscale or an https reverse proxy. Do **not** expose it directly to the internet: anyone who can sign in can run commands as your user.
 
 **Plain http is not encrypted.** On your own computer (`localhost`) that does not matter. From another device, the access link, API keys and vault passphrase cross the network readable. Prefer an SSH tunnel (`ssh -L 7777:localhost:7777 you@host`), Tailscale, or an https reverse proxy in front of Apiary. Apiary shows "Not encrypted" in the top bar when you are on plain http from another address.
 

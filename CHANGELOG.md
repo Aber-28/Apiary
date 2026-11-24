@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0
+
+* **The CEO leads everything.** A new project is led by your CEO, who hands work to the specialists he created. There is no hidden "project lead" agent any more. The agent shown as **Responsible** is the one acting in the project chat, and you can change it per project. Projects you already have keep whoever is responsible today.
+* Secrets given to the CEO work in his projects without asking again, and specialists doing project work get access to the project folder.
+* **Sign-in with a username and password**, so you can use Apiary from any laptop. Create it under **Settings > Sign-in**, with `apiary user set <name>`, or when the installer asks. The password is stored only as a salted scrypt hash, sessions last 14 days, wrong guesses are slowed down, and changing the password signs every other device out. The access link keeps working as a backup.
+* New command: `apiary user [set <name>|remove]`. It is also the way back in if you forget the password.
+
 ## 0.12.1
 
 * An agent that asks for a secret that is not assigned to it no longer just gets refused. You get an approval card saying the secret is **not assigned** to that agent: *Allow once*, *Always allow* (which also assigns it), or *Deny*. This fixes the case where you gave a secret to the CEO but the project's lead agent was the one doing the work.

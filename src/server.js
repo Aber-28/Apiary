@@ -11,7 +11,8 @@ import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
-import { Store } from './store.js';
+import { Store, HOME } from './store.js';
+import { Auth, COOKIE, maxAge } from './auth.js';
 import { Engine } from './engine.js';
 import { Updater } from './updater.js';
 import { authArgs } from './github.js';
@@ -28,7 +29,7 @@ const TOKEN = process.env.APIARY_TOKEN || '';
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const EXTRA_HOSTS = new Set((process.env.APIARY_ALLOWED_HOSTS || '').split(',').map((s) => s.trim()).filter(Boolean));
 
-export function createServer(engine, { updater = null, restart = () => {} } = {}) {
+export function createServer(engine, { updater = null, restart = () => {}, auth = new Auth(path.join(HOME, 'auth.json')) } = {}) {
   const clients = new Set();
   engine.on('event', (ev) => {
     const data = `data: ${JSON.stringify(ev)}\n\n`;
@@ -60,20 +61,28 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
     return timingSafeEqual(a, b);
   };
 
+  // what can be reached before signing in
+  const OPEN = new Set(['/login', '/login.js', '/login.css', '/theme.js', '/style.css', '/api/login']);
+  const secure = (req) => req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
+  const ipOf = (req) => req.socket.remoteAddress || '?';
+
   function guard(req, url) {
     // Stops other websites (CSRF) and DNS-rebinding from driving a local agent runner.
     const hostName = (req.headers.host || '').replace(/:\d+$/, '');
     // A bare IP address cannot be used for DNS rebinding, so with a token set it is safe to accept (LAN use).
     const ipHost = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostName) || /^\[[0-9a-fA-F:]+\]$/.test(hostName);
-    if (!LOOPBACK.has(hostName) && !EXTRA_HOSTS.has(hostName) && !(TOKEN && ipHost)) return [403, TOKEN ? 'Host not allowed. Use the server\'s IP address, or set APIARY_ALLOWED_HOSTS=<name>' : 'Host not allowed. To open Apiary from another device, start it with: apiary start --lan'];
+    if (!LOOPBACK.has(hostName) && !EXTRA_HOSTS.has(hostName) && !((TOKEN || auth.exists) && ipHost)) return [403, (TOKEN || auth.exists) ? 'Host not allowed. Use the server\'s IP address, or set APIARY_ALLOWED_HOSTS=<name>' : 'Host not allowed. To open Apiary from another device, start it with: apiary start --lan'];
     if (req.headers.origin) {
       let o; try { o = new URL(req.headers.origin).host; } catch { return [403, 'Bad origin']; }
       if (o !== req.headers.host) return [403, 'Cross-origin request blocked'];
     }
-    if (TOKEN) {
-      const cookie = /(?:^|;\s*)apiary_token=([^;]+)/.exec(req.headers.cookie || '')?.[1];
-      const given = req.headers['x-apiary-token'] || url.searchParams.get('token') || (cookie && decodeURIComponent(cookie));
-      if (!sameToken(given)) return [401, 'Token required'];
+    if (TOKEN || auth.exists) {
+      const cookies = req.headers.cookie || '';
+      const pick = (n) => { const v = new RegExp(`(?:^|;\\s*)${n}=([^;]+)`).exec(cookies)?.[1]; try { return v && decodeURIComponent(v); } catch { return ''; } };
+      const given = req.headers['x-apiary-token'] || url.searchParams.get('token') || pick('apiary_token');
+      const okToken = !!TOKEN && sameToken(given);
+      const okSession = auth.exists && auth.validCookie(pick(COOKIE));
+      if (!okToken && !okSession && !OPEN.has(url.pathname)) return [401, auth.exists ? 'Sign in required' : 'Token required'];
     }
     const upload = url.pathname === '/api/import' && /^application\/(gzip|x-gzip|octet-stream)/.test(req.headers['content-type'] || '') && req.headers['x-apiary-import'] === '1';
     if (['POST', 'PUT', 'DELETE'].includes(req.method) && !upload && !(req.headers['content-type'] || '').startsWith('application/json')) {
@@ -87,6 +96,10 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
     try {
       const bad = guard(req, url);
+      if (bad && bad[0] === 401 && auth.exists && req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
+        res.writeHead(302, { location: '/login', 'cache-control': 'no-store' });
+        return res.end();
+      }
       if (bad && bad[0] === 401 && req.method === 'GET' && (req.headers.accept || '').includes('text/html')) {
         res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' });
         return res.end('<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>Apiary</title><body style="font:16px system-ui;max-width:34em;margin:15vh auto;padding:0 1em"><h1>Apiary needs its access link</h1><p>This Apiary is protected. Open the full link printed in the terminal where it was started (it ends with <code>/?token=…</code>), or run <code>apiary token</code> on that machine.</p>');
@@ -100,6 +113,34 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
       const m = (re) => re.exec(url.pathname);
       let r;
 
+      // ----- sign-in -----
+      if (req.method === 'GET' && url.pathname === '/login') { url.pathname = '/login.html'; }
+      if (req.method === 'POST' && url.pathname === '/api/login') {
+        if (!auth.exists) return json(res, 400, { error: 'No account has been created yet.' });
+        const b = await readBody(req);
+        const value = await auth.login(b.username, b.password, ipOf(req));
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `${COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure(req) ? '; Secure' : ''}` });
+        return res.end(JSON.stringify({ ok: true }));
+      }
+      if (req.method === 'POST' && url.pathname === '/api/logout') {
+        res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secure(req) ? '; Secure' : ''}` });
+        return res.end(JSON.stringify({ ok: true }));
+      }
+      if (url.pathname === '/api/account') {
+        const info = () => ({ exists: auth.exists, username: auth.username, secure: secure(req) || LOOPBACK.has((req.headers.host || '').replace(/:\d+$/, '')) });
+        if (req.method === 'GET') return json(res, 200, info());
+        const b = await readBody(req);
+        // changing or removing needs the current password, so a borrowed open window is not enough
+        if (auth.exists && !(await auth.verify(b.current))) { await new Promise((r) => setTimeout(r, 800)); return json(res, 403, { error: 'The current password is not right.' }); }
+        if (req.method === 'POST') {
+          await auth.set(b.username || auth.username, b.password);
+          const value = auth.cookie();
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store', 'set-cookie': `${COOKIE}=${encodeURIComponent(value)}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure(req) ? '; Secure' : ''}` });
+          return res.end(JSON.stringify(info()));
+        }
+        if (req.method === 'DELETE') { await auth.remove(); return json(res, 200, info()); }
+      }
+
       if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
         const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
         const file = path.resolve(PUBLIC, rel);
@@ -110,7 +151,7 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
         if (req.method === 'GET') return json(res, 200, { limits: engine.limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
@@ -380,8 +421,8 @@ export function createServer(engine, { updater = null, restart = () => {} } = {}
 }
 
 export function main(links = []) {
-  if (!LOOPBACK.has(HOST) && !TOKEN) {
-    console.error('Refusing to listen on a non-local address without APIARY_TOKEN set.');
+  if (!LOOPBACK.has(HOST) && !TOKEN && !new Auth(path.join(HOME, 'auth.json')).exists) {
+    console.error('Refusing to listen on a non-local address without APIARY_TOKEN set or a sign-in account (apiary user set <name>).');
     process.exit(1);
   }
   // the AI tools are installed for this user in ~/.local/bin; make sure a service finds them too

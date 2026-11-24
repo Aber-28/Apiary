@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sign in · Apiary</title>
+<link rel="stylesheet" href="/style.css">
+<script src="/theme.js"></script>
+<style>
+.signin{max-width:380px;margin:12vh auto;padding:0 16px}
+.signin .card{padding:24px;display:flex;flex-direction:column;gap:14px}
+.signin h1{margin:0 0 4px;font-size:22px}
+.signin label{display:flex;flex-direction:column;gap:6px;font-weight:600;font-size:13px}
+.signin .err{color:var(--err);min-height:20px;font-size:13px}
+</style>
+</head>
+<body>
+<main class="signin">
+  <form id="f" class="card" autocomplete="on">
+    <h1>Sign in to Apiary</h1>
+    <label>Username<input id="u" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus></label>
+    <label>Password<input id="p" type="password" name="password" autocomplete="current-password" required></label>
+    <div id="e" class="err" role="alert"></div>
+    <button class="btn primary big" type="submit">Sign in</button>
+  </form>
+</main>
+<script src="/login.js"></script>
+</body>
+</html>

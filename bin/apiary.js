@@ -11,6 +11,8 @@ Usage:
   apiary service <install|uninstall|status> [--lan]
                                      Start Apiary automatically at login (systemd user service)
   apiary token                       Print the access link for --lan (and create the token if needed)
+  apiary user [set <name>|remove]    Username and password for signing in from other laptops.
+                                     Also the way back in if you forget the password
   apiary status                      Show what is connected and which agents exist
   apiary connect <claude|codex|github> [--method cli|api|token] [--model NAME]
                                      Choose how a service is reached. For api/token, pipe the key in:
@@ -24,6 +26,24 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from 'n
 import { networkInterfaces, homedir } from 'node:os';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
+
+// Reads a line without showing it. Piped input (a script) is read as is.
+async function hiddenLine(prompt) {
+  const { stdin, stderr } = process;
+  if (!stdin.isTTY) { let d = ''; for await (const c of stdin) d += c; return d.replace(/\r?\n$/, ''); }
+  stderr.write(prompt);
+  return new Promise((resolve) => {
+    let v = ''; stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
+    const on = (ch) => {
+      for (const c of ch) {
+        if (c === '\r' || c === '\n' || c === '\u0004') { stdin.setRawMode(false); stdin.pause(); stdin.off('data', on); stderr.write('\n'); return resolve(v); }
+        if (c === '\u0003') { stdin.setRawMode(false); stderr.write('\n'); process.exit(130); }
+        if (c === '\u007f' || c === '\b') v = v.slice(0, -1); else v += c;
+      }
+    };
+    stdin.on('data', on);
+  });
+}
 // One token, created on first use and kept (private file) so the link stays the same between restarts.
 function lanToken() {
   const dir = process.env.APIARY_HOME || path.join(homedir(), '.apiary'), file = path.join(dir, 'token');
@@ -69,6 +89,20 @@ try {
     else if (sub === 'uninstall') { await svc.uninstall(); console.log('✔ Removed. Apiary will no longer start automatically.'); }
     else if (sub === 'status') { const s = await svc.status(); console.log(s.supported ? `installed: ${s.installed}  enabled: ${s.enabled}  running: ${s.active}` : s.reason); }
     else throw new Error('Usage: apiary service <install|uninstall|status> [--lan]');
+  } else if (cmd === 'user') {
+    const { Auth } = await import('../src/auth.js');
+    const auth = new Auth(path.join(process.env.APIARY_HOME || path.join(homedir(), '.apiary'), 'auth.json'));
+    const sub = args[0];
+    if (!sub || sub === 'status') console.log(auth.exists ? `Sign-in is on. Username: ${auth.username}` : 'Sign-in is off. Turn it on with: apiary user set <name>');
+    else if (sub === 'remove') { await auth.remove(); console.log('✔ Sign-in removed.'); }
+    else if (sub === 'set') {
+      const name = args[1] || auth.username;
+      if (!name) throw new Error('Usage: apiary user set <name>');
+      const first = await hiddenLine('Password: '), again = process.stdin.isTTY ? await hiddenLine('Type it again: ') : first;
+      if (first !== again) throw new Error('The two passwords are not the same.');
+      await auth.set(name, first);
+      console.log(`✔ Sign-in is on for "${name}". Everyone signed in before is signed out.`);
+    } else throw new Error('Usage: apiary user [set <name>|remove]');
   } else if (cmd === 'token') {
     const t = process.env.APIARY_TOKEN || lanToken();
     console.log(`Access token: ${t}`);

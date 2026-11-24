@@ -72,6 +72,7 @@ export class Engine extends EventEmitter {
     this.tickets = new Tickets(store);
     this.repos = new Repos(store, () => this.connections.get('github'), path.join(path.dirname(store.file), 'repos'));
     this.userLeases = new Map(); // agentId -> Map(secret name -> username), same lifetime as leases
+    this.projectFor = new Map(); // agentId -> project id, while a specialist is working on a project from another folder
     this.metaLeases = new Map(); // agentId -> { ENV_NAME: value } for the non-secret details of a lease (host, port, how to log in)
     this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
@@ -188,7 +189,13 @@ export class Engine extends EventEmitter {
   }
   get memoryEnabled() { return this.store.data.settings.memory !== false; }
   setMemoryEnabled(v) { this.store.data.settings.memory = !!v; this.store.save(); return this.memoryEnabled; }
-  _mkey(a) { return a.memKey || slug(a.name); }
+  // A project has no agent of its own. Whoever is responsible for it (the CEO unless you chose another agent) does the work,
+  // using their own name, instructions, secrets, memory and team. The project keeps its folder, plan and chat history.
+  _isProject(a) { return !a.parentId && !a.kind && !a.member; }
+  _persona(a) { if (!this._isProject(a)) return a; const o = this.ownerOf(a); return o && o.id !== a.id ? o : a; }
+  // Whose team is it: for a project led by the CEO, the CEO's team of specialists.
+  _teamRoot(a) { const r = this.rootOf(a); if (!this._isProject(r)) return r; const p = this._persona(r); return p.kind === 'general' ? p : r; }
+  _mkey(a) { const p = this._persona(a); return p.memKey || slug(p.name); }
   _pkey(a) { const r = this.rootOf(a); return r.git?.repo || r.cwd || r.id; }
   // Remember one finished task for this agent, its project, and (through the project) its teammates.
   _record(agent, userText, from, final) {
@@ -320,7 +327,7 @@ export class Engine extends EventEmitter {
 
   // ---------- hiring ----------
   _scope(root) { return root.kind === 'general' ? 'org' : root.id; }
-  _standing(agent) { return (agent.mdFile && orgfiles.readStanding(agent.mdFile)) || agent.instructions || ''; }
+  _standing(agent) { const p = this._persona(agent); return (p.mdFile && orgfiles.readStanding(p.mdFile)) || p.instructions || ''; }
 
   // Create a permanent team member: name (comic-book style unless given), full profile, Markdown file.
   async _makeMember(root, spec) {
@@ -340,7 +347,7 @@ export class Engine extends EventEmitter {
 
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
   async _hire(proposer, hires, notes) {
-    const root = this.rootOf(proposer);
+    const root = this._teamRoot(proposer);
     const roster = this._roster(root);
     const titles = new Set(roster.map((m) => (m.title || m.name).toLowerCase()));
     const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
@@ -542,7 +549,7 @@ export class Engine extends EventEmitter {
       const it = this.vault.byName(r.name);
       if (!this.vault.unlocked) { notes.push(`The secrets vault is locked, so "${r.name}" is not available. Ask the human to unlock it (Secrets page).`); continue; }
       if (!it || !(agent.member || !agent.parentId)) { notes.push(`There is no secret called "${r.name}" that you can use.`); continue; }
-      const key = this._mkey(agent), asg = it.assigned?.[key];
+      const key = this._mkey(agent), asg = it.assigned?.[key] || it.assigned?.[agent.memKey || slug(agent.name)];   // the second is how it was assigned before projects were led by the CEO
       let asgd = asg;
       if (!asg) {
         // Not assigned to this agent yet (for example you gave it to the CEO and the project's lead is asking). Ask the human on the spot.
@@ -596,7 +603,7 @@ export class Engine extends EventEmitter {
   }
   eligibleAgents() {
     const seen = new Map();
-    for (const a of Object.values(this.agents)) if (a.member || !a.parentId) { const k = this._mkey(a); if (!seen.has(k)) seen.set(k, { key: k, label: this._agentLabel(a) }); }
+    for (const a of Object.values(this.agents)) if (a.member || (!a.parentId && !this._isProject(a))) { const k = this._mkey(a); if (!seen.has(k)) seen.set(k, { key: k, label: this._agentLabel(a) }); }
     return [...seen.values()].sort((x, y) => x.label.localeCompare(y.label));
   }
 
@@ -648,7 +655,7 @@ export class Engine extends EventEmitter {
     const id = id8();
     const title = (name || goal || 'New project').trim().split('\n')[0].slice(0, 48);
     const pslug = slug(title);
-    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, ownerId: this._ceo()?.id, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
+    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, ownerId: this.orgDone ? this._ceo()?.id : undefined, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
 
     // Where does the work happen?
     let repo = null;
@@ -831,7 +838,9 @@ export class Engine extends EventEmitter {
 
   _system(agent) {
     const names = this.available.filter((p) => p.id !== 'mock').map((p) => p.id).join(', ') || agent.provider;
-    let s = `You are "${agent.name}" (${agent.role}), one agent in a small team coordinated by Apiary. Work in your current directory unless told otherwise.\n`;
+    const who = this._persona(agent), proj = this._isProject(agent) ? agent : null;
+    let s = `You are "${who.name}" (${who.role}), one agent in a small team coordinated by Apiary. Work in your current directory unless told otherwise.\n`;
+    if (proj) s += `You are leading the project "${proj.name}". Its folder is your current directory. ${who.id !== proj.id && who.kind === 'general' ? 'You are the CEO: you decide who does each part. ' : ''}Messages in this chat come from the human.\n`;
     if (this.plainEnglish) s += '\nWRITING STYLE: Write in plain, simple English by default. Short sentences, everyday words, no jargon or buzzwords. If a technical term is needed, explain it in a few words the first time. Say what you did and what happens next. Code, commands and file contents stay exact.\n';
     const standing = this._standing(agent);
     if (standing) s += `\nStanding instructions for you:\n${standing}\n`;
@@ -842,13 +851,13 @@ export class Engine extends EventEmitter {
       : 'Your replies go to the human you are working for. Be clear and concise.\n';
     s += 'If a message is marked "Message from teammate", your reply goes back to that teammate.\n';
     if (this.memoryEnabled) s += 'You have a long-term memory, shown below as MEMORY when there is something to show. To keep something for next time, put ```apiary-remember\n{"text":"what to remember","scope":"agent"}\n``` in your reply (scope: "agent" for you alone, "project" for the whole team on this project, "global" for everyone). Save lasting facts, decisions and preferences, not chatter.\n';
-    const roster = this._roster(agent);
-    if (roster.length) {
-      s += `\nYou lead the team "${agent.team?.name || 'your team'}". Its members stay on this project, remember past work and talk to each other:\n` + roster.map((m) => `- ${m.name}${m.title ? ` (${m.title})` : ''}: ${m.role}`).join('\n') +
+    const roster = this._roster(this._teamRoot(agent));
+    if (roster.length && !agent.parentId) {
+      s += `\nYou lead the team "${this._teamRoot(agent).team?.name || 'your team'}". Its members stay on this project, remember past work and talk to each other:\n` + roster.map((m) => `- ${m.name}${m.title ? ` (${m.title})` : ''}: ${m.role}`).join('\n') +
         '\n\nDo not do the specialists\' work yourself. Decide which member is best placed and hand it over with:\n\n```apiary-assign\n{"to":"Member name","task":"Complete instructions that stand alone"}\n```\n\n' +
         'Apiary then makes that member check with the other members first. If a teammate needs something done before the work can start, it is done first; if one blocks the work, you are told why and nothing is changed. You then get the member\'s report to summarise for the human. Hand independent jobs to different members in the same reply; otherwise one at a time. If no member fits, say so or do it yourself.\n';
     }
-    if (agent.org) s += '\nYou are the CEO of this person\'s organisation. Questions you can answer yourself; real jobs go to the right team member.\n' + (orgfiles.readCompany() ? `\nAbout the human\'s setup (written during setup; the human may edit it):\n${orgfiles.readCompany()}\n` : '');
+    if (agent.org || (proj && who.kind === 'general')) s += '\nYou are the CEO of this person\'s organisation. Questions you can answer yourself; real jobs go to the right team member.\n' + (orgfiles.readCompany() ? `\nAbout the human\'s setup (written during setup; the human may edit it):\n${orgfiles.readCompany()}\n` : '');
     else if (agent.kind === 'general') s += '\nYou are the person\'s everyday assistant: answer questions, think things through and do quick tasks here. When something is a real piece of work with its own files and goals (a website, an app, a report series), suggest they create a project for it in Projects so it gets its own space, team and documents.\n';
     if (!agent.parentId) {
       s += '\nYou can propose permanent hires when this project needs a specialist that the team lacks. Apiary shows your proposal to the human with your reasons, writes each hire\'s profile and guardrails from its department, and adds approved people to the team (visible in the organisation chart). Propose like this:\n\n' +
@@ -870,7 +879,7 @@ export class Engine extends EventEmitter {
       s += `\nYou are a standing member of the team "${lead?.team?.name || 'team'}" led by ${lead?.name || 'the lead'}. Before a teammate does a task, Apiary may ask you for a pre-check from your area. Then reply in exactly this shape and do no work yet:\nVERDICT: GO | CONDITIONS | BLOCK\nREASON: one or two sentences\nPREREQUISITE: something that must be done first (one line per item, only with CONDITIONS)\n` +
         'Use CONDITIONS when something in your area must be done or checked first; use BLOCK only if the task should not happen at all. If you are asked to complete a prerequisite, do it fully now and begin your reply with DONE or FAILED. Your work is on your own branch; Apiary merges it into the lead\'s.\n';
     }
-    const mates = this.tree(this.rootOf(agent).id).map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id);
+    const mates = [...new Set([...this.tree(this.rootOf(agent).id), ...(!agent.parentId ? this._roster(this._teamRoot(agent)).map((m) => m.id) : [])])].map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id);
     if (mates.length && this.limits.maxPeerMessages > 0) {
       s += '\nYou can talk to or hand work to any teammate by name. Put a block like this in your reply:\n\n' +
         '```apiary-send\n{"to":"Teammate name","text":"Your question or the task, written so it stands alone","wait":true}\n```\n\n' +
@@ -895,6 +904,17 @@ export class Engine extends EventEmitter {
     return s;
   }
 
+  // Run a specialist's turn on a project that lives in another folder, then forget it again.
+  _onProject(workerId, root, fn) {
+    if (!root) return fn();
+    this.projectFor.set(workerId, root.id);
+    return Promise.resolve().then(fn).finally(() => { if (this.projectFor.get(workerId) === root.id) this.projectFor.delete(workerId); });
+  }
+  _projectDirs(agent) { const r = this.agents[this.projectFor.get(agent.id)]; return r?.cwd && r.cwd !== agent.cwd ? [r.cwd] : []; }
+  _projectNote(agent) {
+    const r = this.agents[this.projectFor.get(agent.id)];
+    return r ? `\nYou are working on the project "${r.name}". Its folder is ${r.cwd} (you have been given access to it). Make the project's changes there. Your own folder is only for your notes.\n` : '';
+  }
   async _exec(agent, prompt) {
     const ctl = new AbortController();
     this.ctls.set(agent.id, ctl);
@@ -902,9 +922,9 @@ export class Engine extends EventEmitter {
     this._log(agent, `── ${new Date().toLocaleTimeString()} ${agent.name} (${agent.provider}, ${agent.method === 'api' ? 'web' : 'terminal'}) ──`);
     try {
       const runner = providers.pick(agent);
-      const system = this._system(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
+      const system = this._system(agent) + this._projectNote(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
       const res = await runner.run({
-        agent, prompt, system, dirs: this.repos.dirsFor(agent), signal: ctl.signal,
+        agent, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: ctl.signal,
         history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
         onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }),
         onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
@@ -934,7 +954,7 @@ export class Engine extends EventEmitter {
   // ----- project stages: Building, then Maintenance, finally Closed (nothing is ever deleted) -----
   stageOf(root) { return root.stage || 'building'; }
   // The agent responsible for a project (its lead does the work). The CEO unless you choose someone else.
-  ownerOf(root) { return (root.ownerId && this.agents[root.ownerId]) || this._ceo(); }
+  ownerOf(root) { return (root.ownerId && this.agents[root.ownerId]) || (this.orgDone ? this._ceo() : null); }
   projectsOwnedBy(agent) { return Object.values(this.agents).filter((r) => !r.parentId && r.kind !== 'general' && r.id !== agent.id && this.ownerOf(r)?.id === agent.id); }
   setOwner(rootId, agentId) {
     const root = this.agents[rootId];
@@ -948,11 +968,8 @@ export class Engine extends EventEmitter {
     return root;
   }
   _ownerNote(agent) {
-    const bits = [];
     const owned = this.projectsOwnedBy(agent);
-    if (owned.length) bits.push(`You are responsible for these projects (the lead named does the work): ${owned.map((r) => r.name).join(', ')}. Each is run by a lead agent with the same name. Give it work, or ask how it is going, with an apiary-send block addressed to that name.`);
-    if (!agent.parentId && agent.kind !== 'general') { const o = this.ownerOf(agent); if (o) bits.push(`${o.name} is responsible for your project. You can report to or ask ${o.name} with an apiary-send block addressed to "owner".`); }
-    return bits.length ? '\n' + bits.join('\n') + '\n' : '';
+    return owned.length ? `\nYou lead these projects: ${owned.map((r) => r.name).join(', ')}. When a message arrives in a project you work in its folder. You can also tell someone else about a project with an apiary-send block.\n` : '';
   }
   setStage(rootId, stage, note = '', by = 'you') {
     const root = this.agents[rootId];
@@ -1102,7 +1119,7 @@ export class Engine extends EventEmitter {
   // Every task has an agent. Without a choice it is the CEO, who can hand it to a specialist.
   _ceo() { return Object.values(this.agents).find((a) => a.kind === 'general'); }
   assignable() {
-    const ok = (a) => a.kind === 'general' || ((a.member || !a.parentId) && (this.rootOf(a).kind === 'general' || this.stageOf(this.rootOf(a)) !== 'closed'));
+    const ok = (a) => a.kind === 'general' || (a.member && this.rootOf(a).kind === 'general');
     return Object.values(this.agents).filter(ok).map((a) => ({ id: a.id, label: this._agentLabel(a), ceo: a.kind === 'general' }))
       .sort((x, y) => Number(y.ceo) - Number(x.ceo) || x.label.localeCompare(y.label));
   }
@@ -1322,8 +1339,7 @@ export class Engine extends EventEmitter {
     for (let tries = 0; tries < 10; tries++) {   // a just-spawned teammate may not exist yet
       if (t === 'parent' && agent.parentId) return { peer: this.agents[agent.parentId] };
       if (t === 'lead') return { peer: root };
-      if (t === 'owner' && !agent.parentId && agent.kind !== 'general') { const o = this.ownerOf(agent); if (o && o.id !== agent.id) return { peer: o }; }
-      const pool = [...new Set([...this.tree(root.id), ...this.projectsOwnedBy(agent).map((r) => r.id), ...(!agent.parentId && agent.kind !== 'general' ? [this.ownerOf(agent)?.id].filter(Boolean) : [])])];
+      const pool = [...new Set([...this.tree(root.id), ...this._roster(this._teamRoot(agent)).map((m) => m.id), ...this.projectsOwnedBy(agent).map((r) => r.id)])];
       const hits = pool.map((i) => this.agents[i]).filter((a) => a && a.id !== agent.id && (a.id === to || a.name.toLowerCase() === t || (a.title || '').toLowerCase() === t));
       if (hits.length === 1) return { peer: hits[0] };
       if (hits.length > 1) return { error: `More than one teammate is called "${to}". Use a more specific name.` };
@@ -1355,13 +1371,14 @@ export class Engine extends EventEmitter {
     }
     this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
     this._msg(agent, { role: 'system', text: `${m.wait ? 'Asked' : 'Told'} ${peer.name}: ${m.text.slice(0, 160)}${m.text.length > 160 ? '…' : ''}`, agentId: peer.id });
+    const proj = this._isProject(this.rootOf(agent)) && this.rootOf(peer).id !== this.rootOf(agent).id ? this.rootOf(agent) : null;
     if (!m.wait) {
-      this.send(peer.id, m.text, agent).catch(() => {});
+      this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).catch(() => {});
       notes.push(`Message delivered to ${peer.name} (no reply awaited).`);
       return null;
     }
     this._edge(agent.id, peer.id);
-    return this.send(peer.id, m.text, agent).then((text) => ({ kind: 'reply', name: peer.name, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, text: `FAILED: ${e.message}` }))
+    return this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).then((text) => ({ kind: 'reply', name: peer.name, text: text || '(no reply)' }), (e) => ({ kind: 'reply', name: peer.name, text: `FAILED: ${e.message}` }))
       .finally(() => this.waitingOn.get(agent.id)?.delete(peer.id));
   }
   _edge(a, b) { (this.waitingOn.get(a) || this.waitingOn.set(a, new Set()).get(a)).add(b); }
@@ -1409,7 +1426,8 @@ export class Engine extends EventEmitter {
 
   // ----- team workflow: assign -> pre-check by the others -> prerequisites -> the job -----
   async _assignJob(lead, a, notes) {
-    const roster = this._roster(lead);
+    const roster = this._roster(this._teamRoot(lead));
+    const projRoot = this._isProject(this.rootOf(lead)) ? this.rootOf(lead) : null;
     const want = String(a.to).trim().toLowerCase();
     const worker = roster.find((m) => m.id === a.to || m.name.toLowerCase() === want || (m.title || '').toLowerCase() === want);
     if (!worker) { notes.push(roster.length ? `No team member called "${a.to}". Your team: ${roster.map((m) => `${m.name} (${m.title || m.role})`).join(', ')}.` : 'You have no team members to assign work to.'); return null; }
@@ -1439,7 +1457,7 @@ export class Engine extends EventEmitter {
         this._edge(worker.id, adv.id);
         this._msg(worker, { role: 'system', text: `Waiting for ${adv.name} to finish prerequisites first`, agentId: adv.id });
         let r;
-        try { r = await this.send(adv.id, `Prerequisite for ${worker.name}'s task (do this now, before ${worker.name} starts):\n${c.prerequisites.map((p) => '- ' + p).join('\n')}\n\nThe task is:\n${a.task}\n\nWhen finished, begin your reply with DONE or FAILED.`, worker); }
+        try { r = await this._onProject(adv.id, projRoot, () => this.send(adv.id, `Prerequisite for ${worker.name}'s task (do this now, before ${worker.name} starts):\n${c.prerequisites.map((p) => '- ' + p).join('\n')}\n\nThe task is:\n${a.task}\n\nWhen finished, begin your reply with DONE or FAILED.`, worker)); }
         catch (e) { r = `FAILED: ${e.message}`; }
         finally { this.waitingOn.get(worker.id)?.delete(adv.id); }
         if (!/^\W*DONE/i.test(r || '')) return finish(`NOT STARTED. ${adv.name} could not complete a prerequisite: ${clipText(r, 300)}\nNothing further was done. Pre-check results:\n${summary.join('\n')}`);
@@ -1453,7 +1471,7 @@ export class Engine extends EventEmitter {
         (summary.length ? `Pre-check by your teammates (already done):\n${summary.join('\n')}\n\n` : '') +
         (done.length ? `Prerequisites already completed${lead.git ? ' and merged into your branch' : ''}:\n${done.join('\n')}\n\n` : '') +
         'Now carry out the task. Respect any conditions above.';
-      const text = await this.send(worker.id, prompt, lead);
+      const text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, prompt, lead));
       let note = '';
       if (lead.git && worker.branch) { note = await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
       return finish(`${text || '(no output)'}${note}\n\nPre-check results:\n${summary.join('\n') || '(none)'}${done.length ? '\nPrerequisites done first:\n' + done.join('\n') : ''}`);

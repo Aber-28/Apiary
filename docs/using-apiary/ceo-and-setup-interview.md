@@ -19,3 +19,7 @@ Profiles are plain Markdown. The file is the source of truth: edit it in Apiary 
 
 ## Answering the questions
 Each question offers suggested answers. You can **pick several**, and you can **write your own words** in the box below them (for example to add detail). Press **Send answer** to send them together.
+
+## The CEO leads every project
+
+From version 0.13 your CEO leads every new project and task by default. He does the work himself or hands it to the specialists he created, and the secrets you give him work in all his projects. You can pick someone else as **Responsible** for a project at any time, and projects made before this change keep whoever was responsible.

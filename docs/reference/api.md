@@ -81,3 +81,8 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | POST | `/api/tickets/:id/comment`, `/status` | Reply, close or reopen |
 | GET | `/api/agents/:id/model-advice` | Suggested model |
 | PUT | `/api/agents/:id/model` | Change the model |
+
+## Sign-in
+
+* `POST /api/login` `{username,password}` sets the session cookie. `POST /api/logout` clears it.
+* `GET /api/account` shows whether an account exists. `POST /api/account` `{username,password,current}` creates or changes it. `DELETE /api/account` `{current}` removes it.

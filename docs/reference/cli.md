@@ -60,3 +60,7 @@ apiary service uninstall
 ```
 
 Installs, shows or removes a systemd **user** service (no root needed). `--lan` makes the service use [LAN mode](../getting-started/service.md#using-it-from-another-device-vm-server-phone). Uninstalling does not stop a copy that is already running. Start the service now with `systemctl --user start apiary`.
+
+## apiary user
+
+`apiary user` shows whether sign-in is on. `apiary user set <name>` creates or changes the username and password (hidden prompt; piped input also works). `apiary user remove` turns sign-in off. See [Sign-in](../using-apiary/sign-in.md).

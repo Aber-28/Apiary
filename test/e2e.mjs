@@ -1599,6 +1599,11 @@ let orgIds;
     for (const [a, st] of savedStatus) a.status = st;
     for (const r of savedPending) r.status = 'pending';
   }
+  { // task conversations and history are newest first by default, with a button to show oldest first
+    const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+    assert.match(a, /const order = \{ newest: true \}/, 'newest first by default');
+    assert.match(a, /Show oldest first/, 'the person can switch the order');
+  }
   { // the Copy buttons work on plain http too (the page falls back to a hidden text box), and task messages show when they were sent
     const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
     assert.match(a, /document\.execCommand\('copy'\)/, 'copy has a fallback');

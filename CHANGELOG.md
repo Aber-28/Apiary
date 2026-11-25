@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.40.1
+
+- **Task conversations are newest first.** The conversation and history on a task page show the latest first by default. A button switches them to oldest first, and back.
+
 ## 0.40.0
 
 - **IDs are status chips.** Anywhere an ID is quoted, it shows as a small chip with an icon beside it: green ✓ done, red ⛔ blocked, orange ⏳ in progress, purple ✋ waiting, grey ○ to do. Hover for the name and status; click to open.

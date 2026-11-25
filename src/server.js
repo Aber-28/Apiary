@@ -99,6 +99,21 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
     return null;
   }
 
+  // Updates: an install waits, without starting anything new, until the work already running has finished.
+  const startUpdate = () => {
+    if (!updater) return;
+    engine.holdNewWork(false); updater.s.queued = false; updater.s.busy = 0;
+    updater.install().then(() => { updater.markRestarting(); setTimeout(restart, 1800); }).catch((e) => console.error('Update failed:', e.message));
+  };
+  const runQueuedUpdate = () => {
+    if (!updater || !updater.s.queued || updater.s.state === 'installing') return;
+    const b = engine.busy(); updater.s.busy = b.total;
+    if (!b.total) startUpdate();
+  };
+  if (updater) {
+    engine.on('event', runQueuedUpdate);
+    setInterval(runQueuedUpdate, 5000).unref();
+  }
   return http.createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
@@ -455,13 +470,21 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (url.pathname === '/api/update/install' && req.method === 'POST') {
         if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });
         const ub = await readBody(req);
-        const busy = Object.values(engine.agents).filter((a) => a.status === 'working' || a.status === 'waiting').length;
-        if (busy && !ub.force) return json(res, 409, { error: `${busy} agent${busy > 1 ? 's are' : ' is'} working right now. Installing restarts Apiary and interrupts them.`, busy });
         if (updater.s.state === 'installing') return json(res, 202, { started: true });
         if (updater.s.state !== 'ready') throw Object.assign(new Error('There is no downloaded update to install. Check for updates first.'), { status: 409 });
-        // The work takes a while and ends in a restart, so it runs in the background and the page watches /api/update.
-        updater.install().then(() => { updater.markRestarting(); setTimeout(restart, 1800); }).catch((e) => console.error('Update failed:', e.message));
-        return json(res, 202, { started: true });
+        const b = engine.busy();
+        if (b.total && !ub.force) {
+          // Queue it: nothing new starts, and the update installs by itself once the work in progress has finished.
+          updater.s.queued = true; updater.s.busy = b.total; engine.holdNewWork(true);
+          return json(res, 202, { queued: true, busy: b.total, runs: b.runs, approvals: b.approvals });
+        }
+        startUpdate();
+        return json(res, 202, { started: true, forced: !!(b.total && ub.force) });
+      }
+      if (url.pathname === '/api/update/cancel' && req.method === 'POST') {
+        if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });
+        updater.s.queued = false; updater.s.busy = 0; engine.holdNewWork(false);
+        return json(res, 200, { ok: true });
       }
       if (req.method === 'GET' && url.pathname === '/api/events') {
         res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache', connection: 'keep-alive' });

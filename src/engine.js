@@ -794,9 +794,18 @@ export class Engine extends EventEmitter {
     return agent;
   }
 
+  // Work that is running or waiting on the person. An update waits for this to reach zero.
+  busy() {
+    const ids = new Set([...this.ctls.keys(), ...Object.values(this.agents).filter((a) => a.status === 'working' || a.status === 'waiting').map((a) => a.id)]);
+    const approvals = Object.values(this.store.data.approvals).filter((r) => r.status === 'pending').length;
+    return { runs: ids.size, approvals, total: ids.size + approvals };
+  }
+  // While an update is queued, no new work starts: messages are refused with a clear reason until it is cancelled or installed.
+  holdNewWork(on) { this.updateHold = !!on; }
   send(agentId, text, from = null, opts = {}) {
     const agent = this.agents[agentId];
     if (!agent) throw httpErr(404, 'No such agent');
+    if (this.updateHold) throw httpErr(409, 'An update is waiting for the current work to finish, so new messages are held. Send it again after the update has installed.');
     const rt = this.rootOf(agent);
     if (rt.kind !== 'general' && this.stageOf(rt) === 'closed') throw httpErr(409, 'This project is closed. Reopen it (Projects page) to continue. Nothing has been deleted.');
     const prev = this.chains.get(agentId) || Promise.resolve();

@@ -92,6 +92,7 @@ export class Updater {
     try {
       this._p(0, 'run', `Update ${s.current} to ${s.latest} is already downloaded`); await this._pause();
       before = (await G(this.dir, ['rev-parse', 'HEAD'])).stdout.trim();
+      this._before = before;
       const ahead = await G(this.dir, ['rev-list', '--count', `HEAD..origin/${this.branch}`]);
       this._p(0, 'done', `${ahead.stdout.trim() || '?'} change${ahead.stdout.trim() === '1' ? '' : 's'} to apply`);
       this._p(1, 'run', 'Applying the new version'); await this._pause();
@@ -115,7 +116,16 @@ export class Updater {
       this._p(3, 'done', `Version ${pkg.version} looks good`); await this._pause();
       return { version: pkg.version };
     } catch (e) {
-      if (before) { await G(this.dir, ['reset', '--hard', before]); this._p(null, null, 'Put the old version back so nothing is broken'); }
+      if (before) {
+        // Dependencies changed by the update must go back too, or the old code would run with the new packages.
+        const depsChanged = (await G(this.dir, ['diff', '--name-only', before, 'HEAD', '--', 'package.json', 'package-lock.json'])).stdout.trim();
+        await G(this.dir, ['reset', '--hard', before]);
+        this._p(null, null, 'Put the old version back so nothing is broken');
+        if (depsChanged && existsSync(path.join(this.dir, 'package.json'))) {
+          const r = await run('npm', ['install', '--omit=dev', '--no-audit', '--no-fund'], { cwd: this.dir, timeout: 600000 });
+          this._p(null, null, r.code === 0 ? 'The old packages are back in place' : 'Could not put the old packages back: run "npm install" in the Apiary folder');
+        }
+      }
       const pr = s.progress; if (pr) { pr.failed = true; const cur = pr.steps.find((x) => x.state === 'run'); if (cur) cur.state = 'fail'; this._p(null, null, e.message); }
       Object.assign(s, { state: 'ready', error: e.message });   // still downloaded; the person can retry
       throw Object.assign(e, { status: 500 });

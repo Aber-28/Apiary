@@ -6,11 +6,13 @@ import { which } from './providers.js';
 
 const strip = (s) => String(s).replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '');
 const URL_RE = /(https?:\/\/[^\s"'<>]+)/;
+const CODE_RE = /\b([A-Z0-9]{4,6}-[A-Z0-9]{4,8})\b/;
 
-// The sign-in command for each provider. Codex's output is not verified in this build (see README).
+// The sign-in command for each provider. Claude shows a code to paste back. Codex uses its device-code mode: it prints
+// a page address and a short one-time code, the person types the code on that page, and the CLI finishes by itself.
 const LOGIN = {
   claude: { bin: 'claude', args: ['auth', 'login', '--claudeai'], check: ['auth', 'status'], ok: (out) => /"loggedIn"\s*:\s*true/.test(out) },
-  codex: { bin: 'codex', args: ['login'], check: null, ok: () => true },
+  codex: { bin: 'codex', args: ['login', '--device-auth'], device: true, check: ['login', 'status'], ok: (out) => /logged in/i.test(out) && !/not logged in/i.test(out) },
 };
 
 export class AiLogin {
@@ -18,7 +20,7 @@ export class AiLogin {
     this.onChange = onChange; this.timeoutMs = timeoutMs; this.bin = bin; this.spawnFn = spawnFn; this.checkFn = checkFn;
     this.s = {}; this.child = {}; this.timer = {};
   }
-  status(provider) { const s = this.s[provider] || { state: 'idle' }; return { provider, state: s.state, url: s.url, message: s.message, startedAt: s.startedAt }; }
+  status(provider) { const s = this.s[provider] || { state: 'idle' }; return { provider, state: s.state, url: s.url, code: s.code, device: !!LOGIN[provider]?.device, message: s.message, startedAt: s.startedAt }; }
   _set(provider, patch) { this.s[provider] = { ...(this.s[provider] || {}), ...patch }; this.onChange(this.status(provider)); }
   _known(provider) { if (!LOGIN[provider]) { const e = new Error('Unknown service'); e.status = 404; throw e; } }
 
@@ -29,7 +31,7 @@ export class AiLogin {
     const cfg = LOGIN[provider];
     const bin = this.bin(cfg.bin);
     if (!bin) { const e = new Error(`${provider === 'claude' ? 'Claude Code' : 'Codex'} is not installed yet. Install it first.`); e.status = 400; throw e; }
-    this._set(provider, { state: 'starting', startedAt: Date.now(), url: '', message: '' });
+    this._set(provider, { state: 'starting', startedAt: Date.now(), url: '', code: '', message: '' });
     const env = { ...process.env, NO_COLOR: '1', BROWSER: 'true', CI: '' };
     let child;
     try { child = this.spawnFn(bin, cfg.args, { env, stdio: ['pipe', 'pipe', 'pipe'] }); }
@@ -39,7 +41,12 @@ export class AiLogin {
     const feed = (d) => {
       text = (text + strip(d)).slice(-8000);
       const m = URL_RE.exec(text);
-      if (m && this.s[provider].state === 'starting') this._set(provider, { state: 'waiting', url: m[1].replace(/[.,;)]+$/, '') });
+      if (!m || this.s[provider].state !== 'starting') return;
+      const url = m[1].replace(/[.,;)]+$/, '');
+      if (!cfg.device) { this._set(provider, { state: 'waiting', url }); return; }
+      // Device mode: wait until the one-time code has been printed too (it comes after the address).
+      const c = CODE_RE.exec(text.slice(m.index + m[0].length));
+      if (c) this._set(provider, { state: 'waiting', url, code: c[1] });
     };
     child.stdout?.on('data', feed); child.stderr?.on('data', feed);
     child.on('error', (e) => this._set(provider, { state: 'failed', message: `Could not start the sign-in: ${e.message}` }));
@@ -54,6 +61,7 @@ export class AiLogin {
     const c = String(code || '').trim();
     const child = this.child[provider];
     if (!c || c.length > 500) { const e = new Error('Paste the code shown after you approve the sign-in'); e.status = 400; throw e; }
+    if (LOGIN[provider].device) { const e = new Error('This sign-in has no code to paste. Type the code shown on the page into the sign-in page instead.'); e.status = 400; throw e; }
     if (!child || this.s[provider]?.state !== 'waiting') { const e = new Error('There is no sign-in waiting for a code. Press Sign in first.'); e.status = 409; throw e; }
     // Set first: the CLI may answer before the write returns.
     this._set(provider, { state: 'checking', message: '' });
@@ -66,14 +74,14 @@ export class AiLogin {
     const child = this.child[provider];
     if (child && !child.killed && child.exitCode === null) { try { child.kill('SIGTERM'); } catch { /* already gone */ } }
     this.child[provider] = null;
-    this._set(provider, { state: message ? 'failed' : 'idle', message, url: '' });
+    this._set(provider, { state: message ? 'failed' : 'idle', message, url: '', code: '' });
     return this.status(provider);
   }
   _finished(provider, code) {
     clearTimeout(this.timer[provider]); this.child[provider] = null;
     if (!['starting', 'waiting', 'checking'].includes(this.s[provider]?.state)) return;
     const cfg = LOGIN[provider];
-    if (code !== 0) { this._set(provider, { state: 'failed', message: 'The sign-in did not finish. Check the code and try again, or use the terminal.' }); return; }
+    if (code !== 0) { this._set(provider, { state: 'failed', message: cfg.device ? 'The sign-in did not finish. Press Sign in to get a new code.' : 'The sign-in did not finish. Check the code and try again, or use the terminal.' }); return; }
     // Only report success once the CLI itself says the login works.
     if (!cfg.check) { this._set(provider, { state: 'done', message: '' }); return; }
     const bin = this.bin(cfg.bin);

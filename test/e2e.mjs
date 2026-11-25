@@ -1634,6 +1634,25 @@ let orgIds;
     assert.equal(al.status('claude').state, 'failed'); assert.ok(al.status('claude').message.length > 0);
     // an unknown service is refused
     assert.throws(() => al.start('example-service'), /Unknown service/);
+    // Codex: device-code sign-in. The code is shown (not pasted), the CLI finishes by itself, success is confirmed with its own status command
+    let cx = null, logged = false;
+    const alx = new AiLogin({ timeoutMs: 5000, bin: () => '/example/codex', checkFn: (b, a) => (a[0] === 'login' && a[1] === 'status' ? (logged ? 'Logged in using ChatGPT' : 'Not logged in') : ''),
+      spawnFn: (bin, args) => { cx = { bin, args }; const c = new EventEmitter(); c.stdin = new PassThrough(); c.stdout = new PassThrough(); c.stderr = new PassThrough(); c.exitCode = null; c.kill = () => {};
+        setTimeout(() => c.stdout.write('\u001b[1mFollow these steps\u001b[0m\n1. Open this link\n   https://auth.example.com/codex/device\n'), 5);
+        setTimeout(() => c.stdout.write('2. Enter this one-time code\n   ABCD-12345\n'), 15);
+        setTimeout(() => { logged = true; c.exitCode = 0; c.emit('close', 0); }, 120); c.__c = c; return c; } });
+    alx.start('codex'); await tock(60);
+    const sx = alx.status('codex');
+    assert.equal(sx.state, 'waiting'); assert.equal(sx.url, 'https://auth.example.com/codex/device'); assert.equal(sx.code, 'ABCD-12345'); assert.equal(sx.device, true);
+    assert.deepEqual(cx.args, ['login', '--device-auth'], 'Codex uses its device-code sign-in');
+    assert.throws(() => alx.submit('codex', 'x'), /no code to paste/);
+    await tock(150);
+    assert.equal(alx.status('codex').state, 'done', 'done once Codex says it is logged in');
+    // exiting cleanly is not enough: the status command must agree
+    logged = false;
+    const aly = new AiLogin({ bin: () => '/example/codex', checkFn: () => 'Not logged in', spawnFn: () => { const c = new EventEmitter(); c.stdin = new PassThrough(); c.stdout = new PassThrough(); c.stderr = new PassThrough(); c.exitCode = null; c.kill = () => {}; setTimeout(() => { c.exitCode = 0; c.emit('close', 0); }, 20); return c; } });
+    aly.start('codex'); await tock(60);
+    assert.equal(aly.status('codex').state, 'failed');
   }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);

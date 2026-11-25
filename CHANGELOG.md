@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.39.1
+
+- **Codex sign-in works from the web page.** Press *Sign in to Codex*, type the short code shown on the page into OpenAI's sign-in page, and Apiary updates by itself. Nothing to paste back, no terminal needed. Success is confirmed with Codex's own login check.
+
 ## 0.39.0
 
 - **Discovery.** Press *Discover* on a server and Apiary lists the virtual machines and containers on it over SSH: Proxmox, KVM/libvirt, ESXi, XCP-ng, Hyper-V, Docker, LXC, Incus and LXD.

@@ -1156,7 +1156,15 @@ function aiSignIn(c, onDone = () => route()) {
   const start = guard(async () => { draw({ state: 'starting' }); draw(await api(base, 'POST')); clearTimeout(timer); timer = setTimeout(poll, 1000); });
   const draw = (st) => {
     if (st.state === 'starting') box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Getting the sign-in link…'));
-    else if (st.state === 'waiting') {
+    else if (st.state === 'waiting' && st.device) {
+      // Codex: the page shows a short code to type on the sign-in page. Nothing to paste back; this page updates by itself.
+      box.replaceChildren(
+        h('p', { style: 'margin:0 0 6px' }, h('b', {}, '1.'), ' Open the sign-in page and type this code:'),
+        h('div', { class: 'cmd mono', style: 'justify-content:center;font-size:1.7em;letter-spacing:.14em' }, h('code', { 'aria-label': 'One-time code' }, st.code || '…'), st.code ? h('button', { type: 'button', onclick: () => copy(st.code) }, 'Copy') : null),
+        h('div', { class: 'kv', style: 'margin:10px 0' }, h('a', { class: 'btn primary', href: st.url || '#', target: '_blank', rel: 'noopener' }, 'Open the sign-in page'),
+          h('button', { class: 'btn', onclick: guard(async () => { await api(base, 'DELETE'); clearTimeout(timer); draw({ state: 'idle' }); }) }, 'Cancel')),
+        h('p', { class: 'hint', role: 'status' }, h('b', {}, '2.'), ' Approve it there. This page updates by itself.'));
+    } else if (st.state === 'waiting') {
       const code = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Paste the code here', 'aria-label': 'Code from the sign-in page' });
       const send = guard(async () => { await api(base + '/code', 'POST', { code: code.value }); code.value = ''; draw({ state: 'checking' }); clearTimeout(timer); timer = setTimeout(poll, 1000); });
       box.replaceChildren(
@@ -1169,7 +1177,7 @@ function aiSignIn(c, onDone = () => route()) {
     } else if (st.state === 'checking') box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Checking the code…'));
     else if (st.state === 'failed') box.replaceChildren(h('p', { class: 'pill err', role: 'alert', style: 'white-space:normal' }, st.message || 'The sign-in did not finish.'), h('div', { class: 'kv', style: 'margin-top:8px' }, signInBtn('Try again')));
     else if (st.state === 'done') box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Signed in. Checking…'));
-    else box.replaceChildren(signInBtn(`Sign in to ${CINFO[c.id].title}`), h('p', { class: 'hint' }, 'You approve in your browser, then paste the code it shows. No terminal needed.'));
+    else box.replaceChildren(signInBtn(`Sign in to ${CINFO[c.id].title}`), h('p', { class: 'hint' }, c.id === 'codex' ? 'You get a short code and type it on the sign-in page. No terminal needed.' : 'You approve in your browser, then paste the code it shows. No terminal needed.'));
   };
   draw({ state: 'idle' }); poll();
   return box;

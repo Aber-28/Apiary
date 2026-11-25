@@ -437,18 +437,29 @@ function pageProject(leadId, general = false) {
     if (!msgsEl) return;
     if (msgsEl.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't wipe a note being typed
     const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
+    refreshTaskIndex();
     const list = (S.msgs[a.id] || []).map((m) => {
-      if (m.role === 'system') return h('div', { class: 'msg system' + (m.error ? ' error' : '') }, m.text);
-      const who = m.role === 'user' ? (m.from ? `From ${m.from.name}` : 'You') : m.role === 'report' ? 'Reports from sub-agents' : m.by ? m.by.name : (!a.parentId && !a.kind && !a.member ? ownerOf(a)?.name : null) || a.name;
-      return h('div', { class: 'msg ' + m.role }, h('div', { class: 'who' }, who), m.text);
+      const t = timeOf(m.ts);
+      if (m.role === 'system') {
+        // "Asked Neo: …", "Told Neo: …" and "Assigned to Neo: …" are handoffs: shown as @Name with their text, from this chat's agent.
+        const d = /^(Asked|Told|Assigned to) (.+?): ([\s\S]*)$/.exec(m.text || '');
+        if (d && m.agentId) return bubble('them', a.name, colourOf(a.id), t, [h('span', { class: 'cb-mention', style: `color:${colourOf(m.agentId)}` }, `@${d[2]}: `), ...linkify(d[3]), h('small', { class: 'cb-note' }, ` (${d[1].toLowerCase()})`)]);
+        return h('div', { class: 'cb-line' + (m.error ? ' error' : '') }, ...linkify(m.text || ''));
+      }
+      if (m.role === 'user' && !m.from) return bubble('me', null, null, t, linkify(m.text || ''));
+      if (m.role === 'user' && m.from) return bubble('them', m.from.name, colourOf(m.from.id), t, linkify(m.text || ''));
+      if (m.role === 'report') return bubble('them', 'Reports from sub-agents', '#64748b', t, linkify(m.text || ''));
+      const who = m.by ? m.by.name : (!a.parentId && !a.kind && !a.member ? ownerOf(a)?.name : null) || a.name;
+      return bubble('them', who, colourOf(m.by?.id || a.id), t, linkify(m.text || ''));
     });
-    if (S.stream[a.id]) list.push(h('div', { class: 'msg agent' }, h('div', { class: 'who' }, a.name), S.stream[a.id]));
+    if (S.stream[a.id]) list.push(bubble('them', a.name, colourOf(a.id), '', S.stream[a.id]));
     for (const ap of pending().filter((x) => x.projectId === leadId)) list.push(approvalCard(ap));
     if (!list.length) list.push(h('div', { class: 'empty' }, 'Nothing here yet.'));
     msgsEl.replaceChildren(...list);
     if (near) msgsEl.scrollTop = msgsEl.scrollHeight;
     if (liveEl) liveEl.replaceChildren(...(a.status === 'working' || a.status === 'waiting' ? [h('span', { class: 'dot work pulse' }), S.activity[a.id] || (a.status === 'waiting' ? 'Waiting for sub-agents…' : 'Working…')] : []));
   };
+  window.__drawChat = drawMsgs;   // lets the task index redraw the chat when it loads
   const drawTerm = () => {
     if (!termEl) return;
     const near = termEl.scrollHeight - termEl.scrollTop - termEl.clientHeight < 80;
@@ -1166,6 +1177,42 @@ function pageConnection(id) {
 
 // ---------- shared helpers for the 0.6.0 pages ----------
 const fmtTok = (n) => (n >= 1e6 ? (n / 1e6).toFixed(1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(n || 0));
+// ---------- chat bubbles ----------
+const CB_COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#0891b2', '#dc2626', '#4f46e5', '#65a30d', '#c2410c'];
+const colourOf = (id) => { let x = 0; for (const c of String(id || '')) x = (x * 31 + c.charCodeAt(0)) >>> 0; return CB_COLOURS[x % CB_COLOURS.length]; };
+const timeOf = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
+const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+// Task codes (T-0012) become links to the task. The index maps codes to task ids and is refreshed as needed.
+const taskIdx = { map: {}, at: 0, loading: false };
+async function loadTaskIndex() {
+  if (taskIdx.loading) return;
+  taskIdx.loading = true;
+  try { const r = await api('/api/tasks'); taskIdx.map = Object.fromEntries((r.tasks || []).map((t) => [t.code, t.id])); } catch { /* keep the old index */ }
+  taskIdx.at = Date.now(); taskIdx.loading = false;
+}
+function refreshTaskIndex() { if (!taskIdx.loading && Date.now() - taskIdx.at > 4000) loadTaskIndex().then(() => { const f = window.__drawChat; if (f) f(); }); }
+function linkify(text) {
+  const str = String(text ?? ''), out = [];
+  let last = 0;
+  for (const m of str.matchAll(/\bT-\d{4,}\b/g)) {
+    out.push(str.slice(last, m.index));
+    const id = taskIdx.map[m[0]];
+    out.push(id ? h('a', { class: 'cb-task', href: `#/task/${id}`, title: 'Open this task' }, m[0]) : m[0]);
+    last = m.index + m[0].length;
+  }
+  out.push(str.slice(last));
+  return out;
+}
+// side: 'me' (yours, right) or 'them' (an agent, left, in its colour)
+function bubble(side, who, colour, time, body) {
+  const bub = h('div', { class: 'cb-bub', style: side === 'them' ? `--c:${colour}` : '' },
+    who ? h('div', { class: 'cb-who', style: `color:${colour}` }, who) : null,
+    h('div', { class: 'cb-text' }, ...(Array.isArray(body) ? body : [body])),
+    time ? h('small', { class: 'cb-time' }, time) : null);
+  return side === 'me' ? h('div', { class: 'cb-row me' }, bub)
+    : h('div', { class: 'cb-row them' }, h('span', { class: 'cb-av', style: `background:${colour}` }, initials(who)), bub);
+}
+
 const debounce = (fn, ms = 700) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 const dlgOpen = (title, ...body) => { const d = h('dialog', {}, h('form', { method: 'dialog' }, h('h2', {}, title), ...body)); document.body.append(d); d.addEventListener('close', () => d.remove()); d.showModal(); return d; };
 

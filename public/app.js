@@ -1630,15 +1630,15 @@ async function pageRunbooks() {
   const box = h('div');
   let items = [];
   const edit = (r) => {
-    const t = h('input', { type: 'text', value: r?.title || '', maxlength: '100' }), prob = h('input', { type: 'text', value: r?.problem || '', maxlength: '500', placeholder: 'When does this apply?' });
+    const t = h('input', { type: 'text', value: r?.title || '', maxlength: '100' }), prob = h('textarea', { rows: '3', maxlength: '500', placeholder: 'Why is this runbook needed? A sentence or two.', 'aria-label': 'Why we need this runbook' }); prob.value = r?.problem || '';
     const steps = h('textarea', { rows: '9', placeholder: 'One step per line' }); steps.value = (r?.steps || []).join('\n'); const tags = h('input', { type: 'text', value: (r?.tags || []).join(', '), placeholder: 'For example: server, backup' });
-    const d = dlgOpen(r ? 'Edit runbook' : 'New runbook', h('label', { class: 'f' }, 'Title', t), h('label', { class: 'f' }, 'Problem it solves', prob), h('label', { class: 'f' }, 'Steps', steps), h('label', { class: 'f' }, 'Tags (comma separated)', tags),
+    const d = dlgOpen(r ? 'Edit runbook' : 'New runbook', h('label', { class: 'f' }, 'Title', t), h('label', { class: 'f' }, 'Why we need this runbook', prob), h('label', { class: 'f' }, 'Steps', steps), h('label', { class: 'f' }, 'Tags (comma separated)', tags),
       h('p', { class: 'hint' }, 'Never put passwords or keys in a runbook. Name the secret to use instead.'),
       h('div', { class: 'formrow' }, h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'), h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { const body = { title: t.value, problem: prob.value, steps: steps.value, tags: tags.value }; await (r ? api('/api/runbooks/' + r.id, 'PUT', body) : api('/api/runbooks', 'POST', body)); d.close(); load(); })(); } }, 'Save')));
   };
   const card = (r) => h('div', { class: 'card', style: 'max-width:760px;margin-bottom:10px' },
     h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, r.title), r.status === 'trusted' ? h('span', { class: 'pill ok' }, 'Approved') : h('span', { class: 'pill work' }, 'Draft: needs your review')),
-    r.problem ? h('p', { class: 'hint' }, 'For: ' + r.problem) : null, h('ol', { style: 'margin:6px 0 6px 18px' }, r.steps.map((x) => h('li', {}, x))),
+    r.problem ? h('p', { class: 'hint' }, 'Why: ' + r.problem) : null, h('ol', { style: 'margin:6px 0 6px 18px' }, r.steps.map((x) => h('li', {}, x))),
     h('p', { class: 'hint' }, `By ${r.author}${r.project ? ' in ' + r.project : ''} · ${ago(r.updatedAt)}${r.tags?.length ? ' · ' + r.tags.join(', ') : ''}`),
     h('div', { class: 'formrow' }, r.status === 'trusted' ? h('button', { class: 'btn', onclick: guard(async () => { await api('/api/runbooks/' + r.id, 'PUT', { status: 'draft' }); load(); }) }, 'Stop trusting') : h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/runbooks/' + r.id, 'PUT', { status: 'trusted' }); load(); }) }, 'Approve'),
       h('button', { class: 'btn', onclick: () => edit(r) }, 'Edit'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete the runbook "${r.title}"?`)) return; await api('/api/runbooks/' + r.id, 'DELETE'); load(); }) }, 'Delete')));

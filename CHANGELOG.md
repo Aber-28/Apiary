@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.33.1
+
+- **Runbooks have a "why".** Each runbook has its title, a short explanation of why it is needed, and its steps. The title is kept as written.
+- **Steps use placeholders.** Real machine names, addresses and links are replaced with <server>, <service> and similar in the why and the steps, including in runbooks saved before this change. Agents are told to write steps this way.
+
 ## 0.33.0
 
 - **Chat looks like a messaging app.** Your messages are on the right. Each agent is on the left in its own colour, with its name. A handoff reads as @Name: text (for example @Neo: do A, B, C). Task codes such as T-0012 are links that open the task.

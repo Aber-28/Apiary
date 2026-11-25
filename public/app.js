@@ -311,7 +311,7 @@ function approvalCard(ap) {
   });
   const label = { approved: ['ok', 'Approved'], denied: ['err', 'Denied'], cancelled: ['', 'Cancelled'], expired: ['', 'Expired'], pending: ['work', 'Waiting for you'] }[ap.status];
   return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
-    h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
+    h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.num ? h('span', { class: 'mono', style: 'font-weight:600;opacity:.7;margin-right:8px' }, `AP-${String(ap.num).padStart(4, '0')}`) : null, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
     ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
     ap.kind === 'plan' ? h('ol', { class: 'plan-list' }, (ap.phases || []).map((p) => h('li', {}, h('b', {}, p.title), p.goal ? ` — ${p.goal}` : '', p.steps?.length ? h('ul', {}, p.steps.map((t) => h('li', {}, t))) : null))) :
     ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
@@ -775,6 +775,7 @@ function pageSecrets() {
       const assignedNames = (x.assigned || []).map((a) => a.label);
       return h('div', { class: 'card secret-card', style: 'margin-bottom:8px;padding:10px 14px' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:12px;flex-wrap:wrap' },
         h('button', { class: 'btn', 'aria-label': `Open ${x.name}`, style: 'background:none;border:0;padding:0;font-weight:600;color:var(--accent);cursor:pointer;text-align:left;font-size:inherit', onclick: () => dlgOpen(x.name, full, h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'x' }, 'Close'))) }, x.name),
+        h('small', { class: 'mono hint', title: 'Secret ID' }, x.code || ''),
         h('small', { class: 'hint' }, assignedNames.length ? `Assigned to: ${assignedNames.join(', ')}` : 'Not assigned to anyone yet')));
     });
     view.replaceChildren(head, autoCard, addCard, rows.length ? rows : h('div', { class: 'card empty' }, 'No secrets yet.'));
@@ -1261,22 +1262,34 @@ const CB_COLOURS = ['#2563eb', '#16a34a', '#d97706', '#9333ea', '#db2777', '#089
 const colourOf = (id) => { let x = 0; for (const c of String(id || '')) x = (x * 31 + c.charCodeAt(0)) >>> 0; return CB_COLOURS[x % CB_COLOURS.length]; };
 const timeOf = (ts) => (ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
-// Task codes (T-0012) become links to the task. The index maps codes to task ids and is refreshed as needed.
+// Short IDs (T-0012 task, TK-0003 ticket, AP-0007 approval, SC-0002 secret) become small chips with a status icon.
+// The index maps each ID to what it is and how it is going, and is refreshed as needed. Colour never stands alone: each state has its own icon.
 const taskIdx = { map: {}, at: 0, loading: false };
+const REF_STATE = {
+  done: ['✓', 'Done'], blocked: ['⛔', 'Blocked'], progress: ['⏳', 'In progress'], waiting: ['✋', 'Waiting'],
+  todo: ['○', 'To do'], later: ['💤', 'Back burner'], cancelled: ['⊘', 'Cancelled'], secret: ['🔑', 'Secret'],
+};
 async function loadTaskIndex() {
   if (taskIdx.loading) return;
   taskIdx.loading = true;
-  try { const r = await api('/api/tasks'); taskIdx.map = Object.fromEntries((r.tasks || []).map((t) => [t.code, t.id])); } catch { /* keep the old index */ }
+  try { const r = await api('/api/refs'); taskIdx.map = r.refs || {}; } catch { /* keep the old index */ }
   taskIdx.at = Date.now(); taskIdx.loading = false;
 }
 function refreshTaskIndex() { if (!taskIdx.loading && Date.now() - taskIdx.at > 4000) loadTaskIndex().then(() => { const f = window.__drawChat; if (f) f(); }); }
+// One chip: the ID with its icon beside it. Hovering shows the name and the status (a secret shows its name only).
+function refChip(code) {
+  const r = taskIdx.map[code];
+  if (!r) return code;
+  const [icon, word] = REF_STATE[r.state] || REF_STATE.todo;
+  const title = r.kind === 'secret' ? `${code} · ${r.title} (secret)` : `${code} · ${r.title} · ${r.label || word}`;
+  return h('a', { class: `idchip st-${r.state}`, href: r.href || '#', title, 'aria-label': title }, h('span', { class: 'idc' }, code), h('span', { class: 'idi', 'aria-hidden': 'true' }, icon));
+}
 function linkify(text) {
   const str = String(text ?? ''), out = [];
   let last = 0;
-  for (const m of str.matchAll(/\bT-\d{4,}\b/g)) {
+  for (const m of str.matchAll(/\b(?:T|TK|AP|SC)-\d{4,}\b/g)) {
     out.push(str.slice(last, m.index));
-    const id = taskIdx.map[m[0]];
-    out.push(id ? h('a', { class: 'cb-task', href: `#/task/${id}`, title: 'Open this task' }, m[0]) : m[0]);
+    out.push(refChip(m[0]));
     last = m.index + m[0].length;
   }
   out.push(str.slice(last));
@@ -1512,7 +1525,7 @@ function pageTickets() {
     const item = (t) => {
       const [tone, label] = TICKET_LABEL[t.status], isOpen = openId === t.id;
       const reply = h('textarea', { rows: '2', placeholder: t.status === 'resolved' ? 'Still broken? Tell the agent what you see.' : 'Reply to the agent', 'aria-label': 'Your reply' });
-      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('button', { class: 'tk-head', 'aria-expanded': String(isOpen), onclick: () => { openId = isOpen ? null : t.id; draw(); } }, h('b', {}, `#${t.num} ${t.title}`), h('span', { class: 'pill ' + tone }, label), t.priority === 'high' ? h('span', { class: 'pill err' }, 'Urgent') : null, h('small', { class: 'hint', style: 'margin-left:auto' }, ago(t.updatedAt))),
+      return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('button', { class: 'tk-head', 'aria-expanded': String(isOpen), onclick: () => { openId = isOpen ? null : t.id; draw(); } }, h('b', {}, h('span', { class: 'mono', style: 'font-weight:600;opacity:.7;margin-right:8px' }, `TK-${String(t.num).padStart(4, '0')}`), t.title), h('span', { class: 'pill ' + tone }, label), t.priority === 'high' ? h('span', { class: 'pill err' }, 'Urgent') : null, h('small', { class: 'hint', style: 'margin-left:auto' }, ago(t.updatedAt))),
         isOpen ? h('div', { style: 'margin-top:10px' }, t.description ? h('p', { class: 'tk-msg you' }, h('small', {}, 'You wrote'), t.description) : null,
           t.comments.map((c) => h('p', { class: 'tk-msg ' + (c.kind === 'human' ? 'you' : c.kind === 'error' ? 'bad' : '') }, h('small', {}, `${c.who} · ${ago(c.at)}${c.kind === 'resolution' ? ' · fixed' : c.kind === 'question' ? ' · needs you' : ''}`), c.text)),
           t.status === 'working' ? h('p', { class: 'hint', role: 'status' }, 'An agent is working on this…') : null,

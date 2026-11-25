@@ -22,3 +22,20 @@ If the proper agent cannot finish, the subtask is marked Blocked (it is not clos
 Every task that is closed, by an agent, by Apiary on an agent's behalf or by you, records who closed it and which task to refer to. It shows in green on the task card and in the task's history. Quick pre-checks that teammates give before a job starts are opinions, not tasks.
 
 Task IDs are searchable in [global search](global-search.md), and opening, handing over and closing a task are recorded in the [Audit log](audit-log.md).
+
+## IDs show as status chips
+
+Wherever an ID is quoted (chat, task messages, reports) it becomes a small chip: the ID with an icon beside it. Hover to see the name and the status; click to open it. A secret shows its name only, never its value.
+
+| Chip | Meaning |
+| --- | --- |
+| Green ✓ | Done (or approved, resolved) |
+| Red ⛔ | Blocked (or an approval you blocked) |
+| Orange ⏳ | In progress |
+| Purple ✋ | Waiting (for a subtask, or for your approval) |
+| Grey ○ | To do |
+| Grey 💤 | Back burner |
+| Grey ⊘, struck through | Cancelled or expired |
+| Grey 🔑 | A secret |
+
+Every kind of item has its own prefix: **T-** tasks, **TK-** support tickets, **AP-** approvals, **SC-** secrets. Chips update by themselves, so an ID quoted last week turns green when the task is finished. An ID that does not exist stays plain text.

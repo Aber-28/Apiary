@@ -34,7 +34,7 @@ import { Backups } from './backup.js';
 import { Vault, envName, redactPairs, typeOf } from './vault.js';
 import * as orgfiles from './orgfiles.js';
 import { Usage, estimateTokens, looksLikeLimit } from './usage.js';
-import { Tasks, STATUSES as TASK_STATUSES } from './tasks.js';
+import { Tasks, STATUS_LABELS, STATUSES as TASK_STATUSES } from './tasks.js';
 import { Tickets } from './tickets.js';
 import os from 'node:os';
 import { Repos } from './repos.js';
@@ -157,14 +157,18 @@ export class Engine extends EventEmitter {
 
   // ---------- approvals ----------
   // Decisions stay in view for a day, then count as archived.
+  // Every approval gets a short ID (AP-0001), counted up and never reused. Older ones are numbered oldest first.
+  _approvalNo(rec) { if (!rec.num) { const n = (this.store.data.approvalSeq = (this.store.data.approvalSeq || 0) + 1); rec.num = n; } return rec; }
+  _stampApprovals() { for (const r of Object.values(this.store.data.approvals).filter((x) => !x.num).sort((a, b) => a.createdAt - b.createdAt)) this._approvalNo(r); }
   approvals() {
+    this._stampApprovals();
     const cut = Date.now() - 24 * 3600000;
     return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, archived: r.status !== 'pending' && (r.decidedAt || r.createdAt) < cut }));
   }
   _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }
   _ask(agent, fields, ctx = {}) {
     const id = id8();
-    const rec = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields };
+    const rec = this._approvalNo({ id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status: 'pending', createdAt: Date.now(), ...fields });
     const rule = this.policy.match({ kind: fields.kind, title: fields.title, secret: fields.secret, project: rec.projectId, agent: agent.id, command: ctx.command });
     if (rule) {   // one of your rules decides, so nobody is asked
       const allow = rule.action === 'allow';
@@ -1155,7 +1159,7 @@ export class Engine extends EventEmitter {
   // A decision made without asking (trust setting or rule) is kept on the Approvals page and shown in the chat.
   _recordAuto(agent, { title, detail, status, note }) {
     const id = id8(), now = Date.now();
-    this.store.data.approvals[id] = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status, kind: 'command', title, detail, auto: true, note, createdAt: now, decidedAt: now };
+    this.store.data.approvals[id] = this._approvalNo({ id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status, kind: 'command', title, detail, auto: true, note, createdAt: now, decidedAt: now });
     const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
     for (const r of decided.slice(500)) delete this.store.data.approvals[r.id];
     this.emit('event', { type: 'approval', approval: this.store.data.approvals[id] });
@@ -1406,6 +1410,23 @@ export class Engine extends EventEmitter {
     const prompt = `Task from the board: ${t.title}\n\n${t.notes || '(no more detail given)'}\n\nDo it, or hand it to the right teammate. Keep the task's status up to date with an apiary-task block.`;
     this.send(who.id, prompt).catch(() => {});
     return { started: true, agent: who.name };
+  }
+  // Everything that has a short ID, so the page can show each one as a small status chip. Secrets give their name only, never a value.
+  refs() {
+    const pad = (p, n) => `${p}-${String(n).padStart(4, '0')}`, out = {};
+    for (const t of this.tasksView()) {
+      const waiting = t.status === 'inprogress' && t.waitingFor?.length;
+      out[t.code] = { kind: 'task', id: t.id, title: t.title, state: waiting ? 'waiting' : { done: 'done', blocked: 'blocked', inprogress: 'progress', todo: 'todo', backburner: 'later' }[t.status] || 'todo', label: waiting ? `Waiting for ${t.waitingFor.join(', ')}` : STATUS_LABELS[t.status] || t.status, href: `#/task/${t.id}` };
+    }
+    for (const t of Object.values(this.tickets.all || {})) {
+      out[pad('TK', t.num)] = { kind: 'ticket', id: t.id, title: t.title, state: { open: 'todo', working: 'progress', resolved: 'done', closed: 'done' }[t.status] || 'todo', label: `${t.status[0].toUpperCase()}${t.status.slice(1)}`, href: '#/tickets' };
+    }
+    this._stampApprovals();
+    for (const r of Object.values(this.store.data.approvals)) {
+      out[pad('AP', r.num)] = { kind: 'approval', id: r.id, title: r.title || 'Approval', state: { pending: 'waiting', approved: 'done', denied: 'blocked', expired: 'cancelled' }[r.status] || 'todo', label: { pending: 'Waiting for you', approved: 'Approved', denied: 'Blocked', expired: 'Expired' }[r.status] || r.status, href: '#/approvals' };
+    }
+    if (this.vault.exists) for (const i of this.vault.list()) out[i.code] = { kind: 'secret', id: i.id, title: i.name, state: 'secret', label: 'Secret', href: '#/secrets' };
+    return out;
   }
   tasksView() { return this.tasks.list.map((t) => ({ ...this.tasks.view(t), projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
 

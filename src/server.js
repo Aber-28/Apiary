@@ -198,6 +198,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         }
       }
       // ----- task board -----
+      if (url.pathname === '/api/refs' && req.method === 'GET') return json(res, 200, { refs: engine.refs() });
       if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, { tasks: engine.tasksView(), counts: engine.tasks.counts() });
       if (url.pathname === '/api/tasks' && req.method === 'POST') return json(res, 201, engine.createTask(await readBody(req)));
       if (req.method === 'GET' && url.pathname === '/api/tasks/agents') return json(res, 200, engine.assignable());

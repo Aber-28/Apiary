@@ -1606,6 +1606,32 @@ let orgIds;
     assert.match(a, /timeStyle: 'short'/, 'each task message has a date and time');
     assert.match(a, /c\.id === 'claude' \|\| c\.id === 'codex'\) && c\.cli\.found \? aiSignIn/, 'the sign-in button is on both the Claude and the Codex card');
   }
+  { // every ID is a status chip: tasks, tickets, approvals and secrets are all in /api/refs; a secret shows its name, never its value
+    await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
+    await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
+    const sec = await call('/api/vault/secrets', 'POST', { name: 'Chip secret', value: 'chip-hunter2', type: 'token' });
+    assert.match(sec.body.code, /^SC-\d{4}$/, 'a secret gets a short ID');
+    const tk = engine.tasks.add({ title: 'Chip task', status: 'blocked' });
+    const tk2 = engine.tasks.add({ title: 'Chip task two', status: 'done' });
+    const tick = engine.tickets.add({ title: 'Chip ticket', description: '', priority: 'normal' });
+    engine.tickets.setStatus(tick.id, 'resolved');
+    const rec = engine._approvalNo({ id: 'chipap01', status: 'pending', createdAt: Date.now(), title: 'Chip approval' });
+    engine.store.data.approvals.chipap01 = rec;
+    const refs = (await call('/api/refs')).body.refs;
+    assert.equal(refs[tk.code].state, 'blocked'); assert.equal(refs[tk2.code].state, 'done'); assert.equal(refs[tk.code].title, 'Chip task');
+    assert.equal(refs[`TK-${String(tick.num).padStart(4, '0')}`].state, 'done', 'a resolved ticket is done');
+    assert.equal(refs[`AP-${String(rec.num).padStart(4, '0')}`].state, 'waiting', 'a pending approval is waiting for you');
+    engine.store.data.approvals.chipap01.status = 'denied';
+    assert.equal((await call('/api/refs')).body.refs[`AP-${String(rec.num).padStart(4, '0')}`].state, 'blocked');
+    assert.equal(refs[sec.body.code].state, 'secret'); assert.equal(refs[sec.body.code].title, 'Chip secret');
+    assert.ok(!JSON.stringify(refs).includes('chip-hunter2'), 'no secret value in the references');
+    const nums = Object.values(engine.store.data.approvals).map((r) => r.num); assert.ok(nums.every(Boolean) && new Set(nums).size === nums.length, 'approval numbers are unique');
+    delete engine.store.data.approvals.chipap01;
+    const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8');
+    assert.match(a, /\(\?:T\|TK\|AP\|SC\)-/, 'all four kinds of ID become chips');
+    for (const st of ['done', 'blocked', 'progress', 'waiting', 'todo', 'cancelled']) assert.ok(css.includes(`.idchip.st-${st}`), `${st} has a colour`);
+    assert.match(a, /done: \['✓'/); assert.match(a, /blocked: \['⛔'/);
+  }
   { // sign in to Claude from the page: the link is shown, the pasted code goes to the CLI, the login is confirmed, and the code is never kept
     const { AiLogin } = await import('../src/aiLogin.js');
     const { EventEmitter } = await import('node:events');

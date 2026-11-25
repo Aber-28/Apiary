@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.40.0
+
+- **IDs are status chips.** Anywhere an ID is quoted, it shows as a small chip with an icon beside it: green ✓ done, red ⛔ blocked, orange ⏳ in progress, purple ✋ waiting, grey ○ to do. Hover for the name and status; click to open.
+- **Approvals and secrets now have IDs** (AP-0001, SC-0001), next to tasks (T-) and support tickets (TK-). Older ones are numbered oldest first. A secret's chip shows its name only, never its value.
+- Chips update by themselves when the status changes.
+
 ## 0.39.2
 
 - **The *Sign in to Codex* button now shows.** It was only drawn on the Claude card, so 0.39.1's Codex sign-in could not be reached.

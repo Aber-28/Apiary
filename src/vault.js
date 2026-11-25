@@ -124,8 +124,16 @@ export class Vault {
   lock() { this.key?.fill(0); this.key = null; this.values.clear(); this.users.clear(); }
 
   _need() { if (!this.exists) throw err(409, 'Create the vault first'); if (!this.unlocked) throw err(423, 'The vault is locked. Unlock it first.'); }
+  // Every secret gets a short ID (SC-0001), counted up and never reused. Older ones are numbered oldest first.
+  _numbered() {
+    if (!this.data) return;
+    const todo = Object.values(this.data.items || {}).filter((i) => !i.num).sort((a, b) => a.createdAt - b.createdAt);
+    for (const i of todo) i.num = (this.data.seq = (this.data.seq || 0) + 1);
+    if (todo.length) this._save();
+  }
   list() {
-    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, name: i.name, note: i.note || '', createdAt: i.createdAt, username: this.users.get(i.id) || '', hasUsername: !!i.hasUser, type: typeOf(i), host: i.host || '', port: i.port || 0, auth: i.auth || '', assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
+    this._numbered();
+    return Object.values(this.data?.items || {}).sort((a, b) => a.createdAt - b.createdAt).map((i) => ({ id: i.id, code: `SC-${String(i.num).padStart(4, '0')}`, name: i.name, note: i.note || '', createdAt: i.createdAt, username: this.users.get(i.id) || '', hasUsername: !!i.hasUser, type: typeOf(i), host: i.host || '', port: i.port || 0, auth: i.auth || '', assigned: Object.entries(i.assigned || {}).map(([key, a]) => ({ key, label: a.label, grant: a.grant })) }));
   }
   byName(name) { return Object.values(this.data?.items || {}).find((i) => i.name.toLowerCase() === String(name).trim().toLowerCase()); }
   add(name, value, note = '', username = '', meta = {}) {

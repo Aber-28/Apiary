@@ -144,11 +144,11 @@ details summary{cursor:pointer;color:var(--accent-text);font-weight:600;min-heig
 .org-top{display:flex;justify-content:center;position:relative;padding-bottom:22px}
 .org-top::after{content:"";position:absolute;left:50%;bottom:0;width:2px;height:22px;background:var(--line)}
 .org-row{display:flex;gap:18px;flex-wrap:wrap;justify-content:center;align-items:flex-start;border-top:2px solid var(--line);padding-top:18px;width:100%}
-.org-col{min-width:210px;max-width:260px;display:flex;flex-direction:column;gap:10px}
+.org-col{min-width:150px;max-width:200px;display:flex;flex-direction:column;gap:10px}
 .org-col h4{margin:0;font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);text-align:center}
 .org-branch{display:flex;flex-direction:column;gap:8px}
 .org-sub{margin-left:16px;padding-left:12px;border-left:2px solid var(--line);display:flex;flex-direction:column;gap:8px}
-.org-card{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--text);min-width:200px;cursor:pointer}
+.org-card{display:flex;flex-direction:column;align-items:flex-start;gap:0;text-align:left;padding:6px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--text);min-width:0;cursor:pointer;font-size:13px;line-height:1.25}
 .org-card:hover,.org-card:focus-visible{border-color:var(--accent)}
 .org-card small{color:var(--muted)} .org-card .why{font-style:italic}
 .files{padding:20px 24px;overflow:auto;flex:1}

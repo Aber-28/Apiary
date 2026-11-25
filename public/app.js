@@ -463,8 +463,8 @@ function pageProject(leadId, general = false) {
     const members = S.agents.filter((a) => a.member && a.parentId === leadId);
     const boss = (a) => (members.some((m) => m.id === a.reportsTo) ? a.reportsTo : leadId);
     const under = (id) => members.filter((m) => boss(m) === id);
-    const card = (a) => h('button', { class: 'org-card', 'aria-label': `${a.name}, ${a.role || deptOf(a)}`, onclick: () => { S.sel = a.id; S.tab = 'chat'; drawAll(); } },
-      h('span', { class: 'dot ' + ({ working: 'work pulse', waiting: 'info pulse', error: 'err' }[a.status] || 'ok') }), h('b', {}, a.name), h('small', {}, a.role || ''), h('span', { class: 'pill' }, deptOf(a)), a.profile?.reason ? h('small', { class: 'why' }, `Hired for: ${a.profile.reason}`) : null);
+    const card = (a) => h('button', { class: 'org-card', 'aria-label': `${a.name}, ${deptOf(a)}`, title: a.role || deptOf(a), onclick: () => { S.sel = a.id; S.tab = 'chat'; drawAll(); } },
+      h('b', {}, a.name), h('small', {}, deptOf(a)));
     const branch = (a) => h('div', { class: 'org-branch' }, card(a), under(a.id).length ? h('div', { class: 'org-sub' }, under(a.id).map(branch)) : null);
     const direct = under(leadId), depts = [...new Set(direct.map(deptOf))];
     const ask = guard(async () => { await api(`/api/agents/${leadId}/messages`, 'POST', { text: 'Look at this project and propose the permanent specialists we need to do it well (use apiary-hire, with a real reason for each). Do not propose anyone we do not need.' }); S.tab = 'chat'; drawTabs(); drawBody(); });
@@ -1042,8 +1042,8 @@ function pageTerminals() {
 function pageAgents() {
   crumbs('Agents', 'All agents');
   const draw = () => {
-    const rows = []; const walk = (a, d) => { rows.push([a, d]); kidsOf(a.id).forEach((k) => walk(k, d + 1)); }; leads().forEach((l) => walk(l, 0));
-    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'All agents'), h('p', { class: 'sub-title' }, `${S.agents.length} agents across ${leads().length} projects.`))),
+    const rows = []; const walk = (a, d) => { rows.push([a, d]); kidsOf(a.id).forEach((k) => walk(k, d + 1)); }; S.agents.filter((a) => !a.parentId).sort((a, b) => (b.kind === 'general') - (a.kind === 'general') || a.createdAt - b.createdAt).forEach((l) => walk(l, 0));
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'All agents'), h('p', { class: 'sub-title' }, `${S.agents.length} agents across ${S.agents.filter((a) => !a.parentId).length} ${S.agents.filter((a) => !a.parentId).length === 1 ? 'group' : 'groups'}.`))),
       rows.length ? h('div', { class: 'card scroll-x', style: 'padding:0' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Name', 'Role', 'AI', 'Via', 'Status', 'Branch'].map((t) => h('th', {}, t)))),
         h('tbody', {}, rows.map(([a, d]) => h('tr', {}, h('td', { style: `padding-left:${16 + d * 22}px` }, h('a', { href: `#/project/${rootOf(a).id}`, onclick: () => (S.sel = a.id), style: 'font-weight:600' }, a.name)), h('td', { class: 'hint' }, a.role), h('td', {}, PNAME[a.provider] || a.provider), h('td', {}, a.method === 'api' ? 'Web' : 'Terminal'), h('td', {}, pill(a.status)), h('td', { class: 'mono hint' }, a.git?.branch || '—')))))) : h('div', { class: 'card empty' }, 'No agents yet.'));
   };

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.32.1
+
+- **Fix:** All agents lists the whole team, including the CEO and its team members (it showed "No agents yet" when the team had no project lead).
+- **Organisation cards** show only the name and the department (for example Security or Marketing).
+
 ## 0.32.0
 
 Fixes from a review of the approval, trust, messaging and task code.

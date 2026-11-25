@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.45.1
+
+- **Fixed: the pasted sign-in code disappeared.** While waiting for the Claude sign-in code, the page redrew the box every second and a half and wiped the field. It now redraws only when something really changes, and keeps what you typed.
+
 ## 0.45.0
 
 - **Retries and recovery.** A failed or stuck agent run is retried; if Claude hits its usage limit or loses its sign-in, Codex takes over that step (and the reverse); if nothing works, you get a plain-words request with Try again or Give up, saying what happened and what was tried.

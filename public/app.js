@@ -1159,18 +1159,20 @@ const CINFO = {
 };
 // Sign in to Claude or Codex from the page: open the sign-in page, paste the code it shows, and Apiary checks it.
 function aiSignIn(c, onDone = () => route()) {
-  const box = h('div', {}); let timer = null, shownDone = false;
+  const box = h('div', {}); let timer = null, shownDone = false, lastSig = '', draft = '';
   const base = `/api/ai-login/${c.id}`;
   const signInBtn = (label) => h('button', { class: 'btn primary big', onclick: start }, label);
   const poll = async () => {
     if (!box.isConnected) return;
     let st; try { st = await api(base); } catch { timer = setTimeout(poll, 2500); return; }
-    draw(st);
+    const sig = `${st.state}|${st.url || ''}|${st.code || ''}|${st.message || ''}`;
+    if (sig !== lastSig) draw(st);   // only redraw on a real change, so what you are typing is not wiped
     if (['starting', 'waiting', 'checking'].includes(st.state)) timer = setTimeout(poll, 1500);
     else if (st.state === 'done' && !shownDone) { shownDone = true; toast(`Signed in to ${CINFO[c.id].title}`); refreshConns().then(() => onDone()); }
   };
   const start = guard(async () => { draw({ state: 'starting' }); draw(await api(base, 'POST')); clearTimeout(timer); timer = setTimeout(poll, 1000); });
   const draw = (st) => {
+    lastSig = `${st.state}|${st.url || ''}|${st.code || ''}|${st.message || ''}`;
     if (st.state === 'starting') box.replaceChildren(h('p', { class: 'hint', role: 'status' }, 'Getting the sign-in link…'));
     else if (st.state === 'waiting' && st.device) {
       // Codex: the page shows a short code to type on the sign-in page. Nothing to paste back; this page updates by itself.
@@ -1181,8 +1183,8 @@ function aiSignIn(c, onDone = () => route()) {
           h('button', { class: 'btn', onclick: guard(async () => { await api(base, 'DELETE'); clearTimeout(timer); draw({ state: 'idle' }); }) }, 'Cancel')),
         h('p', { class: 'hint', role: 'status' }, h('b', {}, '2.'), ' Approve it there. This page updates by itself.'));
     } else if (st.state === 'waiting') {
-      const code = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Paste the code here', 'aria-label': 'Code from the sign-in page' });
-      const send = guard(async () => { await api(base + '/code', 'POST', { code: code.value }); code.value = ''; draw({ state: 'checking' }); clearTimeout(timer); timer = setTimeout(poll, 1000); });
+      const code = h('input', { type: 'text', autocomplete: 'off', placeholder: 'Paste the code here', 'aria-label': 'Code from the sign-in page', value: draft, oninput: (e) => { draft = e.target.value; } });
+      const send = guard(async () => { await api(base + '/code', 'POST', { code: code.value }); code.value = ''; draft = ''; draw({ state: 'checking' }); clearTimeout(timer); timer = setTimeout(poll, 1000); });
       box.replaceChildren(
         h('p', { style: 'margin:0 0 6px' }, h('b', {}, '1.'), ' Open the sign-in page and approve:'),
         h('div', { class: 'kv', style: 'margin:6px 0' }, h('a', { class: 'btn primary', href: st.url || '#', target: '_blank', rel: 'noopener' }, 'Open the sign-in page'),

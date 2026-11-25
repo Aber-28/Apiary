@@ -2,6 +2,7 @@
 // An agent saves one with an apiary-runbook block; it stays a DRAFT, and is never given to agents as
 // instructions, until you have read it and approved it. Passwords and keys are masked on the way in.
 import { randomUUID } from 'node:crypto';
+import { scrub } from './templates.js';
 
 const err = (status, message) => Object.assign(new Error(message), { status });
 const clean = (s, n) => String(s ?? '').replace(/\r/g, '').trim().slice(0, n);
@@ -9,7 +10,9 @@ const clean = (s, n) => String(s ?? '').replace(/\r/g, '').trim().slice(0, n);
 export class Runbooks {
   constructor(engine) { this.engine = engine; }
   get all() { return (this.engine.store.data.runbooks ||= {}); }
-  _mask(text) {
+  // Why and steps must not name real machines, addresses or links: those become placeholders (see scrub in templates.js).
+  _mask(text) { return this._secretMask(scrub(this.engine, String(text ?? '')).text); }
+  _secretMask(text) {
     return this.engine._redact(String(text ?? '')).replace(/\b(password|passwd|pwd|passphrase|token|api[ _-]?key|secret)\s*[:=]\s*\S+/gi, (m, k) => `${k}: <removed>`);
   }
   _steps(v) {
@@ -17,6 +20,16 @@ export class Runbooks {
     return arr.map((x) => this._mask(clean(String(x).replace(/^\s*(?:\d+[.)]|[-*])\s*/, ''), 400))).filter(Boolean).slice(0, 40);
   }
   _tags(v) { return [...new Set((Array.isArray(v) ? v : String(v ?? '').split(',')).map((t) => clean(t, 24).toLowerCase()).filter(Boolean))].slice(0, 8); }
+  // Cleans runbooks saved before device names were kept out of them. Titles are left as they are.
+  tidy() {
+    let changed = 0;
+    for (const r of Object.values(this.all)) {
+      const problem = this._mask(r.problem || ''), steps = this._steps(r.steps || []);
+      if (problem !== (r.problem || '') || steps.join('\n') !== (r.steps || []).join('\n')) { r.problem = problem; if (steps.length) r.steps = steps; changed++; }
+    }
+    if (changed) this.engine.store.save();
+    return changed;
+  }
   list() { return Object.values(this.all).sort((a, b) => b.updatedAt - a.updatedAt); }
   get(id) { const r = this.all[id]; if (!r) throw err(404, 'No such runbook'); return r; }
   get draftCount() { return Object.values(this.all).filter((r) => r.status === 'draft').length; }
@@ -25,7 +38,7 @@ export class Runbooks {
   // By an agent: always a draft. A runbook that is already trusted is never changed by an agent;
   // a new draft is made beside it so you can compare.
   propose(agentName, project, b = {}) {
-    const title = this._mask(clean(b.title, 100)), steps = this._steps(b.steps);
+    const title = this._secretMask(clean(b.title, 100)), steps = this._steps(b.steps);
     if (!title) throw err(400, 'A runbook needs a title');
     if (!steps.length) throw err(400, 'A runbook needs steps');
     const clash = Object.values(this.all).find((r) => r.title.toLowerCase() === title.toLowerCase());
@@ -63,7 +76,7 @@ export class Runbooks {
   promptText(max = 6000) {
     const out = []; let n = 0;
     for (const r of this.trusted().slice(0, 30)) {
-      const t = `- "${r.title}"${r.problem ? ` (for: ${r.problem})` : ''}\n${r.steps.map((s, i) => `    ${i + 1}. ${s}`).join('\n')}`;
+      const t = `- "${r.title}"${r.problem ? ` (why: ${r.problem})` : ''}\n${r.steps.map((s, i) => `    ${i + 1}. ${s}`).join('\n')}`;
       if (n + t.length > max) break; out.push(t); n += t.length;
     }
     return out.join('\n');

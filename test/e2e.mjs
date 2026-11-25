@@ -1506,6 +1506,20 @@ let orgIds;
       assert.throws(() => engine.setTrust(cagent.id, bad), /0 to 5/, 'F1: rejects ' + JSON.stringify(bad));
     assert.equal(engine.setTrust(cagent.id, { level: '2' }).trust, 2, 'F1: a digit string is accepted');
   }
+  { // runbooks: a why, steps that use placeholders instead of real machines, titles kept as written, older runbooks cleaned
+    engine.infra.add({ name: 'Example Server', type: 'server', address: '10.0.0.5' });
+    const rb = engine.runbooks.propose('Tester', '', { title: 'Restart Example Server', problem: 'Example Server stops after updates', steps: ['ssh to Example Server at 10.0.0.5', 'restart the service at https://example.com/docs'], tags: [] });
+    assert.equal(rb.title, 'Restart Example Server', 'the title is kept as written');
+    assert.ok(!/Example Server|10\.0\.0\.5|example\.com/.test(rb.problem + ' ' + rb.steps.join(' ')), 'no real machine names, addresses or links in why or steps');
+    assert.ok(/<server>/.test(rb.problem) && /<server>/.test(rb.steps[0]), 'placeholders are used instead');
+    engine.runbooks.all.old1 = { id: 'old1', title: 'Old one', problem: 'Example Server is slow', steps: ['open Example Server'], tags: [], status: 'draft', author: 'Tester', project: '', createdAt: 1, updatedAt: 1 };
+    assert.ok(engine.runbooks.tidy() >= 1, 'older runbooks are cleaned');
+    assert.ok(!/Example Server/.test(engine.runbooks.all.old1.steps.join(' ') + engine.runbooks.all.old1.problem), 'the old steps no longer name the machine');
+    assert.equal(engine.runbooks.all.old1.title, 'Old one', 'the old title is kept');
+    // leave nothing behind for the tests that count runbooks and devices
+    delete engine.runbooks.all.old1; engine.runbooks.remove(rb.id);
+    engine.infra.items = engine.infra.items.filter((i) => i.name !== 'Example Server'); engine.infra.save?.();
+  }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);
     assert.equal(engine.setTrustAll({ level: 2 }).count, Object.keys(engine.agents).length);

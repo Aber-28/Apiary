@@ -313,6 +313,14 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
           return;
         }
       }
+      const aiRoute = /^\/api\/ai-login\/(claude|codex)(?:\/(code))?$/.exec(url.pathname);
+      if (aiRoute) {
+        const [, prov, sub] = aiRoute;
+        if (sub === 'code' && req.method === 'POST') return json(res, 200, engine.aiLogin.submit(prov, (await readBody(req)).code));
+        if (!sub && req.method === 'GET') return json(res, 200, engine.aiLogin.status(prov));
+        if (!sub && req.method === 'POST') return json(res, 202, engine.aiLogin.start(prov));
+        if (!sub && req.method === 'DELETE') return json(res, 200, engine.aiLogin.cancel(prov));
+      }
       if (url.pathname === '/api/github/login') {
         if (req.method === 'GET') return json(res, 200, engine.ghLogin.status);
         if (req.method === 'POST') { const st = engine.ghLogin.start(); engine.connections.update('github', { method: 'cli' }); return json(res, 202, st); }

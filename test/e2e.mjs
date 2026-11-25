@@ -1598,6 +1598,36 @@ let orgIds;
     for (const [a, st] of savedStatus) a.status = st;
     for (const r of savedPending) r.status = 'pending';
   }
+  { // sign in to Claude from the page: the link is shown, the pasted code goes to the CLI, the login is confirmed, and the code is never kept
+    const { AiLogin } = await import('../src/aiLogin.js');
+    const { EventEmitter } = await import('node:events');
+    const { PassThrough } = await import('node:stream');
+    const fakeCli = (code) => {
+      const c = new EventEmitter(); c.stdin = new PassThrough(); c.stdout = new PassThrough(); c.stderr = new PassThrough(); c.exitCode = null; c.kill = () => {};
+      c.stdin.on('data', (d) => { if (String(d).trim() === code) { c.exitCode = 0; c.emit('close', 0); } else { c.exitCode = 1; c.emit('close', 1); } });
+      return c;
+    };
+    let launched = null;
+    const al = new AiLogin({ timeoutMs: 5000, bin: () => '/example/claude', checkFn: () => '{"loggedIn": true}',
+      spawnFn: (bin, args) => { launched = { bin, args }; const c = fakeCli('example-code-123'); setTimeout(() => c.stdout.write('If the browser did not open, visit:\nhttps://claude.example.com/oauth/authorize?state=abc.\n'), 5); return c; } });
+    const tock = (ms = 25) => new Promise((r) => setTimeout(r, ms));
+    assert.equal(al.start('claude').state, 'starting');
+    await tock();
+    assert.equal(al.status('claude').state, 'waiting'); assert.equal(al.status('claude').url, 'https://claude.example.com/oauth/authorize?state=abc', 'the link is shown without the trailing full stop');
+    assert.deepEqual(launched.args, ['auth', 'login', '--claudeai'], 'uses the CLI\'s own sign-in');
+    assert.throws(() => al.submit('claude', ''), /Paste the code/);
+    al.submit('claude', 'example-code-123');
+    await tock();
+    assert.equal(al.status('claude').state, 'done', 'done once the CLI confirms the login');
+    assert.ok(!JSON.stringify(al.s).includes('example-code-123'), 'the code is not kept');
+    assert.throws(() => al.submit('claude', 'x'), /no sign-in waiting/);
+    // a wrong code fails with a clear message
+    al.start('claude'); await tock();
+    al.submit('claude', 'wrong-code'); await tock();
+    assert.equal(al.status('claude').state, 'failed'); assert.ok(al.status('claude').message.length > 0);
+    // an unknown service is refused
+    assert.throws(() => al.start('example-service'), /Unknown service/);
+  }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);
     assert.equal(engine.setTrustAll({ level: 2 }).count, Object.keys(engine.agents).length);

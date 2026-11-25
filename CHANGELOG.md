@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.36.0
+
+- **Sign in to Claude from the page.** The Claude connection has a sign-in button. Apiary shows the link to open, you approve it in your browser, paste the code it shows, and the page confirms the login by itself. No terminal needed. Codex still uses the terminal: its sign-in is not verified yet.
+
 ## 0.35.0
 
 - **Updates wait for work in progress.** Install now waits while agents are working or approvals are waiting for you. The Updates page says what it is waiting for, new messages to agents are held meanwhile, and the update installs by itself once everything has finished. You can cancel the wait, or install now anyway (with a warning that running agents will be cut off).

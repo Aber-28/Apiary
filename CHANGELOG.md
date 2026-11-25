@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.41.1
+
+- **Past decisions are archived after 3 hours** (it was 24). They are still listed under *Archived decisions* on the Approvals page.
+
 ## 0.41.0
 
 - **Library.** A set of ready-made connectors (Proxmox, ESXi, Hyper-V, Linux, Docker, Raspberry Pi, OpenWrt, OPNsense, Synology, Home Assistant, n8n, Nginx Proxy Manager, Coolify, website). Pick one, give the address and login, and Apiary puts the login in the vault, adds the device already linked, and tests it.

@@ -157,13 +157,13 @@ export class Engine extends EventEmitter {
   setApprovalsDefault(v) { this.store.data.settings.approvalsDefault = !!v; this.store.save(); return this.approvalsDefault; }
 
   // ---------- approvals ----------
-  // Decisions stay in view for a day, then count as archived.
+  // Decisions stay in view for 3 hours, then count as archived.
   // Every approval gets a short ID (AP-0001), counted up and never reused. Older ones are numbered oldest first.
   _approvalNo(rec) { if (!rec.num) { const n = (this.store.data.approvalSeq = (this.store.data.approvalSeq || 0) + 1); rec.num = n; } return rec; }
   _stampApprovals() { for (const r of Object.values(this.store.data.approvals).filter((x) => !x.num).sort((a, b) => a.createdAt - b.createdAt)) this._approvalNo(r); }
   approvals() {
     this._stampApprovals();
-    const cut = Date.now() - 24 * 3600000;
+    const cut = Date.now() - 3 * 3600000;
     return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, archived: r.status !== 'pending' && (r.decidedAt || r.createdAt) < cut }));
   }
   _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }

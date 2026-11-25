@@ -339,7 +339,7 @@ function approvalCard(ap) {
       h('button', { class: 'btn', onclick: () => { if (confirm('Allow every command this agent runs, including ones that delete or change things? You can take this back on Approval rules.')) decide('approve', 'agent')(); } }, 'Allow everything for this agent'),
       h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
     : isPending && ap.kind === 'secret' ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve', 'once') }, 'Allow once'), h('button', { class: 'btn', onclick: decide('approve', 'always') }, 'Allow always'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
-    : isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'plan' ? 'Approve plan' : ap.kind === 'hire' ? 'Approve hiring' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'))
+    : isPending ? h('div', { class: 'kv', style: 'margin-top:12px' }, note, h('button', { class: 'btn primary', onclick: decide('approve') }, ap.kind === 'merge' ? 'Approve merge' : ap.kind === 'plan' ? 'Approve plan' : ap.kind === 'hire' ? 'Approve hiring' : ap.kind === 'stuck' ? 'Try again' : 'Approve'), h('button', { class: 'btn danger', onclick: decide('deny') }, ap.kind === 'stuck' ? 'Give up' : 'Deny'))
       : ap.note ? h('p', { class: 'hint', style: 'margin-top:8px' }, `Your note: ${ap.note}`) : null);
 }
 function pageApprovals() {

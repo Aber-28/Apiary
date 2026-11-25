@@ -24,7 +24,7 @@ import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
 import { Audit } from './audit.js';
-import { Health } from './health.js';
+import { Health, LOGIN_RE } from './health.js';
 import { Telegram } from './telegram.js';
 import { Templates } from './templates.js';
 import { Reports } from './report.js';
@@ -50,8 +50,11 @@ const ENV_LIMITS = {
   maxAgents: Number(process.env.APIARY_MAX_AGENTS || 12),  // per whole tree
   maxRounds: Number(process.env.APIARY_MAX_ROUNDS || 4),   // delegate/report cycles per turn
   maxPeerMessages: Number(process.env.APIARY_MAX_PEER_MESSAGES || 30), // agent-to-agent messages per project
+  maxRetries: Number(process.env.APIARY_MAX_RETRIES || 2),  // retries of a stuck or briefly failing run
 };
-const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], maxPeerMessages: [0, 200] };
+const PROVIDER_LABEL = { claude: 'Claude', codex: 'Codex', mock: 'The test agent' };
+const abortError = () => Object.assign(new Error('stopped'), { name: 'AbortError' });
+const LIMIT_RANGE = { maxDepth: [0, 4], maxAgents: [1, 40], maxRounds: [0, 10], maxPeerMessages: [0, 200], maxRetries: [0, 5] };
 const SPAWN_RE = /```apiary-spawn\s*([\s\S]*?)```/g;
 const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
@@ -1242,26 +1245,97 @@ export class Engine extends EventEmitter {
     try {
       const runner = providers.pick(agent);
       const system = this._system(agent) + this._projectNote(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
-      const res = await runner.run({
-        agent, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: ctl.signal, approval,
-        history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
-        onText: (text) => this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }),
-        onActivity: (text) => this.emit('event', { type: 'activity', agentId: agent.id, text }),
-        onLog: (line) => this._log(agent, line), env: this._leaseEnv(agent),
-      });
+      const res = await this._runRecovering(agent, ctl, { prompt, system, approval, runner });
       this._usage(agent, res, system, prompt);
-      if (res.sessionId) agent.sessionId = res.sessionId;
+      if (res.sessionId && !res.switchedProvider) agent.sessionId = res.sessionId;
       if (agent.method === 'api') {
         agent.history = [...(agent.history || []), { role: 'user', content: prompt }, { role: 'assistant', content: res.text }].slice(-40);
       }
       return res.text;
     } catch (e) {
-      if (e.name !== 'AbortError') { this.health.noteLoginFailure(agent.provider, e.message); this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
+      if (e.name !== 'AbortError' && !e.recorded) { this.health.noteLoginFailure(agent.provider, e.message); this._log(agent, `! ${e.message}`); if (looksLikeLimit(e.message)) { this.usage.markLimit(agent.provider); this._log(agent, `! ${agent.provider} looks like it has reached its usage limit. See Usage.`); } }
       throw e;
     } finally {
       this.endApprovalBridge(approval);
       this.ctls.delete(agent.id);
       this.emit('event', { type: 'activity', agentId: agent.id, text: '' });
+    }
+  }
+
+  // ----- retries and recovery: a failed or stuck run is retried, handed to the other AI if that helps, and only then put to you -----
+  _alternate(agent) {
+    if (agent.method === 'api' || agent.provider === 'mock') return null;
+    return this.available.find((p) => p.id !== agent.provider && p.id !== 'mock')?.id || null;
+  }
+  _failKind(e, stuck) {
+    const m = String(e?.message || e);
+    if (stuck) return 'stuck';
+    if (LOGIN_RE.test(m)) return 'auth';
+    if (/overloaded|\b50[234]\b|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|socket hang up|fetch failed|network|connection (reset|closed|lost)|temporar/i.test(m)) return 'transient';
+    if (looksLikeLimit(m)) return 'limit';
+    return 'other';
+  }
+  _failWords(kind, who) {
+    return { limit: `${who} has reached its usage limit`, auth: `${who} is not signed in any more`, stuck: `${who} stopped responding`, transient: `${who} could not be reached`, other: `${who} stopped with an error` }[kind] || `${who} failed`;
+  }
+  async _runRecovering(agent, ctl, { prompt, system, approval, runner }) {
+    const retryMs = Number(process.env.APIARY_RETRY_MS || 3000), stuckMs = Number(process.env.APIARY_STUCK_MS || 20 * 60 * 1000);
+    const maxRetries = this.limits.maxRetries ?? 2;
+    const label = (id) => PROVIDER_LABEL[id] || id;
+    let cur = agent, attempt = 0, retries = 0, escalations = 0, switched = false, extra = null; const tried = [];
+    for (;;) {
+      if (ctl.signal.aborted) throw abortError();
+      const rctl = new AbortController(), onAbort = () => rctl.abort(); ctl.signal.addEventListener('abort', onAbort, { once: true });
+      let idle = null, stuck = false;
+      const ping = () => { clearTimeout(idle); idle = setTimeout(() => { stuck = true; rctl.abort(); }, stuckMs); };
+      ping();
+      const bridge = cur.provider === agent.provider ? approval : (cur.provider === 'claude' && cur.method !== 'api' && cur.access !== 'full' ? this.beginApprovalBridge(cur, rctl.signal) : undefined);
+      try {
+        const run = cur.provider === agent.provider ? runner : providers.pick(cur);
+        const res = await run.run({
+          agent: cur, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: rctl.signal, approval: bridge,
+          history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
+          onText: (text) => { ping(); this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }); },
+          onActivity: (text) => { ping(); this.emit('event', { type: 'activity', agentId: agent.id, text }); },
+          onLog: (line) => { ping(); this._log(agent, line); }, env: this._leaseEnv(agent),
+        });
+        if (cur.provider !== agent.provider) res.switchedProvider = cur.provider;
+        return res;
+      } catch (e) {
+        if (e.name === 'AbortError' && !stuck) throw e;
+        e.recorded = true;
+        const kind = this._failKind(e, stuck), why = stuck ? `no sign of life for ${Math.round(stuckMs / 60000) || '<1'} minute(s)` : String(e.message || e).slice(0, 200);
+        if (!stuck) { this.health.noteLoginFailure(cur.provider, e.message); if (looksLikeLimit(e.message)) { this.usage.markLimit(cur.provider); this._log(agent, `! ${cur.provider} looks like it has reached its usage limit. See Usage.`); } }
+        this._log(agent, `! ${why}`); tried.push(`${label(cur.provider)}: ${this._failWords(kind, label(cur.provider))}`);
+        attempt++;
+        // 1. a short hiccup (network, overloaded, stuck): try the same AI again
+        if ((kind === 'transient' || kind === 'stuck') && retries < maxRetries) {
+          retries++;
+          this._msg(agent, { role: 'system', text: `${this._failWords(kind, label(cur.provider))}. Trying again (${retries} of ${maxRetries}).` });
+          await new Promise((r, j) => { const t = setTimeout(r, retryMs * retries); ctl.signal.addEventListener('abort', () => { clearTimeout(t); j(abortError()); }, { once: true }); });
+          cur = { ...cur, attempt }; continue;
+        }
+        // 2. a limit, a lost login or a repeated failure: hand this step to the other AI
+        const alt = !switched ? this._alternate(agent) : null;
+        if (alt && (kind !== 'other')) {
+          switched = true; cur = { ...agent, provider: alt, sessionId: null, model: '', switchedFrom: agent.provider, attempt };
+          this._msg(agent, { role: 'system', text: `${this._failWords(kind, label(agent.provider))}, so ${label(alt)} takes over this step.` });
+          this._log(agent, `↪ switching to ${alt} for this step`);
+          continue;
+        }
+        // 3. nothing worked: put it to you, in plain words
+        if (escalations >= 2 || this.stopped.has(agent.id)) throw e;
+        escalations++;
+        const r = await this._ask(agent, {
+          kind: 'stuck', title: `${agent.name} cannot continue: ${this._failWords(kind, label(cur.provider))}`,
+          detail: `What happened: ${why}.\nWhat Apiary tried: ${tried.join('; ')}${retries ? `; retried ${retries} time${retries > 1 ? 's' : ''}` : ''}${switched ? '; handed the step to the other AI' : ''}.\n${kind === 'limit' ? 'Usually this clears when the limit resets. ' : kind === 'auth' ? 'Sign in again on the Connections page, then try again. ' : ''}Choose "Try again" to run the step once more, or "Give up" to stop here and tell the team.`,
+        });
+        if (r.decision !== 'approve') throw Object.assign(new Error(`${this._failWords(kind, label(cur.provider))}; you chose to stop. ${why}`), { handled: true });
+        retries = 0; switched = false; cur = { ...agent, attempt, humanOk: true };
+      } finally {
+        clearTimeout(idle); ctl.signal.removeEventListener('abort', onAbort);
+        if (bridge && bridge !== approval) this.endApprovalBridge(bridge);
+      }
     }
   }
 

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.45.0
+
+- **Retries and recovery.** A failed or stuck agent run is retried; if Claude hits its usage limit or loses its sign-in, Codex takes over that step (and the reverse); if nothing works, you get a plain-words request with Try again or Give up, saying what happened and what was tried.
+- A run that shows no activity for 20 minutes counts as stuck and is stopped and retried.
+
 ## 0.44.0
 
 - **Parallel work that doesn't collide.** Merges into a lead's branch now go through a queue, one at a time in the order work finishes, so teammates working at once can never corrupt each other's merge.

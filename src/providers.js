@@ -257,6 +257,14 @@ const mock = {
     });
     const delay = Number(process.env.APIARY_MOCK_DELAY || 8);
     const say = async (s) => { for (const w of s.split(/(?<= )/)) { onText(w); await sleep(delay); } };
+    const tries = (mock.tries ||= new Map());
+    if (/\brecover-(flaky|stuck|limit|allfail)\b/.test(prompt) && !prompt.startsWith('Review requested')) {
+      const k = /recover-(\w+)/.exec(prompt)[1], n = (tries.get(agent.id + k) || 0) + 1; tries.set(agent.id + k, n);
+      if (k === 'flaky' && n === 1) throw new Error('read ECONNRESET: connection reset');
+      if (k === 'stuck' && n === 1) await new Promise((r, j) => signal?.addEventListener('abort', () => j(abortErr()), { once: true }));
+      if (k === 'limit' && !agent.switchedFrom) throw new Error('429 usage limit reached for this account');
+      if (k === 'allfail' && !agent.humanOk) throw new Error('429 usage limit reached for this account');
+    }
     let out;
     onLog(`$ mock ${agent.name}`);
     if ((system || '').includes('ONBOARDING INTERVIEW')) {

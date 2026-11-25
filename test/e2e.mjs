@@ -406,6 +406,31 @@ assert.ok(engine2.agents[lead2.id]);
   await call('/api/agents/' + gl.id, 'DELETE');
 }
 
+// ---- retries and recovery: retry a hiccup, retry a stuck run, hand a limit to the other AI, otherwise ask the human in plain words ----
+{
+  process.env.APIARY_RETRY_MS = '5'; process.env.APIARY_STUCK_MS = '250';
+  const sysText = (id) => engine.messages(id).filter((m) => m.role === 'system').map((m) => m.text).join('\n');
+  const mk = async (goal) => (await call('/api/agents', 'POST', { provider: 'mock', approvals: false, goal })).body;
+  const done = (id, re) => until(() => engine.agents[id].status === 'idle' && engine.messages(id).some((m) => m.role === 'agent' && re.test(m.text)), 8000);
+  const a1 = await mk('recover-flaky hello'); await done(a1.id, /You said: recover-flaky/); assert.match(sysText(a1.id), /could not be reached\. Trying again \(1 of 2\)/, 'a network hiccup is retried');
+  const a2 = await mk('recover-stuck hello'); await done(a2.id, /You said: recover-stuck/); assert.match(sysText(a2.id), /stopped responding\. Trying again/, 'a run that goes quiet is stopped and retried');
+  engine._alternate = (a) => (a.provider === 'mock' ? 'mock' : null);
+  const a3 = await mk('recover-limit hello'); await done(a3.id, /You said: recover-limit/); assert.match(sysText(a3.id), /has reached its usage limit, so .* takes over this step/, 'a limit hands the step to the other AI');
+  assert.equal(engine.agents[a3.id].switchedFrom, undefined, 'the agent itself keeps its own AI');
+  engine._alternate = () => null;
+  const a4 = await mk('recover-allfail hello');
+  await until(() => engine.approvals().some((x) => x.agentId === a4.id && x.status === 'pending' && x.kind === 'stuck'), 8000);
+  const ask = engine.approvals().find((x) => x.agentId === a4.id && x.kind === 'stuck');
+  assert.match(ask.title, /cannot continue: .* reached its usage limit/); assert.match(ask.detail, /What happened:[\s\S]*What Apiary tried:[\s\S]*Try again/, 'the reason is explained in plain words');
+  await call(`/api/approvals/${ask.id}/decide`, 'POST', { decision: 'approve' }); await done(a4.id, /You said: recover-allfail/);
+  const a5 = await mk('recover-allfail again');
+  await until(() => engine.approvals().some((x) => x.agentId === a5.id && x.status === 'pending' && x.kind === 'stuck'), 8000);
+  const ask5 = engine.approvals().find((x) => x.agentId === a5.id && x.kind === 'stuck'); await call(`/api/approvals/${ask5.id}/decide`, 'POST', { decision: 'deny' });
+  await until(() => engine.agents[a5.id].status !== 'working' && engine.agents[a5.id].status !== 'waiting', 8000);
+  assert.ok(engine.messages(a5.id).some((m) => /you chose to stop/.test(m.text || '')), 'giving up is reported');
+  delete engine._alternate; delete process.env.APIARY_RETRY_MS; delete process.env.APIARY_STUCK_MS;
+}
+
 // ---- parallel work in a git project: two specialists change the same file at once; merges are queued, the clash is fixed by its author ----
 {
   const repo = path.join(tmp, 'parrepo');

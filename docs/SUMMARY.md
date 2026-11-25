@@ -19,6 +19,7 @@
 * [Project plans and progress](using-apiary/project-plans.md)
 * [Review of finished work](using-apiary/review.md)
 * [Parallel work](using-apiary/parallel-work.md)
+* [Retries and recovery](using-apiary/recovery.md)
 * [Project stages](using-apiary/project-stages.md)
 * [Call an agent with @](using-apiary/mentions.md)
 * [Export and import](using-apiary/export-import.md)

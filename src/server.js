@@ -70,7 +70,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
   };
 
   // what can be reached before signing in
-  const OPEN = new Set(['/login', '/login.js', '/login.css', '/theme.js', '/style.css', '/api/login']);
+  const OPEN = new Set(['/login', '/login.js', '/login.css', '/theme.js', '/style.css', '/themes.css', '/api/login']);
   const secure = (req) => req.socket.encrypted || req.headers['x-forwarded-proto'] === 'https';
   const ipOf = (req) => req.socket.remoteAddress || '?';
 

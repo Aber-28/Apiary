@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.46.0
+
+- **Themes.** Eleven looks next to the default Dark and Bright: Matrix (green on black with falling code), Glass and Glass Dark (frosted panels over a soft wallpaper), Nord, Tokyo Night, Dracula, Solarized Light, Graphite and High contrast. Pick from the palette button at the top or on Settings, Appearance.
+- Every theme meets the 4.5 to 1 text contrast level. Matrix rain respects reduced motion.
+
 ## 0.45.1
 
 - **Fixed: the pasted sign-in code disappeared.** While waiting for the Claude sign-in code, the page redrew the box every second and a half and wiped the field. It now redraws only when something really changes, and keeps what you typed.

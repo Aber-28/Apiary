@@ -406,6 +406,19 @@ assert.ok(engine2.agents[lead2.id]);
   await call('/api/agents/' + gl.id, 'DELETE');
 }
 
+// ---- themes: every theme in the list is served, defined and complete ----
+{
+  const js = await (await fetch(base + '/theme.js')).text(), css = await (await fetch(base + '/themes.css')).text(), page = await (await fetch(base + '/')).text();
+  assert.match(page, /themes\.css/, 'the page loads the themes');
+  const ids = [...js.matchAll(/\{ id: '([a-z-]+)', name:/g)].map((m) => m[1]); assert.ok(ids.length >= 11 && ids.includes('matrix') && ids.includes('glass') && ids.includes('dark') && ids.includes('light'));
+  const need = ['bg', 'surface', 'surface2', 'line', 'text', 'muted', 'accent', 'on-accent', 'accent-text', 'accent-soft', 'ok', 'ok-text', 'ok-soft', 'info', 'info-text', 'info-soft', 'err', 'err-soft', 'user', 'hover'];
+  for (const id of ids.filter((x) => x !== 'dark' && x !== 'light')) {
+    const m = css.match(new RegExp(`html\\.t-${id}\\{([^}]*)\\}`)); assert.ok(m, `theme ${id} has its colours`);
+    for (const v of need) assert.ok(m[1].includes(`--${v}:`), `theme ${id} sets --${v}`);
+  }
+  assert.equal(ids.length, new Set(ids).size, 'theme ids are unique');
+}
+
 // ---- retries and recovery: retry a hiccup, retry a stuck run, hand a limit to the other AI, otherwise ask the human in plain words ----
 {
   process.env.APIARY_RETRY_MS = '5'; process.env.APIARY_STUCK_MS = '250';

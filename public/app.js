@@ -91,21 +91,39 @@ const kidsOf = (id) => S.agents.filter((a) => a.parentId === id).sort((a, b) => 
 const rootOf = (a) => { while (a.parentId) a = S.agents.find((x) => x.id === a.parentId) || { id: null }; return a; };
 
 // ---------- theme ----------
-function applyTheme(t) {
-  document.documentElement.className = t;
-  try { localStorage.setItem('apiary-theme', t); } catch { /* private mode */ }
-  const b = $('#theme'); b.replaceChildren(svg(t === 'dark' ? ICON.sun : ICON.moon));
-  const label = t === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
-  b.setAttribute('aria-label', label); b.title = label;
+const PALETTE_ICON = 'M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.9 1.5-1.9-.3-1 .3-2.1 1.4-2.1H17a4 4 0 0 0 4-4c0-5-4-10-9-10z M7.5 11h.01 M10 7.5h.01 M14.5 7.5h.01 M17 11h.01';
+function applyTheme(id) {
+  const t = window.apiaryTheme.apply(id);
+  const b = $('#theme'); b.replaceChildren(svg(PALETTE_ICON));
+  const label = `Theme: ${t.name}. Choose a theme`;
+  b.setAttribute('aria-label', label); b.title = label; b.setAttribute('aria-haspopup', 'menu');
+}
+function themeMenu() {
+  const old = $('#thememenu'); if (old) { old.remove(); return; }
+  const cur = window.apiaryTheme.get(), btn = $('#theme'), r = btn.getBoundingClientRect();
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', away, true); document.removeEventListener('keydown', key, true); btn.focus(); };
+  const away = (e) => { if (!menu.contains(e.target) && e.target !== btn && !btn.contains(e.target)) close(); };
+  const key = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    const items = [...menu.querySelectorAll('button')], i = items.indexOf(document.activeElement);
+    if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+    if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  };
+  const menu = h('div', { id: 'thememenu', role: 'menu', 'aria-label': 'Choose a theme' }, window.apiaryTheme.list.map((t) => h('button', { type: 'button', role: 'menuitemradio', 'aria-checked': String(t.id === cur), onclick: () => { applyTheme(t.id); close(); } },
+    h('span', { class: 'tsw', 'aria-hidden': 'true' }, t.sw.map((c) => h('i', { style: `background:${c}` }))), h('span', {}, h('b', {}, t.name), h('small', {}, t.note)))));
+  document.body.append(menu);
+  menu.style.top = `${r.bottom + 8}px`; menu.style.right = `${Math.max(12, innerWidth - r.right)}px`;
+  document.addEventListener('mousedown', away, true); document.addEventListener('keydown', key, true);
+  (menu.querySelector('[aria-checked=true]') || menu.querySelector('button')).focus();
 }
 // Over plain http from another device, the access link, API keys and the vault passphrase travel unencrypted.
 if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname)) {
   const live = document.querySelector('.live');
   if (live) { live.replaceChildren(h('span', { class: 'dot warn' }), 'Not encrypted. Use only on a network you trust.'); live.title = 'You are connected over plain http. Use an SSH tunnel, Tailscale or an https reverse proxy for anything you do not fully trust.'; }
 }
-$('#theme').onclick = () => applyTheme(document.documentElement.className === 'dark' ? 'light' : 'dark');
+$('#theme').onclick = themeMenu;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
-applyTheme(document.documentElement.className || 'dark');
+applyTheme(window.apiaryTheme.get());
 
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
@@ -1563,8 +1581,9 @@ function pageTickets() {
 // ---------- settings ----------
 function pageAppearance() {
   crumbs('Settings', 'Appearance');
-  const draw = () => view.replaceChildren(h('h1', {}, 'Appearance'), h('p', { class: 'sub-title' }, 'Apiary remembers your choice on this browser.'),
-    h('div', { class: 'card', style: 'max-width:560px' }, h('div', { class: 'seg' }, ['dark', 'light'].map((t) => h('button', { 'aria-pressed': String(document.documentElement.className === t), onclick: () => { applyTheme(t); draw(); } }, t === 'dark' ? 'Dark' : 'Light')))),
+  const draw = () => view.replaceChildren(h('h1', {}, 'Appearance'), h('p', { class: 'sub-title' }, 'Pick a look. Apiary remembers your choice on this browser. You can also change it from the palette button at the top.'),
+    h('div', { class: 'themegrid', role: 'radiogroup', 'aria-label': 'Theme' }, window.apiaryTheme.list.map((t) => h('button', { type: 'button', role: 'radio', 'aria-checked': String(t.id === window.apiaryTheme.get()), onclick: () => { applyTheme(t.id); draw(); } },
+      h('span', { class: 'prev', 'aria-hidden': 'true', style: `background:${t.sw[0]}` }, h('i', { style: `background:${t.sw[1]}` }), h('em', { style: `background:${t.sw[2]}` })), h('b', {}, t.name), h('small', {}, t.note)))),
     h('div', { class: 'card', style: 'max-width:560px;margin-top:16px' }, h('h2', {}, 'Writing style'), h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: S.plainEnglish, onchange: guard(async (e) => { await api('/api/settings', 'PUT', { plainEnglish: e.target.checked }); S.plainEnglish = e.target.checked; }) }), ' Agents write in plain, simple English'), h('p', { class: 'hint' }, 'On by default: short sentences and everyday words. Turn it off if you prefer technical language.')));
   draw();
 }

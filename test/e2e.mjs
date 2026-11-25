@@ -1786,9 +1786,13 @@ let orgIds;
       } finally { globalThis.fetch = realFetch; }
     }
     assert.match(fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8'), /forceBottom = true;[\s\S]*?\/messages`, 'POST'/, 'sending a chat message scrolls to it');
+    { // after an update, old cached copies of the app are not reused
+      const home = await (await fetch(base + '/')).text(), js = await (await fetch(base + '/app.js')).text();
+      assert.match(home, /\/app\.js\?v=\d+\.\d+\.\d+/); assert.match(home, /\/style\.css\?v=/); assert.match(js, /from '\.\/map\.js\?v=\d/);
+    }
     { // phones: no sideways scrolling, a compact top bar and chat header, comfortable touch targets
       const css = fsRead(path.join(import.meta.dirname, '..', 'public', 'style.css'), 'utf8'), idx = fsRead(path.join(import.meta.dirname, '..', 'public', 'index.html'), 'utf8'), app = fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8');
-      assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*html,body\{overflow-x:hidden\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /min-height:44px/);
+      assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*html,body\{overflow-x:hidden\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /min-height:44px/); assert.match(css, /\.gsearch input\{font-size:16px!important\}/); assert.match(css, /\.team\{order:-1/);
       assert.match(css, /\.chat-head\.more \.ch-more\{display:flex\}/); assert.match(app, /class: 'ch-more'/); assert.match(app, /closest\('#menu'\)/, 'tapping outside the menu closes it');
     }
     // testing checks the port and also signs in for real

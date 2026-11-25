@@ -180,6 +180,10 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         if (!file.startsWith(PUBLIC + path.sep)) return json(res, 403, { error: 'Forbidden' });
         let body; try { body = readFileSync(file); } catch { return json(res, 404, { error: 'Not found' }); }
         const headers = { 'content-type': MIME[path.extname(file)] || 'application/octet-stream', 'cache-control': 'no-cache' };
+        // Stamp the files with the version, so a proxy or browser that keeps old copies fetches the new ones after an update.
+        const ext = path.extname(file);
+        if (ext === '.html') body = Buffer.from(body.toString('utf8').replace(/(href|src)="\/(style|themes|theme|app|login)\.(css|js)"/g, `$1="/$2.$3?v=${VERSION}"`));
+        else if (path.basename(file) === 'app.js') body = Buffer.from(body.toString('utf8').replace("from './map.js'", `from './map.js?v=${VERSION}'`));
         res.writeHead(200, headers);
         return res.end(body);
       }

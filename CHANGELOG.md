@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.50.1
+
+- **Phone fixes.** Fields use 16 px text everywhere (including search), so iPhones no longer zoom in and push pop-ups off the screen. On a phone the project team is now a row of chips you swipe, above the chat, so you can still talk to each teammate.
+- **No stale app after an update.** Apiary's files are stamped with the version, so a proxy or browser that kept an old copy fetches the new one.
+
 ## 0.50.0
 
 - **Works on a phone.** No more sideways wobble on any page; a compact top bar (search becomes a magnifier that opens full width); the project header folds its buttons behind a **Details** button; tabs and task columns swipe sideways; bigger tap targets, 16 px text in fields so iPhones do not zoom in, and room for the home bar and on-screen keyboard.

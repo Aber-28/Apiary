@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.2
+
+- **Reports show the sub-agent's name.** Each sub-agent's reply appears as its own bubble under its name and colour, instead of one grey "Reports from sub-agents" box.
+
 ## 0.33.0
 
 - **Chat looks like a messaging app.** Your messages are on the right. Each agent is on the left in its own colour, with its name. A handoff reads as @Name: text (for example @Neo: do A, B, C). Task codes such as T-0012 are links that open the task.

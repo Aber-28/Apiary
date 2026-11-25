@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.44.0
+
+- **Parallel work that doesn't collide.** Merges into a lead's branch now go through a queue, one at a time in the order work finishes, so teammates working at once can never corrupt each other's merge.
+- **Clashes fix themselves.** If two teammates changed the same file, the one who clashes is asked to bring in the lead's latest work, keep both pieces and try again. It is all in the task history.
+
 ## 0.43.0
 
 - **Reviewer agents.** Finished delegated work is checked by another teammate before it counts as done. Changes needed go back to the worker with notes; a second failure blocks the task and tells the lead why in plain words. Each review is a task with its own ID.

@@ -3,7 +3,7 @@
 //   onText(chunk)      live reply text for the chat
 //   onActivity(label)  short "what is it doing now" label
 //   onLog(line)        a line for the Terminal view
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { accessSync, constants, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -307,13 +307,23 @@ const mock = {
       onActivity('Doing the prerequisite');
       if (/failprereq/i.test(prompt)) out = 'FAILED: could not complete it.';
       else { if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.title || agent.name)}-prereq.txt`), 'prerequisite done\n'); out = 'DONE: reviewed the rules and wrote them to a file.'; }
+    } else if (prompt.startsWith('Your work on ') && /conflicts with the lead's latest work \(branch (\S+)\)/.test(prompt) && agent.cwd) {
+      onActivity('Resolving a conflict');
+      const lb = /\(branch (\S+)\)/.exec(prompt)[1], g = (...x) => execFileSync('git', ['-c', 'user.email=m@m', '-c', 'user.name=m', ...x], { cwd: agent.cwd, stdio: 'pipe' });
+      try { g('merge', lb); } catch {}
+      writeFileSync(path.join(agent.cwd, 'shared.txt'), `Both pieces of work kept (${agent.name})\n`); g('add', '-A'); g('commit', '-m', 'resolve conflict');
+      out = 'Resolved the conflict and kept both pieces of work.';
     } else if (prompt.startsWith('Task from ') && agent.member) {
       onActivity('Working');
       const sees = agent.cwd && existsSync(path.join(agent.cwd, 'security-prereq.txt'));
       if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.title || agent.name)}.txt`), `Work by ${agent.name}\n`);
+      if (agent.cwd && /sharedfile/.test(prompt)) writeFileSync(path.join(agent.cwd, 'shared.txt'), `Shared file by ${agent.name}\n`);
       out = `Finished the job. Sees prerequisite: ${sees ? 'yes' : 'no'}. Checks: ${(prompt.match(/^- \w+: \w+/gm) || []).join(' | ')}`;
     } else if (!agent.parentId && agent.kind !== 'general' && !/Notes from Apiary:|^Nothing was run|^Reports from/m.test(prompt) && /\bhire\b/i.test(prompt)) {
       out = 'I need specialists.\n\n```apiary-hire\n[{"name":"Frontend Engineer","role":"Builds the website UI","department":"engineering","complexity":"hard","reason":"The site needs a UI built and tested"},{"name":"Brand Writer","role":"Writes the site copy","department":"marketing","reason":"Copy needs a consistent voice","reportsTo":"Frontend Engineer"}]\n```';
+    } else if (agent.team && /assign-both:(\w+),(\w+)/.test(prompt) && !prompt.startsWith('Reports from your sub-agents') && !/Notes from Apiary:|^Nothing was run/m.test(prompt)) {
+      const [, x, y] = /assign-both:(\w+),(\w+)/.exec(prompt);
+      out = 'Splitting this between two specialists.\n\n```apiary-assign\n{"to":"' + x + '","task":"sharedfile job for ' + x + '"}\n```\n\n```apiary-assign\n{"to":"' + y + '","task":"sharedfile job for ' + y + '"}\n```';
     } else if (agent.team && !prompt.startsWith('Reports from your sub-agents') && !/Notes from Apiary:|^Nothing was run/m.test(prompt) && /network|research|assign-to:/i.test(prompt)) {
       const at = /assign-to:(\S+)/i.exec(prompt);
       const to = at ? at[1].replace(/_/g, ' ') : /network/i.test(prompt) ? 'Networking' : 'Research';

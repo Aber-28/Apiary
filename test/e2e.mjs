@@ -406,6 +406,25 @@ assert.ok(engine2.agents[lead2.id]);
   await call('/api/agents/' + gl.id, 'DELETE');
 }
 
+// ---- parallel work in a git project: two specialists change the same file at once; merges are queued, the clash is fixed by its author ----
+{
+  const repo = path.join(tmp, 'parrepo');
+  execFileSync('git', ['init', '-q', '-b', 'main', repo]);
+  sh(repo, 'config', 'user.email', 't@t'); sh(repo, 'config', 'user.name', 't');
+  execFileSync('sh', ['-c', 'echo hi > README.md'], { cwd: repo }); sh(repo, 'add', '-A'); sh(repo, 'commit', '-qm', 'init');
+  const preset = (await call('/api/teams')).body.find((t) => t.name === 'Operations team');
+  const gl = (await call('/api/agents', 'POST', { provider: 'mock', team: preset.id, source: repo, name: 'Parallel job', goal: 'assign-both:Networking,Research please' })).body;
+  const approved = new Set();
+  const timer = setInterval(() => { for (const a of engine.approvals()) if (a.status === 'pending' && a.projectId === gl.id && !approved.has(a.id)) { approved.add(a.id); call(`/api/approvals/${a.id}/decide`, 'POST', { decision: 'approve' }).catch(() => {}); } }, 40);
+  try { await until(() => engine.agents[gl.id].status === 'idle' && engine.messages(gl.id).some((m) => m.role === 'report'), 25000); } finally { clearInterval(timer); }
+  const files = sh(repo, 'ls-tree', '-r', '--name-only', engine.agents[gl.id].git.branch).split('\n');
+  assert.ok(files.includes('networking.txt') && files.includes('research.txt') && files.includes('shared.txt'), `everyone's work reached the lead's branch: ${files}`);
+  assert.match(sh(repo, 'show', engine.agents[gl.id].git.branch + ':shared.txt'), /Both pieces of work kept/, 'the clash was resolved by keeping both');
+  assert.ok(engine.tasks.list.some((t) => t.log.some((l) => /Conflict in shared\.txt resolved and merged/.test(l.text))), 'the conflict and its fix are in the task history');
+  assert.equal(sh(repo, 'status', '--porcelain', '--', '.').trim(), '', 'nothing left half-merged');
+  await call('/api/agents/' + gl.id, 'DELETE');
+}
+
 // ---- main chat, project files, hiring and the organisation chart ----
 {
   engine.store.data.settings.defaultProvider = 'mock';   // the sandbox has a real claude CLI; tests must not use it

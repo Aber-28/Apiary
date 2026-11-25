@@ -1892,7 +1892,7 @@ export class Engine extends EventEmitter {
         'Now carry out the task. Respect any conditions above.';
       const text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, prompt, lead, { taskId: task.id }));
       let note = '';
-      if (lead.git && worker.branch) { note = await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
+      if (lead.git && worker.branch) { note = (await this._mergeResolving(lead, worker, projRoot, task)).note; await this._sync(lead, worker); }
       let final = text, reviewTxt = '';
       if (this.reviewWork && !/^\W*(NOT STARTED|FAILED)/i.test(text || '')) {
         const rv = await this._reviewLoop({ lead, worker, roster, task, a, projRoot, text });
@@ -1957,7 +1957,8 @@ export class Engine extends EventEmitter {
   }
 
   // Bring the lead's latest work into a member's checkout (best effort; a conflict is aborted and logged).
-  async _sync(lead, member) {
+  _sync(lead, member) { return this._lock(`merge:${lead.id}`, () => this._syncNow(lead, member)); }
+  async _syncNow(lead, member) {
     try {
       const r = await git.merge(member.cwd, lead.git.branch);
       if (!r.ok) this._log(member, `! could not bring in the lead's latest work (conflicts in ${r.conflicts.join(', ') || 'some files'})`);
@@ -1965,9 +1966,26 @@ export class Engine extends EventEmitter {
   }
 
   // Bring a child's branch into its parent's. A conflict is aborted and reported, never left half-done.
-  async _mergeChild(parent, child, keep = false) {
+  async _mergeChild(parent, child, keep = false) { return (await this._mergeChildR(parent, child, keep)).note; }
+  // Merges into one lead's branch go through a queue, one at a time in the order they finish, so parallel workers never collide.
+  _mergeChildR(parent, child, keep = false) { return this._lock(`merge:${parent.id}`, () => this._mergeChildNow(parent, child, keep)); }
+  // Merge a worker's branch; if it conflicts, ask the worker to bring the lead's latest work in and fix the clash, then merge once more.
+  async _mergeResolving(lead, worker, projRoot, task) {
+    let r = await this._mergeChildR(lead, worker, true);
+    if (r.ok || !r.conflicts?.length || this.stopped.has(lead.id)) return r;
+    const files = r.conflicts.join(', ');
+    this._taskNote(task, `Merge conflict in ${files}: ${worker.name} is asked to resolve it`);
+    this._msg(lead, { role: 'system', text: `${worker.name}'s work clashes with the lead's branch (${files}). ${worker.name} is resolving it.`, agentId: worker.id });
+    try {
+      await this._onProject(worker.id, projRoot, () => this.send(worker.id, `Your work on ${task.code} conflicts with the lead's latest work (branch ${lead.git.branch}) in: ${files}.\n\nBring the lead's work into your checkout (git merge ${lead.git.branch}), resolve the conflicts so both pieces of work are kept, and commit. Reply with what you did.`, lead, { taskId: task.id }));
+    } catch (e) { if (e.name === 'AbortError') throw e; }
+    const again = await this._mergeChildR(lead, worker, true);
+    this._taskNote(task, again.ok ? `Conflict in ${files} resolved and merged` : `Conflict in ${files} was not resolved`);
+    return { ...again, note: (r.note || '') + again.note };
+  }
+  async _mergeChildNow(parent, child, keep = false) {
     const parentBranch = parent.git.branch;
-    let note, merge = true;
+    let note, merge = true, mergeOk = false, conflicts = [];
     if (this._needsApproval(parent)) {
       let d = { stat: '', patch: '', truncated: false };
       try { d = await git.diff(parent.cwd, parentBranch, child.branch); } catch (e) { d.stat = `(could not read the changes: ${e.message})`; }
@@ -1981,13 +1999,13 @@ export class Engine extends EventEmitter {
       }
     }
     if (merge) {
-      const res = await git.merge(parent.cwd, child.branch);
+      const res = await git.merge(parent.cwd, child.branch); mergeOk = !!res.ok; conflicts = res.conflicts || [];
       if (res.ok) note = (note || '') + `\n\n(Apiary merged ${child.name}'s changes into your branch.)`;
       else note = (note || '') + `\n\n(Apiary could NOT merge ${child.name}'s branch ${child.branch} into yours${res.conflicts.length ? `: conflicts in ${res.conflicts.join(', ')}` : ''}. Nothing was merged; the branch is kept. Resolve this yourself or ask the human.)`;
       this._log(parent, res.ok ? `✔ merged ${child.branch} into ${parentBranch}` : `! merge conflict with ${child.branch}`);
     } else this._log(parent, `✘ merge of ${child.branch} declined`);
     if (!keep) await this._lock(parent.git.repo, () => git.worktreeRemove(parent.git.repo, child.cwd)).catch(() => {});
-    return note;
+    return { note, ok: mergeOk, conflicts };
   }
 }
 

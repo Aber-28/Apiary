@@ -1428,6 +1428,9 @@ async function pageTask(id) {
   const info = h('div'), convo = h('div');
   const text = h('textarea', { rows: '3', 'aria-label': 'What to tell the agent next', placeholder: 'Tell the agent what to do next, or answer a question…' });
   let t = null, who = null;
+  // Newest first by default; the person can switch the conversation and the history to oldest first.
+  const order = { newest: true };
+  const orderBtn = h('button', { class: 'btn', onclick: () => { order.newest = !order.newest; orderBtn.textContent = order.newest ? 'Show oldest first' : 'Show newest first'; load().catch(() => {}); } }, 'Show oldest first');
   const send = h('button', { class: 'btn primary', onclick: guard(async () => {
     if (!who) { toast('Assign someone to this task first', true); return; }
     if (!text.value.trim()) { toast('Write a message first', true); return; }
@@ -1438,7 +1441,7 @@ async function pageTask(id) {
   view.replaceChildren(h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')), info,
     h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Continue working on this'),
       h('div', { class: 'formrow', style: 'flex-direction:column;align-items:stretch' }, text), h('div', { class: 'formrow', style: 'margin-top:8px;flex-wrap:wrap' }, send, start)),
-    h('h3', {}, 'Conversation'), convo);
+    h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('h3', {}, 'Conversation'), orderBtn), convo);
   const load = async () => {
     try { t = await api('/api/tasks/' + id); } catch (e) { info.replaceChildren(h('div', { class: 'card empty' }, e.message)); convo.replaceChildren(); return; }
     who = (t.assignee && S.agents.find((a) => a.id === t.assignee.id)) || null;
@@ -1455,9 +1458,10 @@ async function pageTask(id) {
         t.closure ? h('p', { style: 'color:var(--ok-text);font-weight:600' }, t.closure) : null,
         h('label', { class: 'f', style: 'margin-top:8px' }, 'Status', statusSel)),
       t.subtasks?.length ? h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Subtasks'), h('ul', {}, t.subtasks.map((k) => h('li', {}, h('a', { href: `#/task/${k.id}` }, `${k.code} ${k.title}`), ` · ${k.assignee || 'unassigned'} · ${k.status === 'done' ? 'closed' : k.status}`)))) : null,
-      t.log?.length ? h('details', { style: 'max-width:760px' }, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null);
+      t.log?.length ? h('details', { style: 'max-width:760px' }, h('summary', {}, 'History'), h('ul', { class: 'hint' }, (order.newest ? t.log.slice().reverse() : t.log.slice()).map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null);
     const msgs = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []) : [];
-    const shown = msgs.filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14);
+    const latest = msgs.filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14);
+    const shown = order.newest ? latest.slice().reverse() : latest;
     convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:8px 0;white-space:pre-wrap' }, h('small', { class: 'hint', style: 'display:block' }, m.ts ? new Date(m.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''), h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
   };
   await load();

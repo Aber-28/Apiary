@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.4
+
+- **Task conversations are newest first.** The conversation and history on a task page show the latest first by default. A button switches them to oldest first, and back.
+
 ## 0.37.3
 
 - **Task conversations show times.** Each message on a task page shows when it was sent, so the latest is easy to see.

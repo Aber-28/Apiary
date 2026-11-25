@@ -1257,7 +1257,7 @@ function pageTasks() {
     t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
     t.subtasks?.length ? h('small', { class: 'hint', style: 'display:block' }, (t.waitingFor.length ? `Waiting for ${t.waitingFor.join(', ')}. ` : 'All subtasks closed. '), t.subtasks.map((k) => `${k.code} ${k.assignee} (${k.status === 'done' ? 'closed' : k.status})`).join(' · ')) : null,
     t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
-    h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
+    h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, (TASK_COLS.find((c) => c[0] === t.status) || [0, t.status || 'Unknown'])[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
     (() => {
       const w = t.assignee && S.agents.find((a) => a.id === t.assignee.id);
@@ -1285,36 +1285,44 @@ function pageTasks() {
 // ---------- one task: read it, see its conversation, and carry on working on it ----------
 async function pageTask(id) {
   crumbs('Workspace', 'Tasks', 'Task');
-  const draw = async () => {
-    let t; try { t = await api('/api/tasks/' + id); } catch (e) { view.replaceChildren(h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')), h('div', { class: 'card empty' }, e.message)); return; }
-    const who = t.assignee && S.agents.find((a) => a.id === t.assignee.id);
-    const convo = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []).filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14) : [];
-    const text = h('textarea', { rows: '3', 'aria-label': 'What to tell the agent next', placeholder: who ? `Tell ${who.name} what to do next, or answer a question…` : 'Assign someone to this task first, then continue here.' });
-    const send = h('button', { class: 'btn primary', disabled: !who, onclick: guard(async () => {
-      if (!text.value.trim()) { toast('Write a message first', true); return; }
-      await api(`/api/agents/${who.id}/messages`, 'POST', { text: `About task ${t.code} "${t.title}": ${text.value.trim()}` });
-      text.value = ''; toast(`Sent to ${who.name}`);
-    }) }, 'Send to ' + (who ? who.name : 'the agent'));
-    const start = h('button', { class: 'btn', disabled: t.status === 'done', onclick: guard(async () => {
-      const r = await api(`/api/tasks/${t.id}/start`, 'POST'); toast(`${r.agent} is working on it`); draw();
-    }) }, t.status === 'inprogress' ? 'Ask the agent to carry on' : 'Start work on this task');
-    const statusSel = h('select', { 'aria-label': 'Status', onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); toast('Status updated'); draw(); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n)));
-    view.replaceChildren(
-      h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')),
+  // Built once: live updates redraw only the task and the conversation, never the message box.
+  const info = h('div'), convo = h('div');
+  const text = h('textarea', { rows: '3', 'aria-label': 'What to tell the agent next', placeholder: 'Tell the agent what to do next, or answer a question…' });
+  let t = null, who = null;
+  const send = h('button', { class: 'btn primary', onclick: guard(async () => {
+    if (!who) { toast('Assign someone to this task first', true); return; }
+    if (!text.value.trim()) { toast('Write a message first', true); return; }
+    await api(`/api/agents/${who.id}/messages`, 'POST', { text: `About task ${t.code} "${t.title}": ${text.value.trim()}` });
+    text.value = ''; toast(`Sent to ${who.name}`);
+  }) }, 'Send');
+  const start = h('button', { class: 'btn', onclick: guard(async () => { const r = await api(`/api/tasks/${t.id}/start`, 'POST'); toast(`${r.agent} is working on it`); load().catch(() => {}); }) }, 'Start work on this task');
+  view.replaceChildren(h('p', {}, h('a', { href: '#/tasks' }, '← Back to Tasks')), info,
+    h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Continue working on this'),
+      h('div', { class: 'formrow', style: 'flex-direction:column;align-items:stretch' }, text), h('div', { class: 'formrow', style: 'margin-top:8px;flex-wrap:wrap' }, send, start)),
+    h('h3', {}, 'Conversation'), convo);
+  const load = async () => {
+    try { t = await api('/api/tasks/' + id); } catch (e) { info.replaceChildren(h('div', { class: 'card empty' }, e.message)); convo.replaceChildren(); return; }
+    who = (t.assignee && S.agents.find((a) => a.id === t.assignee.id)) || null;
+    const statusLabel = (TASK_COLS.find((c) => c[0] === t.status) || [0, t.status || 'Unknown'])[1];
+    send.textContent = who ? `Send to ${who.name}` : 'Send';
+    start.textContent = t.status === 'inprogress' ? 'Ask the agent to carry on' : 'Start work on this task';
+    start.disabled = t.status === 'done';
+    const statusSel = h('select', { 'aria-label': 'Status', onchange: guard(async (e) => { await api('/api/tasks/' + t.id, 'PUT', { status: e.target.value }); toast('Status updated'); load().catch(() => {}); }) }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n)));
+    info.replaceChildren(
       h('h1', {}, h('span', { class: 'chip mono', style: 'margin-right:8px' }, t.code || ''), t.title),
-      h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, TASK_COLS.find((c) => c[0] === t.status)[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
+      h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, statusLabel), (t.labels || []).map((l) => h('span', { class: 'chip' }, l))),
       h('small', { class: 'hint', style: 'display:block;margin:6px 0 14px' }, [who ? `With ${who.name}` : 'Not assigned', t.projectName ? `Project ${t.projectName}` : '', t.source === 'human' ? '' : `Added by ${t.source}`, ago(t.updatedAt)].filter(Boolean).join(' · ')),
       h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? h('p', { style: 'white-space:pre-wrap' }, t.notes) : h('p', { class: 'hint' }, 'No details yet.'),
         t.closure ? h('p', { style: 'color:var(--ok-text);font-weight:600' }, t.closure) : null,
         h('label', { class: 'f', style: 'margin-top:8px' }, 'Status', statusSel)),
       t.subtasks?.length ? h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Subtasks'), h('ul', {}, t.subtasks.map((k) => h('li', {}, h('a', { href: `#/task/${k.id}` }, `${k.code} ${k.title}`), ` · ${k.assignee || 'unassigned'} · ${k.status === 'done' ? 'closed' : k.status}`)))) : null,
-      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Continue working on this'), h('p', { class: 'hint' }, who ? `Your message goes to ${who.name} with this task's code, so the work stays linked to it.` : 'Assign someone to this task to continue it.'),
-        h('div', { class: 'formrow', style: 'flex-direction:column;align-items:stretch' }, text), h('div', { class: 'formrow', style: 'margin-top:8px;flex-wrap:wrap' }, send, start),
-        h('h3', { style: 'margin-top:16px' }, 'Conversation'), convo.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, convo.map((m) => h('li', { style: 'margin:6px 0;white-space:pre-wrap' }, h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, 'No conversation with this agent yet.')),
       t.log?.length ? h('details', { style: 'max-width:760px' }, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null);
+    const msgs = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []) : [];
+    const shown = msgs.filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14);
+    convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:6px 0;white-space:pre-wrap' }, h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
   };
-  await draw();
-  page = { shows: () => true, update: debounce((ev) => { if (['message', 'agent', 'activity'].includes(ev.type)) draw().catch(() => {}); }) };
+  await load();
+  page = { shows: () => true, update: debounce((ev) => { if (['message', 'agent', 'activity'].includes(ev.type)) load().catch(() => {}); }) };
 }
 
 // ---------- repositories ----------
@@ -1901,17 +1909,19 @@ function renderSignOut() {
   if (!S.account?.exists) { b?.remove(); return; }
   if (!b) { b = h('button', { id: 'signout', class: 'btn', style: 'padding:4px 12px;font-size:12px', onclick: guard(async () => { await api('/api/logout', 'POST', {}); location.replace('/login'); }) }, 'Sign out'); $('#theme').before(b); }
 }
-function pageAccess() {
+async function pageAccess() {
   crumbs('Settings', 'Access and safety');
   view.replaceChildren(h('h1', {}, 'Access and safety'), h('p', { class: 'sub-title' }, 'Agents can run commands on this computer, so Apiary is careful about who can reach it.'),
     h('div', { class: 'card', style: 'max-width:720px' }, h('h2', {}, 'Who can open Apiary'), h('p', {}, 'By default it only listens on this computer (127.0.0.1). To use it from another device, run ', h('code', {}, 'apiary start --lan'), ' and then turn on a username and password under ', h('a', { href: '#/signin' }, 'Sign-in'), '.'),
       h('h2', { style: 'margin-top:20px' }, 'Safe and Full access'), h('p', {}, 'Safe lets an agent edit files in its own folder. Full access lets it run any command without asking. Choose per project when you create it.'),
       h('h2', { style: 'margin-top:20px' }, 'Git projects'), h('p', {}, 'In a git repository every agent works on its own branch and checkout, so your own working copy is never touched. Nothing is pushed until you open a pull request.')));
-  view.append(trustCard());
+  view.append(await trustCard());
 }
 // The six slider positions. Keep in step with TRUST_LEVELS in src/command-rules.js.
-const TRUST_LABELS = ['Ask me for every command', 'Read-only commands run; everything else asks', 'Simple commands run; chains, scripts and changes ask', 'Chains and scripts run too; changes and destructive commands ask', 'Everything runs except deleting, rebooting and destroying', 'Everything runs without asking'];
-function trustCard() {
+const TRUST_LABELS = ['Ask me for every command', 'Read-only commands run; everything else asks', 'Simple commands run; chains, scripts and changes ask', 'Chains run too; scripts, changes and destructive commands ask', 'Everything runs except deleting, rebooting and destroying', 'Everything runs without asking'];
+async function trustCard() {
+  const pol = await api('/api/policy').catch(() => ({ rules: [] }));
+  const rulesFor = (id) => (pol.rules || []).filter((r) => r.agent === id);
   const levels = S.agents.map((a) => Math.trunc(Number(a.trust)) || 0);
   const common = levels.length && levels.every((l) => l === levels[0]) ? levels[0] : null;
   const rows = [];   // one per agent, so the master slider can move them all
@@ -1942,8 +1952,11 @@ function trustCard() {
       oninput: (e) => { label.textContent = `${e.target.value}: ${TRUST_LABELS[Number(e.target.value)]}`; },
       onchange: guard(async (e) => { const r = await api(`/api/agents/${a.id}/trust`, 'POST', { level: Number(e.target.value) }); a.trust = r.trust; toast(`${a.name}: ${r.text}`); refreshMaster(); }) });
     rows.push({ slider, label });
+    const mine = rulesFor(a.id);
     card.append(h('div', { style: 'margin:14px 0' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, a.name), a.title ? h('small', { class: 'hint' }, a.title) : null,
-      a.access === 'full' ? h('span', { class: 'pill work' }, 'Full access') : null), slider, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('small', { class: 'hint' }, 'Ask me'), h('small', { class: 'hint' }, 'Run everything')), label));
+      a.access === 'full' ? h('span', { class: 'pill work' }, 'Full access') : null), slider, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('small', { class: 'hint' }, 'Ask me'), h('small', { class: 'hint' }, 'Run everything')), label,
+      mine.length ? h('div', { style: 'margin-top:8px' }, h('small', { class: 'hint' }, 'Approval rules that decide for this agent:'), mine.map((r) => h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;margin:4px 0' }, h('small', {}, r.text),
+        h('button', { class: 'btn danger', onclick: guard(async () => { await api('/api/policy/' + r.id, 'DELETE'); toast('Rule removed'); pageAccess(); }) }, 'Remove')))) : null));
   }
   return card;
 }

@@ -4,7 +4,7 @@
 //   onActivity(label)  short "what is it doing now" label
 //   onLog(line)        a line for the Terminal view
 import { spawn } from 'node:child_process';
-import { accessSync, constants, writeFileSync, existsSync } from 'node:fs';
+import { accessSync, constants, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -81,13 +81,22 @@ function runProc(cmd, args, { cwd, input, signal, onLine, env }) {
 // permission prompt, so each command that needs approval is sent to Apiary instead: `approval` names
 // the bridge (src/approval-bridge.js), its URL and this run's token. Without `approval`, anything that
 // would prompt is refused.
+// The bridge's settings, including this run's token, go in a private file (readable by this user only) instead of the
+// command line, where other users could read them in the process list. The caller removes the file when the run ends.
+export function writeApprovalConfig(approval) {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-'));
+  const file = path.join(dir, 'mcp.json');
+  const mcpServers = { apiary: { command: process.execPath, args: [approval.bridge], env: { APIARY_APPROVAL_URL: approval.url, APIARY_APPROVAL_TOKEN: approval.token } } };
+  writeFileSync(file, JSON.stringify({ mcpServers }), { mode: 0o600 });
+  return { configFile: file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
 export function claudeCliArgs({ access, model, system, dirs = [], sessionId, approval }) {
   const full = access === 'full';
   const args = ['-p', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', full ? 'bypassPermissions' : 'acceptEdits'];
   if (!full && approval) {
-    const mcpServers = { apiary: { command: process.execPath, args: [approval.bridge], env: { APIARY_APPROVAL_URL: approval.url, APIARY_APPROVAL_TOKEN: approval.token } } };
-    args.push('--mcp-config', JSON.stringify({ mcpServers }), '--permission-prompt-tool', 'mcp__apiary__approve');
+    args.push('--mcp-config', approval.configFile, '--permission-prompt-tool', 'mcp__apiary__approve');
   }
   args.push('--append-system-prompt', system);
   if (model) args.push('--model', model);
@@ -98,9 +107,12 @@ export function claudeCliArgs({ access, model, system, dirs = [], sessionId, app
 
 const claudeCli = {
   async run({ agent, prompt, system, env, dirs = [], signal, approval, onText, onActivity, onLog }) {
-    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval });
+    const cfg = approval && agent.access !== 'full' ? writeApprovalConfig(approval) : null;
+    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval: cfg ? { configFile: cfg.configFile } : undefined });
     let sessionId = agent.sessionId, streamed = '', final = null, isError = false, usage = null;
-    const { code, stderr } = await runProc('claude', args, {
+    let runResult;
+    try {
+    runResult = await runProc('claude', args, {
       cwd: agent.cwd, input: prompt, signal, env,
       onLine: (line) => {
         let ev; try { ev = JSON.parse(line); } catch { return; }
@@ -123,6 +135,8 @@ const claudeCli = {
         } else if (ev.type === 'result') { final = ev.result; isError = !!ev.is_error; const u = ev.usage; if (u) usage = { input: (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0), output: u.output_tokens || 0 }; }
       },
     });
+    } finally { cfg?.cleanup(); }
+    const { code, stderr } = runResult;
     if (isError) throw new Error(final || 'Claude reported an error');
     if (final == null && code !== 0) throw new Error(stderr.trim() || `claude exited with code ${code}`);
     return { text: (final ?? streamed).trim(), sessionId, usage };

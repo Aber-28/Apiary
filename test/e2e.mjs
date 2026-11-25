@@ -461,7 +461,7 @@ assert.ok(engine2.agents[lead2.id]);
   // denied hires change nothing; partial approvals hire only the chosen ones; duplicates are refused
   const hp2 = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Site two', goal: 'please hire a team' })).body;
   await until(() => (ap = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'hire' && a.projectId === hp2.id)), 8000);
-  assert.match(ap.items[1].name, /^[A-Z]/); assert.notEqual(ap.items[1].name, ap.items[1].title, 'a comic-book style name is suggested');
+  assert.match(ap.items[1].name, /^[A-Z]/, 'the hire has a name'); // the mock proposes an explicit name, which is kept (a proposal without one gets a codename, tested below)
   await call(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'approve', only: [1], names: { 1: 'Brenda Brand' } });
   await until(() => engine.agents[hp2.id].status === 'idle' && engine._roster(engine.agents[hp2.id]).length === 1, 8000);
   const only = engine._roster(engine.agents[hp2.id])[0];
@@ -1354,8 +1354,8 @@ let orgIds;
     assert.deepEqual(await ask(ag, 'pct destroy 101'), { asked: true, allowed: false }, 'destructive pct is asked');
     assert.deepEqual(await ask(ag, 'python3 -c "print(1)"'), { asked: true, allowed: false }, 'interpreters are asked');
     // "always" choices from the card create rules
-    assert.deepEqual(await ask(ag, 'echo remembered-once', approve('exact')), { asked: true, allowed: true }, 'exact choice is approved');
-    assert.deepEqual(await ask(ag, 'echo remembered-once'), { asked: false, allowed: true }, 'and remembered');
+    assert.deepEqual(await ask(ag, 'make remembered-once', approve('exact')), { asked: true, allowed: true }, 'exact choice is approved');
+    assert.deepEqual(await ask(ag, 'make remembered-once'), { asked: false, allowed: true }, 'and remembered');
     assert.deepEqual(await ask(ag, 'jq . /tmp/a.json', approve('program')), { asked: true, allowed: true }, 'program choice');
     assert.deepEqual(await ask(ag, 'jq . /tmp/b.json'), { asked: false, allowed: true }, 'program choice is remembered');
     assert.deepEqual(await ask(ag, 'jq -n 1', approve('once')), { asked: false, allowed: true }, 'an existing rule covers it');
@@ -1415,6 +1415,96 @@ let orgIds;
     engine.policy.add({ kind: 'command', action: 'deny', scope: 'program', command: 'git', agent: ag.id });
     assert.deepEqual(await run(5, 'git status'), { asked: false, allowed: false }, 'a Deny rule beats level 5');
     for (const [c, r] of [['ls -la', 0], ['ls | grep x', 1], ['systemctl restart ssh', 2], ['rm -rf /tmp/x', 3]]) assert.equal(riskOf(c), r, c);
+  }
+  { // review fixes: classification (A1-A6), the level texts (A7), the token out of the arguments (B1), auto decisions (C1), hire names (D1-D3), peer limits (E1, E2), trust input (F1)
+    const cr = await import('../src/command-rules.js');
+    const risk = cr.riskOf, ro = cr.isReadOnly;
+    // A1 background & and chains
+    assert.ok(risk('sleep 1 & rm -rf /tmp/x') >= 2, 'A1: background operator splits commands');
+    // A2 wrappers and assignments
+    assert.equal(risk('sudo rm -rf /tmp/x'), 3, 'A2: sudo is judged by what it runs');
+    assert.equal(risk('RM_FLAG=1 rm -rf /tmp/x'), 3, 'A2: leading assignments are skipped');
+    assert.equal(risk('nohup rm -rf /tmp/x'), 3, 'A2: nohup is skipped');
+    assert.equal(risk('xargs rm'), 3, 'A2: xargs runs what it is given');
+    assert.equal(risk('sudo ls'), 2, 'A2: sudo alone is at least risk 2');
+    // A3 code passed to interpreters
+    assert.equal(risk('bash -c "rm -rf /tmp/x"'), 3, 'A3: destructive code in bash -c');
+    assert.equal(risk('python3 -c "print(1)"'), 2, 'A3: code in an interpreter is at least risk 2');
+    assert.equal(risk('eval rm -rf x'), 3, 'A3: eval runs what it is given');
+    // A4 scripts by path and build tools
+    assert.equal(risk('./deploy.sh'), 2, 'A4: a script run by path');
+    assert.equal(risk('/opt/tools/run'), 2, 'A4: a program run by an absolute path');
+    assert.equal(risk('npm install example-package'), 2, 'A4: package installs');
+    assert.equal(risk('make clean'), 2, 'A4: build tools');
+    // A5 apiary-ssh: the remote command is judged, unknown is risk 3
+    assert.equal(risk('apiary-ssh "example-host" -- reboot'), 3, 'A5: a remote reboot is risk 3');
+    assert.equal(risk('apiary-ssh "example-host" -- rm -rf /var/tmp/x'), 3, 'A5: a remote delete is risk 3');
+    assert.equal(risk('apiary-ssh "example-host" -- uptime'), 0, 'A5: a remote read is harmless');
+    assert.equal(risk('apiary-ssh "example-host"'), 3, 'A5: an interactive remote shell is risk 3');
+    // A6 read-only lists that could change things
+    for (const c of ['ip addr add 10.0.0.9/24 dev eth0', 'ip link set eth0 down', 'git branch -D example-branch', 'curl -sO http://example.com/x.sh', 'curl -sd a=b http://example.com', 'curl -XPOST http://example.com', 'journalctl --vacuum-time=1d', 'date -s 2030-01-01', 'hostname example-name', 'ss -K', 'wget http://example.com/x', 'sort -o /tmp/x /tmp/y'])
+      assert.ok(!ro(c) && risk(c) >= 2, 'A6: not read-only: ' + c);
+    for (const c of ['ip -br addr', 'git branch', 'curl -s http://example.com/api/', 'journalctl -u ssh', 'date +%F', 'hostname', 'ss -tn'])
+      assert.ok(ro(c) && risk(c) === 0, 'A6: still read-only: ' + c);
+    // A7 the texts match what is enforced
+    assert.equal(cr.TRUST_LEVELS[3], 'Chains run too; scripts, changes and destructive commands ask');
+    assert.ok(cr.levelAllows(3, 'ls | grep x') && !cr.levelAllows(3, './deploy.sh') && !cr.levelAllows(3, 'systemctl restart ssh'), 'A7: level 3 matches its text');
+    assert.ok(cr.levelAllows(4, 'systemctl restart ssh') && !cr.levelAllows(4, 'rm -rf /tmp/x'), 'A7: level 4 matches its text');
+    // B1 the bridge's token is not on the command line
+    const { claudeCliArgs, writeApprovalConfig } = await import('../src/providers.js');
+    const cfg = writeApprovalConfig({ url: 'http://127.0.0.1:1/api/approval-bridge', token: 'example-token-value', bridge: '/x/approval-bridge.js' });
+    const cliArgs = claudeCliArgs({ access: 'safe', system: 'x', approval: { configFile: cfg.configFile } });
+    assert.ok(!cliArgs.join(' ').includes('example-token-value'), 'B1: the token is not in the arguments');
+    assert.equal((fsStat(cfg.configFile).mode & 0o777), 0o600, 'B1: the settings file is private');
+    cfg.cleanup(); assert.ok(!fsExists(cfg.configFile), 'B1: removed after the run');
+    // C1 a decision made without asking is recorded and shown in the chat
+    const cagent = engine._add({ id: 'auto1', name: 'Auto tester', role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: 'auto1' });
+    engine.setTrust(cagent.id, { level: 5 });
+    const brg = engine.beginApprovalBridge(cagent, new AbortController().signal);
+    const allowedNow = await engine.requestCommandApproval(brg.token, { tool_name: 'Bash', input: { command: 'rm -rf /tmp/example-auto' } });
+    engine.endApprovalBridge(brg);
+    assert.equal(allowedNow.behavior, 'allow');
+    const rec = Object.values(engine.store.data.approvals).find((r) => r.agentId === cagent.id && r.auto);
+    assert.ok(rec && rec.status === 'approved' && /rm -rf|run a command/.test(rec.title), 'C1: the automatic decision is on the Approvals page');
+    assert.ok(engine.messages(cagent.id).some((m) => /^Allowed automatically/.test(m.text || '')), 'C1: and in the chat');
+    assert.equal(Object.values(engine.store.data.approvals).filter((r) => r.status === 'pending').length, 0, 'C1: nothing is pending');
+    // D1-D3 hire names
+    const lead2 = Object.values(engine.agents).find((a) => !a.parentId && a.kind !== 'general') || Object.values(engine.agents).find((a) => !a.parentId);
+    const { parseSpawns: ps2 } = await import('../src/engine.js');
+    assert.equal(ps2('```apiary-hire\n{"title":"Example Role","role":"x","department":"operations"}\n```').hires[0].name, '', 'D1: no name when none is given');
+    lead2.approvals = false;
+    await engine._hire(lead2, [{ title: 'Example Codename Role', role: 'x', department: 'operations' }], []);
+    const coded = Object.values(engine.agents).find((a) => a.title === 'Example Codename Role');
+    assert.ok(coded && coded.name !== 'Example Codename Role' && coded.name.length <= 40, 'D3: a hire without a name gets a codename');
+    await engine._hire(lead2, [{ name: 'Example Named', title: 'Example Named Role', role: 'x', department: 'operations' }], []);
+    assert.ok(Object.values(engine.agents).some((a) => a.name === 'Example Named'), 'D3: a hire with a name keeps it');
+    const longNotes = [];
+    lead2.approvals = false;
+    await engine._hire(lead2, [{ name: 'A very long example name for a hire that goes past the limit', title: 'Example Long Role', role: 'x', department: 'operations' }], longNotes);
+    assert.ok(Object.values(engine.agents).some((a) => a.title === 'Example Long Role' && a.name.length <= 40), 'D2: a long name is shortened');
+    assert.ok(engine.messages(lead2.id).some((m) => /is longer than 40 characters/.test(m.text || '')), 'D2: and the person is told');
+    // E1 per hour limit, visible in the chat; E2 a reply cannot start another reply
+    engine.store.data.settings.limits = { ...(engine.store.data.settings.limits || {}), maxPeerMessages: 2 };
+    const room = 'example-room';
+    engine._peerCounted(room); engine._peerCounted(room);
+    assert.equal(engine._peerAllowed(room), false, 'E1: the limit applies');
+    engine.peerLog.set(room, [Date.now() - 2 * 3600000, Date.now() - 2 * 3600000]);
+    assert.equal(engine._peerAllowed(room), true, 'E1: the limit clears after an hour');
+    engine.store.data.settings.limits = { ...engine.store.data.settings.limits, maxPeerMessages: 30 };
+    const mem = Object.values(engine.agents).find((a) => a.parentId === lead2.id && a.member);
+    const other = Object.values(engine.agents).find((a) => a.parentId === lead2.id && a.member && a.id !== mem?.id);
+    if (mem && other) {
+      engine.replyTurns.add(mem.id);
+      const notes = [];
+      const job = await engine._peerJob(mem, { to: other.name, text: 'example question', wait: true }, notes);
+      assert.equal(job, null, 'E2: no reply job is started');
+      assert.ok(notes.some((n) => /without waiting: a reply from a teammate cannot start another reply/.test(n)), 'E2: the sender is told why');
+      engine.replyTurns.delete(mem.id);
+    }
+    // F1 trust input
+    for (const bad of [{ level: '' }, { level: null }, { level: undefined }, { level: 'high' }, {}])
+      assert.throws(() => engine.setTrust(cagent.id, bad), /0 to 5/, 'F1: rejects ' + JSON.stringify(bad));
+    assert.equal(engine.setTrust(cagent.id, { level: '2' }).trust, 2, 'F1: a digit string is accepted');
   }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);
@@ -1592,8 +1682,13 @@ exit 0
     fs.rmSync(signed); fs.writeFileSync(fail, ''); await call('/api/github/login', 'POST');
     const bad = await wait('failed'); assert.match(bad.message, /cancelled on GitHub/); assert.ok(!bad.code);
     // no gh tool: a clear message, not a crash
-    process.env.PATH = '/nonexistent'; const none = await call('/api/github/login', 'POST'); process.env.PATH = bin + path.delimiter + oldPath;
-    assert.equal(none.status, 400); assert.match(none.body.error || none.body.message || '', /not installed/);
+    // The app also looks in the home folder, so this check only means something on a machine without the tool.
+    const ghHere = fs.existsSync(path.join(os.homedir(), '.local', 'bin', 'gh')) || fs.existsSync('/usr/bin/gh');
+    if (ghHere) console.log('  (skipped the "no GitHub tool" check: the GitHub CLI is installed on this machine)');
+    else {
+      process.env.PATH = '/nonexistent'; const none = await call('/api/github/login', 'POST'); process.env.PATH = bin + path.delimiter + oldPath;
+      assert.equal(none.status, 400); assert.match(none.body.error || none.body.message || '', /not installed/);
+    }
   } finally { process.env.PATH = oldPath; if (oldTok === undefined) delete process.env.GH_TOKEN; else process.env.GH_TOKEN = oldTok; }
   // the installer knows how to fetch the GitHub tool, and its script is valid shell
   const { RECIPES } = await import('../src/tools.js'); const { spawnSync } = await import('node:child_process');

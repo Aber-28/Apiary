@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.32.0
+
+Fixes from a review of the approval, trust, messaging and task code.
+
+- **Command safety.** A background `&` splits commands. Leading `VAR=value` and wrappers (sudo, env, nohup, xargs and others) are judged by the command they run. Code passed to bash, python and eval is checked for destructive words. Scripts run by path and build or package tools are at least risk 2. `apiary-ssh` judges the command it runs on the other machine, and an unknown remote command is risk 3. Options that change things are no longer read-only (ip, git branch, journalctl, date, hostname, ss, curl and wget write options, sort -o).
+- **Level 3 text.** The slider text now says what level 3 does: chains run; scripts, changes and destructive commands ask.
+- **Approval token.** The approval bridge settings are in a private file, not on the command line, and are removed after the run.
+- **Visible decisions.** Decisions made without asking (trust setting or rule) appear on the Approvals page and in the chat.
+- **Rules on the Access page.** Rules that decide for an agent are listed under its slider, with a Remove button.
+- **Hire names.** A hire with no name gets a codename. A name longer than 40 characters is shortened at a word boundary, and the person is told.
+- **Peer messages.** The limit is per hour, not for the life of the project. A reply cannot start another reply, and the person is told when the limit is reached.
+- **Trust input.** An empty, null or non-numeric level is rejected.
+- **Task page.** Live updates no longer wipe the message box. Unknown statuses show a neutral label.
+- **Tests.** The GitHub-tool check is skipped on machines that have the tool installed, so the tests after it run.
+
 ## 0.31.0
 
 - **One slider for all agents.** The Access and safety page has an "All agents at once" slider above the list. Move it to set every agent to the same position, then move any single agent's slider to change just that one.

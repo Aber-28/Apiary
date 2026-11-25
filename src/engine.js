@@ -60,6 +60,15 @@ const INFRA_RE = /```apiary-infra\s*([\s\S]*?)```/g;
 const RUNBOOK_RE = /```apiary-runbook\s*([\s\S]*?)```/g;
 const TASK_RE = /```apiary-task\s*([\s\S]*?)```/g;
 const ASSIGN_RE = /```apiary-assign\s*([\s\S]*?)```/g;
+// Shortens a name to a maximum length, at a word boundary where possible. Reports whether it changed.
+function fitName(raw, max) {
+  const s = String(raw || '').trim();
+  if (s.length <= max) return { name: s, cut: false };
+  let cut = s.slice(0, max);
+  const sp = cut.lastIndexOf(' ');
+  if (sp > 10) cut = cut.slice(0, sp);
+  return { name: cut.trim(), cut: true };
+}
 const MAX_LOG = 1000;
 const id8 = () => randomUUID().slice(0, 8);
 const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'agent';
@@ -79,7 +88,8 @@ export class Engine extends EventEmitter {
     this.approvalRuns = new Map(); // one-time token -> { agent, signal } for each safe-mode run's approval bridge
     this.baseUrl = '';         // where this Apiary is reachable on this machine (set by the server when it starts)
     this.waitingOn = new Map();// agentId -> Set of agentIds it is waiting for (deadlock check)
-    this.peerCounts = new Map();// project id -> agent-to-agent messages sent
+    this.peerLog = new Map();   // project id -> times of agent-to-agent messages (only the last hour counts)
+    this.replyTurns = new Set(); // agents whose current turn was started by a teammate's reply (they cannot start new replies)
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
@@ -158,6 +168,7 @@ export class Engine extends EventEmitter {
       this.audit.add('approval', { actor: 'Rule', project: this._pname(agent), action: `${rec.status} automatically: ${rec.title}`, detail: this.policy.describe(rule) });
       this.emit('event', { type: 'approval', approval: rec });
       this._log(agent, `${allow ? '✔' : '!'} ${allow ? 'allowed' : 'blocked'} by your rule: ${rec.title}`);
+      this._msg(agent, { role: 'system', text: `${allow ? 'Allowed' : 'Blocked'} automatically by your rule: ${rec.title}` });
       this.store.save();
       return Promise.resolve({ decision: allow ? 'approve' : 'deny', note: rec.note, only: undefined, names: undefined, mode: rec.mode, models: undefined });
     }
@@ -415,7 +426,9 @@ export class Engine extends EventEmitter {
       if (this.tree(root.id).length + ok.length >= this.limits.maxAgents) { drop(`Not hired: the team is at its size limit, so a ${title} cannot be added.`); continue; }
       titles.add(title.toLowerCase());
       const dept = DEPARTMENTS[h.department] ? h.department : inferDepartment(title, h.role);
-      const given = h.title && h.name ? String(h.name).trim().slice(0, 40) : '';
+      const fit = h.name ? fitName(h.name, 40) : { name: '', cut: false };
+      if (fit.cut) this._msg(proposer, { role: 'system', text: `The name "${h.name}" is longer than 40 characters, so it was shortened to "${fit.name}". Ask for a shorter name if you prefer.` });
+      const given = fit.name;
       const name = given && !taken.has(given.toLowerCase()) ? given : pickName(dept, taken);
       taken.add(name.toLowerCase());
       const provider = this.available.some((p) => p.id === h.provider) ? h.provider : root.provider;
@@ -1020,7 +1033,8 @@ export class Engine extends EventEmitter {
     return { trust: level, count: agents.length, text: TRUST_LEVELS[level] };
   }
   _trustLevel(b) {
-    const level = Number(b.level);
+    const raw = b.level;
+    const level = typeof raw === 'number' || (typeof raw === 'string' && /^\s*\d+\s*$/.test(raw)) ? Number(raw) : NaN;
     if (!Number.isInteger(level) || level < 0 || level > 5) throw httpErr(400, 'The level must be a whole number from 0 to 5');
     return level;
   }
@@ -1049,8 +1063,7 @@ export class Engine extends EventEmitter {
       const denied = this.policy.match({ kind: 'command', title, project: this.rootOf(agent).id, agent: agent.id, command: isShell ? command : '' })?.action === 'deny';
       const level = Math.trunc(Number(agent.trust)) || 0;
       if (!denied && (isShell ? levelAllows(level, command) : level >= 5)) {
-        this._log(agent, `✔ allowed by the trust setting: ${shown}`);
-        this.audit.add('approval', { actor: 'Trust setting', project: this._pname(agent), action: `allowed automatically: ${title}`, detail: `${TRUST_LEVELS[level]}` });
+        this._recordAuto(agent, { title, detail: shown, status: 'approved', note: `Allowed automatically by the trust setting: ${TRUST_LEVELS[level]}.` });
         return { behavior: 'allow', updatedInput: input };
       }
       const fields = { kind: 'command', title, detail: shown, tool, canExact, program: parsed?.program || '' };
@@ -1063,6 +1076,17 @@ export class Engine extends EventEmitter {
     } finally {
       signal?.removeEventListener('abort', cancel);
     }
+  }
+  // A decision made without asking (trust setting or rule) is kept on the Approvals page and shown in the chat.
+  _recordAuto(agent, { title, detail, status, note }) {
+    const id = id8(), now = Date.now();
+    this.store.data.approvals[id] = { id, agentId: agent.id, agentName: agent.name, projectId: this.rootOf(agent).id, status, kind: 'command', title, detail, auto: true, note, createdAt: now, decidedAt: now };
+    const decided = Object.values(this.store.data.approvals).filter((r) => r.status !== 'pending').sort((a, b) => b.createdAt - a.createdAt);
+    for (const r of decided.slice(500)) delete this.store.data.approvals[r.id];
+    this.emit('event', { type: 'approval', approval: this.store.data.approvals[id] });
+    this.audit.add('approval', { actor: 'Trust setting', project: this._pname(agent), action: `${status === 'approved' ? 'allowed' : 'blocked'} automatically: ${title}`, detail: note });
+    this._msg(agent, { role: 'system', text: `${status === 'approved' ? 'Allowed' : 'Blocked'} automatically: ${title}` });
+    return this.store.data.approvals[id];
   }
   // Saves an "always" choice as a rule, so the same kind of command is not asked about again.
   _rememberCommand(agent, mode, command, parsed, canExact) {
@@ -1375,8 +1399,10 @@ export class Engine extends EventEmitter {
   }
   async _converse(agent, userText, from, opts = {}) {
     const w = this._openWork(agent, userText, from, opts);
+    if (opts.replyTo) this.replyTurns.add(agent.id);
     try { const r = await this._converseRun(agent, userText, from); this._closeWork(w, agent, true); return r; }
     catch (e) { this._closeWork(w, agent, false, e); throw e; }
+    finally { this.replyTurns.delete(agent.id); }
   }
   async _converseRun(agent, userText, from) {
     this.stopped.delete(agent.id);
@@ -1556,17 +1582,33 @@ export class Engine extends EventEmitter {
   }
   // A message to a teammate. Nobody's turn waits for anybody: the message is delivered, and a reply (when asked for)
   // comes back to the sender as a new message in its own chat, so people can talk freely in any direction.
+  // Agent-to-agent messages are limited per project per hour, so agents can keep talking but cannot run away.
+  _peerAllowed(root) {
+    const now = Date.now(), recent = (this.peerLog.get(root) || []).filter((t) => now - t < 3600000);
+    this.peerLog.set(root, recent);
+    return recent.length < this.limits.maxPeerMessages;
+  }
+  _peerCounted(root) { this.peerLog.set(root, [...(this.peerLog.get(root) || []), Date.now()]); }
+  _peerLimitNote(agent) {
+    const text = `This project has reached its limit of ${this.limits.maxPeerMessages} agent-to-agent messages in the last hour, so agents cannot message each other until it clears. You can still message agents yourself.`;
+    const last = this.messages(agent.id).at(-1);
+    if (!last || last.text !== text) this._msg(agent, { role: 'system', text });
+    return text;
+  }
   async _peerJob(agent, m, notes) {
     const root = this.rootOf(agent).id;
-    if ((this.peerCounts.get(root) || 0) >= this.limits.maxPeerMessages) { notes.push(`Message to "${m.to}" not sent: this project reached its limit of ${this.limits.maxPeerMessages} agent-to-agent messages.`); return null; }
+    if (!this._peerAllowed(root)) { notes.push(`Message to "${m.to}" not sent. ${this._peerLimitNote(agent)}`); return null; }
     const { peer, error } = await this._findPeer(agent, m.to);
     if (error) { notes.push(error); return null; }
     if (peer.id === agent.id) { notes.push('You cannot message yourself.'); return null; }
-    this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
+    this._peerCounted(root);
     this._msg(agent, { role: 'system', text: `${m.wait ? 'Asked' : 'Told'} ${peer.name}: ${m.text.slice(0, 160)}${m.text.length > 160 ? '…' : ''}`, agentId: peer.id });
     const proj = this._isProject(this.rootOf(agent)) && this.rootOf(peer).id !== this.rootOf(agent).id ? this.rootOf(agent) : null;
+    // A reply cannot start another reply: a turn that began with a teammate's reply sends without waiting for an answer.
+    const wait = m.wait && !this.replyTurns.has(agent.id);
+    if (m.wait && !wait) notes.push(`Sent to ${peer.name} without waiting: a reply from a teammate cannot start another reply. Ask the person if you need an answer.`);
     const sent = this._onProject(peer.id, proj, () => this.send(peer.id, m.text, agent)).then((text) => text || '(no reply)', (e) => `(no reply: ${e.message})`);
-    if (m.wait) {
+    if (wait) {
       notes.push(`Sent to ${peer.name}. Their reply will come to you as a new message, so carry on with other work meanwhile.`);
       sent.then((text) => this._replyBack(agent, peer, text));
     } else {
@@ -1576,7 +1618,7 @@ export class Engine extends EventEmitter {
   }
   // Puts a teammate's reply into the asker's chat as a new message, so the asker picks it up on its next turn.
   _replyBack(asker, peer, text) {
-    return this.send(asker.id, `Reply from ${peer.name} to your message:\n\n${text}`, peer).catch(() => {});
+    return this.send(asker.id, `Reply from ${peer.name} to your message:\n\n${text}`, peer, { replyTo: true }).catch(() => {});
   }
   _codeNote(code) { if (!code) return ''; const t = this.tasks.byCode(code); return ` (${code}${t?.status === 'done' ? ', closed' : t?.status === 'blocked' ? ', blocked' : ''})`; }
   _edge(a, b) { (this.waitingOn.get(a) || this.waitingOn.set(a, new Set()).get(a)).add(b); }
@@ -1686,9 +1728,9 @@ export class Engine extends EventEmitter {
   async _consult(worker, adv, task) {
     const root = this.rootOf(worker).id;
     const res = { adviser: adv, verdict: 'NO ANSWER', reason: '', prerequisites: [] };
-    if ((this.peerCounts.get(root) || 0) >= this.limits.maxPeerMessages) { res.reason = 'not consulted: the project reached its limit of agent-to-agent messages'; return res; }
+    if (!this._peerAllowed(root)) { res.reason = 'not consulted: the project reached its limit of agent-to-agent messages this hour'; this._peerLimitNote(worker); return res; }
     if (this._wouldDeadlock(worker.id, adv.id)) { res.reason = `not consulted: ${adv.name} is waiting on ${worker.name}`; return res; }
-    this.peerCounts.set(root, (this.peerCounts.get(root) || 0) + 1);
+    this._peerCounted(root);
     this._edge(worker.id, adv.id);
     this._msg(worker, { role: 'system', text: `Asked ${adv.name} for a pre-check`, agentId: adv.id });
     try {
@@ -1773,7 +1815,7 @@ export function parseSpawns(reply) {
     try {
       for (const h of [].concat(JSON.parse(body.trim()))) {
         if (!h || !String(h.title || h.name || '').trim()) { errors.push('An apiary-hire block needs a "title".'); continue; }
-        hires.push({ name: String(h.name || h.title), title: h.title, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo, complexity: h.complexity });
+        hires.push({ name: h.name ? String(h.name) : '', title: h.title, role: h.role, department: h.department, reason: h.reason, instructions: h.instructions, guardrails: h.guardrails, provider: h.provider, reportsTo: h.reportsTo, complexity: h.complexity });
       }
     } catch (err) { errors.push(`An apiary-hire block was not valid JSON (${err.message}).`); }
     return '';

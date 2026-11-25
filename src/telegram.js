@@ -54,7 +54,7 @@ export class Telegram {
     return j.result;
   }
   // Sends one alert to the linked chat. Deduplicated (10 minutes) and capped (30 an hour).
-  async alert(text, { force = false } = {}) {
+  async alert(text, { force = false, markup = null } = {}) {
     const c = this.config;
     if (!force && (!c.enabled || !c.chatId)) return false;
     if (!c.chatId) throw err(409, 'No chat is linked yet.');
@@ -66,14 +66,18 @@ export class Telegram {
     }
     this.recent.set(text, now); this.sent.push(now);
     for (const [k, t] of this.recent) if (t < now - 600000) this.recent.delete(k);
-    try { await this._call('sendMessage', { chat_id: c.chatId, text, disable_web_page_preview: true }); this.lastOk = now; this.lastError = ''; this.engine.audit?.add('system', { actor: 'Apiary', action: 'sent a Telegram alert', detail: clip(text, 120) }); return true; }
+    try { await this._call('sendMessage', { chat_id: c.chatId, text, disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}) }); this.lastOk = now; this.lastError = ''; this.engine.audit?.add('system', { actor: 'Apiary', action: 'sent a Telegram alert', detail: clip(text, 120) }); return true; }
     catch (e) { this.lastError = e.message; return false; }
   }
   async test() { await this.alert('✅ Apiary can reach you here. This is a test alert.', { force: true }); if (this.lastError) throw err(502, this.lastError); return { ok: true }; }
   _onEvent(ev) {
     if (ev.type !== 'approval' || ev.approval?.status !== 'pending' || !this.config.events.approvals) return;
     const a = ev.approval, p = this.engine.agents[a.agentId];
-    this.alert(`🔔 Approval waiting${p ? ` (${this.engine._pname(p) || 'CEO'})` : ''}: ${a.title}`);
+    // A new secret's value is typed in Apiary, never in a chat, so that request can only be denied here.
+    const secret = a.kind === 'newsecret';
+    const row = secret ? [{ text: '⛔ Deny', callback_data: `ap:${a.id}:d` }] : [{ text: '✅ Approve', callback_data: `ap:${a.id}:a` }, { text: '⛔ Deny', callback_data: `ap:${a.id}:d` }];
+    const extra = secret ? '\nThe value is typed in Apiary (Approvals page), not here.' : '';
+    this.alert(`🔔 Approval waiting${p ? ` (${this.engine._pname(p) || 'CEO'})` : ''}: ${a.title}${extra}`, { markup: { inline_keyboard: [row] } });
   }
   _health(i) { if (this.config.events.health && (i.level === 'warn' || i.level === 'err')) this.alert(`${i.level === 'err' ? '🔴' : '🟠'} Health: ${i.title}. Open Apiary > Health for what to do.`); }
   _taskDone({ agent, ms, failed }) {
@@ -96,12 +100,33 @@ export class Telegram {
       while (want()) {
         if (this.linking && Date.now() > this.linking.until) this.linking = null;
         let ups;
-        try { ups = await this._call('getUpdates', { offset: this.offset, timeout: process.env.APIARY_TELEGRAM_API ? 1 : 25, allowed_updates: ['message'] }, 35000); this.lastError = ''; }
+        try { ups = await this._call('getUpdates', { offset: this.offset, timeout: process.env.APIARY_TELEGRAM_API ? 1 : 25, allowed_updates: ['message', 'callback_query'] }, 35000); this.lastError = ''; }
         catch (e) { this.lastError = e.message; await new Promise((r) => setTimeout(r, 15000)); continue; }
-        for (const u of ups || []) { this.offset = u.update_id + 1; await this._message(u.message).catch(() => {}); }
+        for (const u of ups || []) { this.offset = u.update_id + 1; if (u.callback_query) await this._callback(u.callback_query).catch(() => {}); else await this._message(u.message).catch(() => {}); }
         if (process.env.APIARY_TELEGRAM_API) await new Promise((r) => setTimeout(r, 150));
       }
     } finally { this.polling = false; }
+  }
+  // A button press from the linked chat: approve or deny that request. Anything else gets no answer.
+  async _callback(q) {
+    const chat = String(q.message?.chat?.id || ''), c = this.config;
+    const answer = (text) => this._call('answerCallbackQuery', { callback_query_id: q.id, text: String(text).slice(0, 180) }).catch(() => {});
+    if (!c.chatId || chat !== String(c.chatId)) return answer('Not allowed');
+    const m = /^ap:([\w-]+):(a|d)$/.exec(String(q.data || ''));
+    if (!m) return answer('Unknown button');
+    const [, id, act] = m;
+    let result;
+    try {
+      const rec = this.engine.store.data.approvals[id];
+      if (!rec) throw new Error('This request no longer exists.');
+      if (rec.kind === 'newsecret' && act === 'a') throw new Error('The value is typed in Apiary, not here.');
+      this.engine.decide(id, { decision: act === 'a' ? 'approve' : 'deny', note: act === 'a' ? '' : 'Denied from Telegram' });
+      result = act === 'a' ? `✅ Approved: ${rec.title}` : `⛔ Denied: ${rec.title}`;
+      this.engine.audit?.add('system', { actor: 'You', action: `${act === 'a' ? 'approved' : 'denied'} from Telegram`, detail: rec.title });
+    } catch (e) { result = e.message || 'Could not answer this request.'; }
+    await answer(result);
+    const msg = q.message;
+    if (msg?.message_id) await this._call('editMessageText', { chat_id: chat, message_id: msg.message_id, text: `${msg.text || 'Approval'}\n\n${result}`.slice(0, 4000) }).catch(() => {});
   }
   async _message(m) {
     if (!m || !m.chat || m.chat.type !== 'private') return;

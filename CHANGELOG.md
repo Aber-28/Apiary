@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.0
+
+- **Approve from Telegram.** Approval alerts have Approve and Deny buttons. Only the chat you linked can press them. A new secret can be denied from Telegram but not approved there, because its value is typed in Apiary.
+
 ## 0.36.0
 
 - **Sign in to Claude from the page.** The Claude connection has a sign-in button. Apiary shows the link to open, you approve it in your browser, paste the code it shows, and the page confirms the login by itself. No terminal needed. Codex still uses the terminal: its sign-in is not verified yet.

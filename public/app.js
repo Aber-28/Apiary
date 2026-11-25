@@ -472,6 +472,7 @@ function pageProject(leadId, general = false) {
   const drawHead = () => {
     const a = sel(), l = S.agents.find((x) => x.id === leadId) || lead;
     el.head.replaceChildren(...[
+      h('a', { class: 'btn only-small chat-back', href: '#/projects', 'aria-label': 'Back to all projects' }, '‹ All chats'),
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${!a.parentId && !a.kind && !a.member ? `Led by ${ownerOf(a)?.name || 'your CEO'}` : a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
       pill(a.status),

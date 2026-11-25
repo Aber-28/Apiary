@@ -295,7 +295,7 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .ch-more{display:contents}.ch-toggle{display:none}
 html{-webkit-text-size-adjust:100%}
 @media (max-width:900px){
- html,body{overflow-x:hidden}
+ body{overflow-x:hidden;overflow-x:clip}
  .shell{min-height:100dvh}.main{height:100dvh}.side{height:100dvh;padding-bottom:calc(18px + env(safe-area-inset-bottom))}
  .doc-top{display:none}
  .top{gap:8px;padding:8px 12px;min-height:56px}
@@ -333,3 +333,6 @@ html{-webkit-text-size-adjust:100%}
 }
 
 .trouble{margin:8px 0;padding:10px 12px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:10px;background:var(--surface2)}.trouble ol,.trouble ul{margin:4px 0;padding-left:20px}.trouble code{font-size:12px}
+
+/* always a way out of a chat on a phone */
+@media (max-width:900px){.top{position:sticky;top:0;z-index:30}#menu{min-width:44px;min-height:44px}.chat-back{flex:0 0 auto}button,a,.btn,select,input,textarea{touch-action:manipulation}}

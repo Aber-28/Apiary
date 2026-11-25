@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.52.1
+
+- Phone: there is now always a way out of a chat. A "‹ All chats" button sits at the top of every chat, the top bar stays pinned, the menu button is bigger, and double-tap zoom no longer swallows taps.
+
 ## 0.52.0
 
 - **Troubleshoot button on devices.** When a device is not reachable, one press tests it again, looks at it (name, ports, the machine it runs on, its neighbours) and explains in plain words what is probably wrong and what to check. If a safe repair could help (restart a service, start a VM, reboot) it asks you once per problem and runs only from a short built-in list; everything else is listed for you. After the device has been back up for 15 minutes the problem is closed and the next press starts afresh.

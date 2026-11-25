@@ -1806,7 +1806,7 @@ let orgIds;
     }
     { // phones: no sideways scrolling, a compact top bar and chat header, comfortable touch targets
       const css = fsRead(path.join(import.meta.dirname, '..', 'public', 'style.css'), 'utf8'), idx = fsRead(path.join(import.meta.dirname, '..', 'public', 'index.html'), 'utf8'), app = fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8');
-      assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*html,body\{overflow-x:hidden\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /min-height:44px/); assert.match(css, /\.gsearch input\{font-size:16px!important\}/); assert.match(css, /\.team\{order:-1/);
+      assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*body\{overflow-x:hidden;overflow-x:clip\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /\.chat-back/); assert.match(app, /class: 'btn only-small chat-back'/); assert.match(css, /min-height:44px/); assert.match(css, /\.gsearch input\{font-size:16px!important\}/); assert.match(css, /\.team\{order:-1/);
       assert.match(css, /\.chat-head\.more \.ch-more\{display:flex\}/); assert.match(app, /class: 'ch-more'/); assert.match(app, /closest\('#menu'\)/, 'tapping outside the menu closes it');
     }
     { // troubleshooting: explains, asks once per outage, repairs only from the safe list, closes after 15 minutes up

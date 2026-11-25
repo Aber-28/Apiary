@@ -1611,6 +1611,58 @@ let orgIds;
     assert.match(a, /timeStyle: 'short'/, 'each task message has a date and time');
     assert.match(a, /c\.id === 'claude' \|\| c\.id === 'codex'\) && c\.cli\.found \? aiSignIn/, 'the sign-in button is on both the Claude and the Codex card');
   }
+  { // the Library: ready-made connectors that make the login in the vault and a linked device; icons are fetched live once, then kept
+    const { LIBRARY, view: libView, cleanSvg } = await import('../src/library.js');
+    const netm = await import('node:net');
+    await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
+    await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
+    const lib = (await call('/api/library')).body;
+    assert.ok(lib.entries.length >= 10 && lib.entries.some((e) => e.id === 'proxmox'));
+    assert.ok(!JSON.stringify(lib).includes('raw.githubusercontent'), 'icon web addresses stay on the server');
+    assert.ok(LIBRARY.every((e) => e.icons.every((u) => /^https:\/\/raw\.githubusercontent\.com\//.test(u))), 'only fixed public icon addresses are ever fetched');
+    // a device from the Library: login in the vault, device linked to it, nothing secret on the map
+    const srv = netm.createServer((c) => c.end()); await new Promise((r) => srv.listen(0, '127.0.0.1', r)); const lport = srv.address().port;
+    const r1 = await call('/api/library/linux/add', 'POST', { name: 'Lib box', address: '127.0.0.1', port: lport, username: 'root', auth: 'password', secret: 'lib-hunter2' });
+    assert.equal(r1.status, 201); assert.equal(r1.body.lib, 'linux'); assert.equal(r1.body.type, 'server'); assert.match(r1.body.secret, /^Lib box login/);
+    assert.ok(!JSON.stringify(engine.infra.view()).includes('lib-hunter2'), 'no password on the map');
+    const sv = engine.vault.byName(r1.body.secret); assert.equal(engine.vault.list().find((x) => x.id === sv.id).type, 'ssh', 'an SSH library entry makes an SSH login');
+    assert.equal(engine.vault.list().find((x) => x.id === sv.id).port, lport);
+    assert.equal((await call('/api/library/linux/add', 'POST', { name: 'Lib box', address: '127.0.0.1', secret: 'x' })).status, 409, 'same name is refused');
+    assert.equal((await call('/api/library/linux/add', 'POST', { name: 'Lib box 2', address: '', secret: 'x' })).status, 400);
+    assert.equal((await call('/api/library/linux/add', 'POST', { name: 'Lib box 3', address: '1.2.3.4' })).status, 400, 'a login needs its password');
+    assert.equal((await call('/api/library/nope/add', 'POST', { address: 'x' })).status, 404);
+    const pm = await call('/api/library/proxmox/add', 'POST', { name: 'Lib pve', method: 'token', address: '127.0.0.1', secret: 'user@pam!t=abc' });
+    assert.equal(pm.status, 201); assert.equal(engine.vault.list().find((x) => x.name === pm.body.secret).type, 'token'); assert.equal(pm.body.port, 8006); assert.match(pm.body.url, /^https:\/\/127\.0\.0\.1:8006$/);
+    const web = await call('/api/library/website/add', 'POST', { name: 'Lib site', address: 'https://example.com' });
+    assert.equal(web.status, 201); assert.equal(web.body.secret, ''); assert.equal((await call('/api/library/website/add', 'POST', { name: 'Lib site 2', address: 'example.com' })).status, 400);
+    // testing checks the port and also signs in for real
+    engine.discoveryRun = async () => ({ code: 0, stdout: 'apiary-ok\n', stderr: '' });
+    const t1 = (await call(`/api/infra/${r1.body.id}/test`, 'POST', {})).body; assert.ok(t1.status.ok && /login works/.test(t1.status.detail), t1.status.detail);
+    engine.discoveryRun = async () => ({ code: 255, stdout: '', stderr: 'Permission denied (publickey,password).' });
+    const t2 = (await call(`/api/infra/${r1.body.id}/test`, 'POST', {})).body; assert.equal(t2.status.ok, false); assert.ok(!t2.status.detail.includes('lib-hunter2'));
+    delete engine.discoveryRun; srv.close();
+    // the vault being locked is explained, and no half-made device is left
+    await call('/api/vault/lock', 'POST', {});
+    const before = engine.infra.view().length;
+    assert.equal((await call('/api/library/linux/add', 'POST', { name: 'Lib locked', address: '1.2.3.4', username: 'root', secret: 'x' })).status, 423);
+    assert.equal(engine.infra.view().length, before, 'nothing half-made');
+    await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
+    // icons: fetched live the first time, then the kept copy is used, and it is never fetched or deleted again
+    let hits = 0; engine.iconFetch = async () => { hits++; const b = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" onload="x()"><script>x</script><path d="M0 0h8v8z"/></svg>'); return { ok: true, arrayBuffer: async () => b, body: null }; };
+    const i1 = await fetch(base + '/api/library/icon/proxmox'); const svg1 = await i1.text();
+    assert.equal(i1.status, 200); assert.match(i1.headers.get('content-type'), /image\/svg\+xml/); assert.ok(svg1.includes('<path') && !/script|onload/.test(svg1), 'active content is stripped');
+    const kept = path.join(path.dirname(engine.store.file), 'icons', 'proxmox.svg'); assert.ok(fsExists(kept), 'the downloaded icon is kept');
+    const first = hits; await (await fetch(base + '/api/library/icon/proxmox')).text(); assert.equal(hits, first, 'the kept copy is used, not downloaded again');
+    engine.iconFetch = async () => { throw new Error('offline'); };
+    assert.equal((await fetch(base + '/api/library/icon/proxmox')).status, 200, 'still shown when offline');
+    assert.equal((await fetch(base + '/api/library/icon/hyperv')).status, 404, 'an entry without an icon falls back');
+    assert.equal((await fetch(base + '/api/library/icon/../../etc')).status === 200, false, 'only known entries');
+    assert.equal(cleanSvg('not an svg'), null);
+    // a factory reset leaves the downloaded icons alone
+    const { plan } = await import('../src/reset.js'); assert.ok(!plan(engine).files.some((f) => /[\\/]icons([\\/]|$)/.test(f)), 'a factory reset keeps the icons');
+    delete engine.iconFetch;
+    const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function openLibrary/); assert.match(a, /iconIdOf\(i\) \? libIcon/, 'device cards show the icon');
+  }
   { // every ID is a status chip: tasks, tickets, approvals and secrets are all in /api/refs; a secret shows its name, never its value
     await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
     await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});

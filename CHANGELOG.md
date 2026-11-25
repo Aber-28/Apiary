@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.41.0
+
+- **Library.** A set of ready-made connectors (Proxmox, ESXi, Hyper-V, Linux, Docker, Raspberry Pi, OpenWrt, OPNsense, Synology, Home Assistant, n8n, Nginx Proxy Manager, Coolify, website). Pick one, give the address and login, and Apiary puts the login in the vault, adds the device already linked, and tests it.
+- **Real login test.** For SSH logins, Test now also signs in with a harmless command, so a green result means the login works.
+- **Vendor icons.** Library entries and their devices show the product icon on the cards and the map. An icon is fetched live from a public icon set the first time, then kept and never deleted. A factory reset leaves them.
+
 ## 0.40.1
 
 - **Task conversations are newest first.** The conversation and history on a task page show the latest first by default. A button switches them to oldest first, and back.

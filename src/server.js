@@ -198,6 +198,16 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         }
       }
       // ----- task board -----
+      if (url.pathname === '/api/library' && req.method === 'GET') return json(res, 200, engine.library());
+      { // a Library icon is fetched live from the public internet the first time, then the kept copy is used for good
+        const ic = /^\/api\/library\/icon\/([a-z0-9]+)$/.exec(url.pathname);
+        if (ic && req.method === 'GET') {
+          const svg = await engine.icon(ic[1]);
+          if (!svg) { res.writeHead(404, { 'cache-control': 'no-store' }); res.end(); return; }
+          res.writeHead(200, { 'content-type': 'image/svg+xml', 'cache-control': 'private, max-age=86400', 'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; sandbox", 'x-content-type-options': 'nosniff' }); res.end(svg); return;
+        }
+      }
+      { const la = /^\/api\/library\/([a-z0-9]+)\/add$/.exec(url.pathname); if (la && req.method === 'POST') return json(res, 201, engine.addFromLibrary(la[1], await readBody(req))); }
       if (url.pathname === '/api/refs' && req.method === 'GET') return json(res, 200, { refs: engine.refs() });
       if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, { tasks: engine.tasksView(), counts: engine.tasks.counts() });
       if (url.pathname === '/api/tasks' && req.method === 'POST') return json(res, 201, engine.createTask(await readBody(req)));
@@ -452,7 +462,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         const [, id, act] = r;
         if (req.method === 'PUT' && !act) { const it = engine.infra.update(id, await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
         if (req.method === 'DELETE' && !act) { engine.audit.add('infra', { actor: 'You', action: 'removed a device', detail: id }); engine.infra.remove(id); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
-        if (req.method === 'POST' && act === 'test') { const it = await engine.infra.test(id); engine.audit.add('infra', { actor: 'You', action: 'tested a connection', detail: `${it.name || id}: ${it.status || ''}` }); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
+        if (req.method === 'POST' && act === 'test') { const it = await engine.testDevice(id); engine.audit.add('infra', { actor: 'You', action: 'tested a connection', detail: `${it.name || id}: ${it.status || ''}` }); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
         if (req.method === 'POST' && act === 'discover') { await readBody(req); return json(res, 200, await engine.discover(id)); }
         if (req.method === 'POST' && act === 'confirm') { const b = await readBody(req); engine.infra.confirm(id, b.ok !== false); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && act === 'answer') { const it = engine.infra.answer(id, (await readBody(req)).text); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }

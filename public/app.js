@@ -1868,6 +1868,67 @@ async function pageBackups() {
 
 // ---------- infrastructure: devices and the map ----------
 const INFRA_COLORS = { ok: 'var(--ok)', bad: 'var(--err)', none: 'var(--line)' };
+// ---------- the Library: ready-made connectors, with their vendor icons ----------
+const TYPE_ICON = { proxmox: 'proxmox' };
+const iconIdOf = (i) => i.lib || TYPE_ICON[i.type] || '';
+// The icon is fetched from the public internet by Apiary the first time, then kept. A letter shows if it cannot be had.
+function libIcon(id, px = 28, label = '') {
+  const letter = () => h('span', { class: 'libicon fb', 'aria-hidden': 'true', style: `width:${px}px;height:${px}px;font-size:${Math.round(px * 0.5)}px` }, (label || id || '?')[0].toUpperCase());
+  const img = h('img', { class: 'libicon', src: `/api/library/icon/${id}`, alt: '', width: String(px), height: String(px), loading: 'lazy' });
+  img.addEventListener('error', () => img.replaceWith(letter()));
+  return img;
+}
+async function openLibrary(done) {
+  const lib = await api('/api/library');
+  const dlg = h('dialog', { class: 'libdlg' }, h('h2', {}, 'Library'), h('p', { class: 'hint' }, 'Pick what you want to connect. Apiary asks only for what it needs and puts the login in the Secrets vault.'),
+    h('div', { class: 'libgrid' }, lib.entries.map((e) => h('button', { class: 'libcard', type: 'button', onclick: () => { dlg.close(); openLibraryForm(e, lib.vault, done); } }, e.hasIcon ? libIcon(e.id, 36, e.name) : h('span', { class: 'libicon fb', style: 'width:36px;height:36px;font-size:18px', 'aria-hidden': 'true' }, e.name[0]), h('b', {}, e.name), h('small', {}, e.blurb)))),
+    h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')));
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
+}
+function openLibraryForm(e, vault, done) {
+  let m = e.methods[0];
+  const name = h('input', { type: 'text', value: e.name, maxlength: '60' });
+  const address = h('input', { type: 'text', placeholder: e.id === 'website' ? 'https://example.com' : '10.0.0.5 or server.local', autocapitalize: 'none', spellcheck: 'false' });
+  const port = h('input', { type: 'number', min: '1', max: '65535' });
+  const user = h('input', { type: 'text', autocomplete: 'off', autocapitalize: 'none' });
+  const auth = h('select', {}, h('option', { value: 'key' }, 'Private key (safest)'), h('option', { value: 'password' }, 'Password'));
+  const pass = h('input', { type: 'password', autocomplete: 'new-password' }), key = h('textarea', { rows: '5', spellcheck: 'false', placeholder: '-----BEGIN OPENSSH PRIVATE KEY-----' });
+  const methodSel = h('select', { 'aria-label': 'How to connect' }, e.methods.map((x) => h('option', { value: x.id }, x.label)));
+  const f = (label, el) => h('label', { class: 'f' }, label, el);
+  const err = h('p', { class: 'hint', style: 'color:var(--err)', role: 'alert' }), note = h('p', { class: 'hint' });
+  const body = h('div', {});
+  const draw = () => {
+    port.value = m.port || ''; user.value = m.user || ''; note.textContent = m.note || '';
+    const secretLabel = m.secret === 'token' ? 'Token' : 'Password';
+    body.replaceChildren(
+      e.methods.length > 1 ? f('Connect with', methodSel) : null,
+      f('Name', name), f(e.id === 'website' ? 'Web address' : 'Address (name or IP)', address),
+      m.secret && e.id !== 'website' ? f('Port', port) : null,
+      m.secret && m.secret !== 'token' ? f('Username', user) : null,
+      m.secret === 'ssh' ? f('Sign in with', auth) : null,
+      m.secret ? (m.secret === 'ssh' && auth.value === 'key' ? f('Private key', key) : f(secretLabel, pass)) : null,
+      note);
+  };
+  methodSel.addEventListener('change', () => { m = e.methods.find((x) => x.id === methodSel.value) || m; draw(); });
+  auth.addEventListener('change', draw);
+  draw();
+  const blocked = m.secret && (!vault.exists ? 'Create the Secrets vault first (Security, Secrets vault), then come back.' : !vault.unlocked ? 'Unlock the Secrets vault first (Security, Secrets vault), then come back.' : '');
+  const add = h('button', { class: 'btn primary', value: 'save', onclick: (ev) => { ev.preventDefault(); (async () => {
+    err.textContent = '';
+    try {
+      const payload = { method: m.id, name: name.value, address: address.value, port: port.value, username: user.value, auth: auth.value, secret: m.secret === 'ssh' && auth.value === 'key' ? key.value : pass.value };
+      const it = await api(`/api/library/${e.id}/add`, 'POST', payload);
+      dlg.close(); toast(`${e.name} added. Testing…`);
+      try { await api(`/api/infra/${it.id}/test`, 'POST', {}); } catch { /* the result shows on the card */ }
+      done();
+    } catch (x) { err.textContent = x.message; }
+  })(); } }, 'Add and test');
+  if (blocked && m.secret) add.disabled = true;
+  const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('div', { class: 'kv', style: 'gap:10px;margin-bottom:6px' }, e.hasIcon ? libIcon(e.id, 36, e.name) : null, h('h2', { style: 'margin:0' }, `Connect ${e.name}`)),
+    h('p', { class: 'hint', style: blocked ? 'color:var(--err)' : '' }, blocked || 'The login goes into the encrypted Secrets vault. Only its name is kept on the device.'),
+    body, err, h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), add)));
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal(); address.focus();
+}
 async function openInfraForm(types, items, secrets, item, done) {
   const cur = item || {};
   const f = (label, el) => h('label', { class: 'f' }, label, el);
@@ -1949,7 +2010,9 @@ function infraMap(items, types, onOpen) {
     g.append(mk('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 10, style: `fill:${b.leaf ? 'var(--surface)' : 'var(--surface2)'};stroke:${stroke(i)};stroke-width:${i.status ? 2 : 1.2};${i.state === 'proposed' ? 'stroke-dasharray:5 4' : ''}` }));
     const tag = i.state === 'proposed' ? 70 : 0, sub = [types[i.type] || i.type, i.address].filter(Boolean).join(' · ');
     g.append(mk('title', {}, document.createTextNode(`${i.name}${sub ? '\n' + sub : ''}`)));
-    g.append(txt(i.name, b.x + 12, b.y + 22, 'var(--text)', 14, 600, b.w - 24 - tag, 10.5));
+    const ic = iconIdOf(i), sh = ic && b.w >= 110 ? 22 : 0;
+    if (sh) { const im = mk('image', { x: b.x + 10, y: b.y + 8, width: 16, height: 16, href: `/api/library/icon/${ic}` }); im.addEventListener('error', () => im.remove()); g.append(im); }
+    g.append(txt(i.name, b.x + 12 + sh, b.y + 22, 'var(--text)', 14, 600, b.w - 24 - tag - sh, 10.5));
     g.append(txt(sub, b.x + 12, b.y + (b.leaf ? 42 : 38), 'var(--muted)', 11.5, 400, b.w - 24, 9));
     if (i.state === 'proposed') g.append(txt('to confirm', b.x + b.w - 12 - 62, b.y + 22, 'var(--accent-text)', 11, 600));
     g.addEventListener('click', () => onOpen(i)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(i); } });
@@ -2031,7 +2094,7 @@ async function pageInfra(tab) {
       location.hash = '#/chat';
     });
     const head = h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, tab === 'map' ? 'Infrastructure map' : 'Devices and connections'), h('p', { class: 'sub-title' }, 'Everything Apiary can reach or manage: servers, VMs, websites and how they connect. Passwords stay in the Secrets vault; only the name of the login is kept here.')),
-      h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
+      h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn', onclick: guard(() => openLibrary(draw)) }, 'Library'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
     const tabs = h('div', { class: 'tabs', role: 'tablist' }, [['devices', 'Devices', '#/infrastructure'], ['map', 'Map', '#/infrastructure/map']].map(([k, t, href]) => h('a', { role: 'tab', 'aria-selected': String(tab === k), class: 'btn', style: 'text-decoration:none', href }, t)));
     const proposed = items.filter((i) => i.state === 'proposed'), real = items.filter((i) => i.state !== 'proposed');
     const fromDisc = proposed.filter((i) => i.by === 'Discovery');
@@ -2054,7 +2117,7 @@ async function pageInfra(tab) {
       const st = i.status ? h('span', { class: 'pill ' + (i.status.ok ? 'ok' : 'err'), title: `${ago(i.status.at)}` }, i.status.ok ? 'Reachable' : 'Not reachable') : h('span', { class: 'pill' }, 'Not tested');
       const discover = i.secret ? h('button', { class: 'btn', title: 'Reads which virtual machines and containers this device runs. It never changes anything.', onclick: guard(async (e) => { const b = e.currentTarget; b.disabled = true; b.textContent = 'Looking…'; try { discoveryDialog(await api(`/api/infra/${i.id}/discover`, 'POST', {}), draw); } finally { b.disabled = false; b.textContent = 'Discover'; } }) }, 'Discover') : null;
       const test = h('button', { class: 'btn', onclick: guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { await api(`/api/infra/${i.id}/test`, 'POST', {}); } finally { draw(); } }) }, 'Test connection');
-      return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', {}, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
+      return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', { class: 'kv', style: 'gap:8px' }, iconIdOf(i) ? libIcon(iconIdOf(i), 26, i.name) : null, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
         h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
         i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? h('p', { style: 'white-space:pre-wrap;margin:4px 0' }, i.notes) : null,
         h('div', { class: 'formrow', style: 'margin-top:6px' }, test, discover, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));

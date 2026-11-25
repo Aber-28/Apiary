@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, renameSync, existsSync, chmodSync, mkdirSy
 import { randomUUID } from 'node:crypto';
 import net from 'node:net';
 import path from 'node:path';
+import { byId as libraryEntry } from './library.js';
 
 export const TYPES = {
   router: 'Router or firewall', switch: 'Switch or access point', proxmox: 'Proxmox or hypervisor', server: 'Server or computer', vm: 'Virtual machine',
@@ -47,6 +48,7 @@ export class Infra {
       if (pid === cur.id && pid) throw err(400, 'That would make it run on itself');
       o.parentId = pid;
     }
+    if (b.lib !== undefined) o.lib = libraryEntry(b.lib) ? String(b.lib) : '';
     if (b.links !== undefined) {
       o.links = [].concat(b.links || []).filter((l) => l && this.get(l.to) && l.to !== cur.id).slice(0, 30).map((l) => ({ to: String(l.to), label: clean(l.label, 40) }));
     }

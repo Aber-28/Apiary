@@ -42,6 +42,7 @@
 * [Team meetings](using-apiary/team-meetings.md)
 * [Infrastructure map](using-apiary/infrastructure.md)
 * [Discovery](using-apiary/discovery.md)
+* [Library](using-apiary/library.md)
 * [Health](using-apiary/health.md)
 * [Secrets vault](using-apiary/secrets-vault.md)
 * [Sign-in from any laptop](using-apiary/sign-in.md)

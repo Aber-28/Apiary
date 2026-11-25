@@ -21,7 +21,8 @@ import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Infra } from './infra.js';
-import { probe as discoveryProbe, sshRun } from './discovery.js';
+import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
+import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
 import { Audit } from './audit.js';
 import { Health } from './health.js';
 import { Telegram } from './telegram.js';
@@ -423,6 +424,54 @@ export class Engine extends EventEmitter {
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
   // Discovery: read what a host runs (VMs, containers) over SSH and offer each new find as an "Is this right?" card.
   // Read-only on the host. The person pressing the button is the approval; the login comes from the vault.
+  // ---------- the Library ----------
+  icon(id) { return iconFor(path.join(path.dirname(this.store.file), 'icons'), id, this.iconFetch || fetch); }
+  library() { return { entries: libraryView(), vault: { exists: this.vault.exists, unlocked: this.vault.unlocked } }; }
+  // Makes the login in the vault and the device on the map, already linked. The password is never kept on the map.
+  addFromLibrary(libId, b = {}) {
+    const bad = (status, message) => Object.assign(new Error(message), { status });
+    const e = libraryEntry(libId); if (!e) throw bad(404, 'No such library entry');
+    const m = e.methods.find((x) => x.id === b.method) || e.methods[0];
+    const name = String(b.name || e.name).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
+    if (!name) throw bad(400, 'Give it a name');
+    const address = String(b.address || '').trim();
+    if (!address) throw bad(400, e.id === 'website' ? 'Enter the web address' : 'Enter its address (a name or IP like 10.0.0.5)');
+    if (this.infra.byName(name)) throw bad(409, `You already have "${name}"`);
+    const port = b.port === undefined || b.port === '' ? m.port : Number(b.port);
+    let url = '', host = address;
+    if (e.id === 'website') { if (!/^https?:\/\/[^\s]+$/i.test(address)) throw bad(400, 'The web address must start with http:// or https://'); url = address; host = ''; }
+    else if (e.web && m.id !== 'ssh') url = `${e.web.scheme}://${address}:${port || e.web.port}`;
+    let secret = '';
+    if (m.secret) {
+      const value = String(b.secret || ''); if (!value) throw bad(400, m.secret === 'ssh' && b.auth === 'key' ? 'Paste the private key' : `Enter the ${m.secret === 'token' ? 'token' : 'password'}`);
+      const user = String(b.username || m.user || '').trim(); if (m.secret !== 'token' && !user) throw bad(400, 'Enter the username');
+      let n = `${name} login`, k = 2; while (this.vault.byName(n)) n = `${name} login ${k++}`;
+      this.vault.add(n, value, `Made from the Library (${e.name})`, user, m.secret === 'ssh' ? { type: 'ssh', host, port: port || 22, auth: b.auth === 'key' ? 'key' : 'password' } : { type: m.secret });
+      secret = n;
+    }
+    const it = this.infra.add({ name, type: e.type, address: host, port: Number.isInteger(port) ? port : 0, url, secret, lib: e.id, notes: `${e.name}, connected with ${m.label.toLowerCase()}.` });
+    this.audit.add('infra', { actor: 'You', action: 'added a device from the Library', detail: `${it.name} (${e.name})` });
+    this.emit('event', { type: 'infra' });
+    return it;
+  }
+  // Reachability, and for an SSH login also a real sign-in with a harmless command, so "works" means it works.
+  async testDevice(id) {
+    const it = await this.infra.test(id);
+    if (it.status?.ok && it.secret && this.vault.unlocked) {
+      try {
+        const sec = this.vault.byName(it.secret), meta = sec && this.vault.list().find((x) => x.id === sec.id);
+        if (meta && meta.type === 'ssh') {
+          const EV = envName(sec.name), user = this.vault.user(sec.id), value = this.vault.value(sec.id);
+          const env = { [EV]: value, [`${EV}_USER`]: user, [`${EV}_HOST`]: meta.host || it.address, [`${EV}_PORT`]: String(meta.port || 22), [`${EV}_AUTH`]: meta.auth || 'password' };
+          const r = await (this.discoveryRun || sshRun)({ name: sec.name, env, shell: 'sh', script: 'echo apiary-ok\n', timeoutMs: 20000 });
+          const ok = r.code === 0 && /apiary-ok/.test(r.stdout || '');
+          it.status = { ...it.status, ok, detail: ok ? `${it.status.detail}, and the login works` : `${it.status.detail}, but the login was refused: ${this.vault.redact(explainSsh(r.stderr, r.code))}` };
+          this.infra._save();
+        }
+      } catch { /* leave the plain result */ }
+    }
+    return it;
+  }
   async discover(id) {
     const host = this.infra.get(id), bad = (status, message) => Object.assign(new Error(message), { status });
     if (!host) throw bad(404, 'No such device');

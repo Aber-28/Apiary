@@ -1604,6 +1604,7 @@ let orgIds;
     assert.match(a, /document\.execCommand\('copy'\)/, 'copy has a fallback');
     assert.match(a, /window\.isSecureContext/, 'the clipboard API is used only where it works');
     assert.match(a, /timeStyle: 'short'/, 'each task message has a date and time');
+    assert.match(a, /c\.id === 'claude' \|\| c\.id === 'codex'\) && c\.cli\.found \? aiSignIn/, 'the sign-in button is on both the Claude and the Codex card');
   }
   { // sign in to Claude from the page: the link is shown, the pasted code goes to the CLI, the login is confirmed, and the code is never kept
     const { AiLogin } = await import('../src/aiLogin.js');

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.39.2
+
+- **The *Sign in to Codex* button now shows.** It was only drawn on the Claude card, so 0.39.1's Codex sign-in could not be reached.
+
 ## 0.39.1
 
 - **Codex sign-in works from the web page.** Press *Sign in to Codex*, type the short code shown on the page into OpenAI's sign-in page, and Apiary updates by itself. Nothing to paste back, no terminal needed. Success is confirmed with Codex's own login check.

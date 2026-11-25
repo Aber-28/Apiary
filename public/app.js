@@ -1231,7 +1231,7 @@ function connCard(c, full = false) {
   const body = isGh && c.method === 'cli' ? ghBody() : c.method === 'cli'
     ? h('div', {}, h('p', {}, c.cli.found ? h('span', {}, h('span', { class: 'pill ok' }, 'Found'), ' ', h('span', { class: 'mono hint' }, `${c.cli.path}${c.cli.version ? ' · ' + c.cli.version : ''}`)) : h('span', {}, h('span', { class: 'pill err' }, 'Not installed'))),
       c.cli.found ? null : h('div', {}, isGh ? null : h('div', { class: 'kv', style: 'margin-bottom:6px' }, installBtn(c.id, () => route())), h('p', { class: 'hint' }, isGh ? 'Install it:' : 'Or run it yourself:'), cmdBox(info.install)),
-      !isGh && c.id === 'claude' && c.cli.found ? aiSignIn(c) : null,
+      !isGh && (c.id === 'claude' || c.id === 'codex') && c.cli.found ? aiSignIn(c) : null,
       h('p', { class: 'hint' }, isGh ? 'Sign in once in a terminal. Apiary reuses that login:' : 'Or log in once in a terminal. Apiary reuses that login — no key needed:'), cmdBox(info.login),
       isGh && c.status ? h('p', { class: 'hint' }, c.status.ok ? `Signed in as ${c.status.account || 'unknown'}` : c.status.reason) : null)
     : h('div', {}, h('label', { class: 'f' }, info.key, key, h('small', {}, isGh ? h('span', {}, 'Needs “repo” access. Stored only on this machine in a private file. ', h('a', { href: 'https://github.com/settings/tokens/new?scopes=repo&description=Apiary', target: '_blank', rel: 'noopener', style: 'text-decoration:underline' }, 'Create one on GitHub (the form is filled in for you)')) : `From ${info.keyUrl}. Stored only on this machine in a private file. Web agents can chat but cannot edit files.`)), model ? h('label', { class: 'f' }, 'Model', model) : null,

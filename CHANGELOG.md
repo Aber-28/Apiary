@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.0
+
+- **Agents can ask to save a secret they made.** An agent names the secret and its kind, and you get a request on the Approvals page. You type the value there and save it to the vault. The value is never given to the agent, the chat or the request, and a denied request saves nothing. Agents cannot read or change existing secrets this way.
+
 ## 0.33.0
 
 - **Chat looks like a messaging app.** Your messages are on the right. Each agent is on the left in its own colour, with its name. A handoff reads as @Name: text (for example @Neo: do A, B, C). Task codes such as T-0012 are links that open the task.

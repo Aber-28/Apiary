@@ -1506,6 +1506,43 @@ let orgIds;
       assert.throws(() => engine.setTrust(cagent.id, bad), /0 to 5/, 'F1: rejects ' + JSON.stringify(bad));
     assert.equal(engine.setTrust(cagent.id, { level: '2' }).trust, 2, 'F1: a digit string is accepted');
   }
+  { // agents may ask to save a secret they made; the person types the value; it never sits on the request or in the chat
+    const { parseSpawns: ps3 } = await import('../src/engine.js');
+    const good = ps3('```apiary-newsecret\n{"name":"Example Save Login","type":"login","username":"example-user","why":"for the example site"}\n```');
+    assert.equal(good.newSecrets.length, 1); assert.equal(good.newSecrets[0].name, 'Example Save Login');
+    const bad = ps3('```apiary-newsecret\n{"name":"Example Bad","value":"example-value-xyz"}\n```');
+    assert.equal(bad.newSecrets.length, 0, 'a block with a value is refused'); assert.ok(bad.errors.some((e) => /Never put the value/.test(e)));
+    assert.ok(!JSON.stringify(bad).includes('example-value-xyz'), 'the value is not kept anywhere');
+    const sag = engine._add({ id: 'newsec1', name: 'Secret saver', role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: 'newsec1' });
+    const tick = () => new Promise((r) => setImmediate(r));
+    const nots = [];
+    const flow = engine._newSecret(sag, [{ name: 'Example Save Login', type: 'login', username: 'example-user', why: 'for the example site' }], nots);
+    await tick();
+    const pend = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'newsecret' && r.agentId === sag.id);
+    assert.ok(pend, 'the person is asked');
+    assert.ok(!JSON.stringify(pend).includes('example-value-456'), 'no value on the request yet');
+    // a wrong or empty value is refused and the request stays open
+    assert.throws(() => engine.decide(pend.id, { decision: 'approve', secret: { name: 'Example Save Login', type: 'login', username: 'example-user', value: '' } }), /Enter the secret value|value/);
+    assert.equal(engine.store.data.approvals[pend.id].status, 'pending', 'still waiting after a failed save');
+    engine.decide(pend.id, { decision: 'approve', secret: { name: 'Example Save Login', type: 'login', username: 'example-user', value: 'example-value-456' } });
+    await flow;
+    assert.ok(engine.vault.byName('Example Save Login'), 'the secret is in the vault');
+    assert.ok(nots.some((n) => /saved "Example Save Login"/.test(n)), 'the agent is told it was saved, not the value');
+    assert.ok(!JSON.stringify(engine.store.data.approvals).includes('example-value-456'), 'the value is not on any request');
+    assert.ok(!JSON.stringify(engine.messages(sag.id)).includes('example-value-456'), 'the value is not in the chat');
+    // a name already in the vault is not asked again
+    const dup = [];
+    await engine._newSecret(sag, [{ name: 'Example Save Login', type: 'login' }], dup);
+    assert.ok(dup.some((n) => /already a secret/.test(n)));
+    // a denied request saves nothing
+    const denied = [];
+    const df = engine._newSecret(sag, [{ name: 'Example Denied Login', type: 'token' }], denied);
+    await tick();
+    const dp = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.kind === 'newsecret' && r.secretName === 'Example Denied Login');
+    engine.decide(dp.id, { decision: 'deny', note: 'no' });
+    await df;
+    assert.equal(engine.vault.byName('Example Denied Login'), undefined, 'nothing saved on deny');
+  }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);
     assert.equal(engine.setTrustAll({ level: 2 }).count, Object.keys(engine.agents).length);

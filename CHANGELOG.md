@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.3
+
+- **Task conversations show times.** Each message on a task page shows when it was sent, so the latest is easy to see.
+
 ## 0.37.2
 
 - **Fix:** the Copy buttons work when Apiary is opened over plain http on the local network. Before, the browser's clipboard was not available there, so Copy did nothing.

@@ -63,7 +63,18 @@ const askSecret = (title, label, { key = false } = {}) => new Promise((resolve) 
   dlg.addEventListener('close', () => { const v = dlg.returnValue === 'ok' ? inp.value : null; inp.value = ''; dlg.remove(); resolve(v || null); });
   document.body.append(dlg); dlg.showModal(); (key ? file : inp).focus();
 });
-const copy = (text) => navigator.clipboard?.writeText(text).then(() => toast('Copied'), () => toast('Copy failed', true));
+// Copies text. The clipboard API only works on secure pages (https or localhost), and Apiary is often opened over
+// plain http on the local network, so there is a fallback that uses a hidden text box.
+const copy = async (text) => {
+  const value = String(text ?? '');
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(value); toast('Copied'); return; } } catch { /* use the fallback */ }
+  const ta = document.createElement('textarea');
+  ta.value = value; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.top = '0'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, value.length);
+  let ok = false; try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  if (ok) toast('Copied'); else toast('Could not copy. Select the text and press Ctrl+C.', true);
+};
 const cmdBox = (text) => h('div', { class: 'cmd mono' }, h('code', {}, text), h('button', { type: 'button', onclick: () => copy(text) }, 'Copy'));
 const ago = (ts) => { const s = (Date.now() - ts) / 1000; return s < 60 ? 'just now' : s < 3600 ? `${Math.floor(s / 60)} min ago` : s < 86400 ? `${Math.floor(s / 3600)} h ago` : `${Math.floor(s / 86400)} d ago`; };
 const STATUS = { idle: ['ok', 'Idle'], working: ['work', 'Working'], waiting: ['info', 'Waiting for team'], error: ['err', 'Error'] };
@@ -1447,7 +1458,7 @@ async function pageTask(id) {
       t.log?.length ? h('details', { style: 'max-width:760px' }, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null);
     const msgs = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []) : [];
     const shown = msgs.filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14);
-    convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:6px 0;white-space:pre-wrap' }, h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
+    convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:8px 0;white-space:pre-wrap' }, h('small', { class: 'hint', style: 'display:block' }, m.ts ? new Date(m.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''), h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
   };
   await load();
   page = { shows: () => true, update: debounce((ev) => { if (['message', 'agent', 'activity'].includes(ev.type)) load().catch(() => {}); }) };

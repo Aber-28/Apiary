@@ -23,6 +23,8 @@ Start it with `apiary start --lan`. This enables an access token and accepts req
 
 **Plain http is not encrypted.** On your own computer (`localhost`) that does not matter. From another device, the access link, API keys and vault passphrase cross the network readable. Prefer an SSH tunnel (`ssh -L 7777:localhost:7777 you@host`), Tailscale, or an https reverse proxy in front of Apiary. Apiary shows "Not encrypted" in the top bar when you are on plain http from another address.
 
+Run `scripts/security-check.sh` for an automatic check, or see the [security checklist](security-checklist.md).
+
 ## Reporting a problem
 
 Open a private security advisory on the GitHub repository.

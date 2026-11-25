@@ -1,50 +1,70 @@
-# Apiary
+<h1 align="center">Apiary</h1>
+<p align="center"><b>A team of AI coding agents, run from one simple chat.</b><br>
+Claude Code and Codex, a lead agent that hires specialists, and you approving the important steps.</p>
 
-A simple, chat-first web app for Linux that runs teams of **Claude Code** and **Codex** agents. One lead agent, as many sub-agents as it needs, one chat, and GitHub built in.
+<p align="center"><img src="docs/images/demo.gif" alt="A short tour of Apiary" width="800"></p>
 
-## Install (Linux)
+## What it is
 
-Needs Node.js 20+ and git.
+Apiary is a web app that runs on your own Linux computer or server. You describe what you want in a chat. A lead agent (the "CEO") makes a plan, brings in specialists (a network engineer, a security reviewer, a researcher…), and they do the work in separate branches while you stay in charge: nothing important happens until you approve it.
+
+It uses the **Claude Code** and **Codex** logins you already have. There is nothing to host in the cloud, no account with us, and no dependencies to install beyond Node.js.
+
+## Install
+
+Linux with Node.js 20+ and git (the installer can fetch them on Debian/Ubuntu):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Aber-28/Apiary/main/install.sh | bash
 ```
 
-The installer starts Apiary and prints where to open it. On a server, answer **y** when it asks about other devices (or add `-s -- --lan` after `bash`) and open the private link it prints.
+Then open <http://127.0.0.1:7777>. A short setup wizard finds your AI logins and helps you sign in. The installer explains each step and only installs Apiary. [Read it first](install.sh) if you like.
 
-The setup wizard opens on first run: it detects your AI logins, helps you sign in, lets you pick default models and can start Apiary automatically at login.
+## What you get
 
-Open <http://127.0.0.1:7777> (on a VM or server? run `apiary start --lan` and open the link it prints from your own computer), go to **Connections**, and connect Claude, Codex and GitHub through your terminal or the web.
+| | |
+|---|---|
+| **Chat-first projects** | Every project is its own space with files, a team and an organisation chart. |
+| **Plans you approve** | Review the plan, the hires and the merges before anything runs. |
+| **Agents that cooperate** | They message each other, hand work over, and check with the right specialist first. |
+| **Reviewer agents** | A second agent reviews finished work and sends it back until it passes. |
+| **Parallel work** | Several agents work at once; merges are queued and conflicts fix themselves. |
+| **Recovery** | Failed jobs retry, switch between Claude and Codex, and explain themselves in plain words. |
+| **Infrastructure map** | Connect your servers, test the links and see how everything fits together. |
+| **Secrets vault** | Logins live in an encrypted vault and are redacted from chat, logs and exports. |
+| **Memory** | Agents remember last night, last week and last year. |
+| **Eleven themes** | Dark, Bright, Matrix, Glass, Nord, Tokyo Night, Dracula and more. |
 
-Prefer to do it by hand?
+<p align="center">
+<img src="docs/images/chat.png" alt="Chat with a team of agents" width="49%"> <img src="docs/images/map.png" alt="Infrastructure map" width="49%"><br>
+<img src="docs/images/approvals.png" alt="Approving a plan" width="49%"> <img src="docs/images/tasks.png" alt="Tasks with clickable IDs" width="49%">
+</p>
 
-```bash
-git clone https://github.com/Aber-28/Apiary.git ~/.local/share/apiary
-ln -sf ~/.local/share/apiary/bin/apiary.js ~/.local/bin/apiary
-```
+All screenshots use made-up projects and example addresses.
 
-## Highlights
+## Safe by default
 
-* Chat-first projects with a live team tree; dark and light mode
-* Claude and Codex together, via your CLI logins or API keys
-* Approve or deny new sub-agents and merges; review the diff first
-* Agents message each other and hand work across the team
-* A main chat for everyday questions; every project is its own space with its own files, team and organisation chart
-* Memory for every agent: tonight, yesterday, last week, last month and last year are recalled automatically
-* Teams with a CEO: work goes to the right specialist, who checks with the others first; hiring suggestions come with reasons and ready-made profiles
-* Git branch + checkout per agent, auto-commits, merges, pull requests
-* Take over any agent in your own terminal
-* Local only by default; zero dependencies
+- Listens only on your own computer. It will not open to the network without an access token.
+- Agents ask before creating sub-agents, merging, or running commands that change things.
+- New projects use **Safe** access; **Full access** is a per-project choice.
+- Work happens in separate git branches, and nothing is pushed until you open a pull request.
+- Passwords and keys go in an AES-256-GCM vault, never into chat.
+
+Run `bash scripts/security-check.sh` for a self-test with a report you can share. More in [SECURITY.md](SECURITY.md) and the [security checklist](docs/reference/security-checklist.md).
+
+Agents can run commands as your user. Try Apiary on a machine or virtual machine you are happy to experiment on first, and never expose it directly to the internet.
 
 ## Documentation
 
-Full docs (install, usage, reference, security) are in [`docs/`](docs/README.md) and published on GitBook.
+Full guides (install, using Apiary, reference, security) are in [`docs/`](docs/README.md) and online at <https://aber-28.gitbook.io/aber-28-docs/>.
+
+## Licence
+
+**Free to use, source visible, not open source.** You can use Apiary for yourself or your team and read the code. You may not copy it, sell it or build a competing product from it. See [LICENSE](LICENSE) for the exact terms.
 
 ## Development
 
 ```bash
-npm test
-APIARY_MOCK=1 npm start
+npm test                    # run the tests
+APIARY_MOCK=1 npm start     # try it with a pretend AI
 ```
-
-Free to use, not open for modification: see [LICENSE](LICENSE). Documentation: https://aber-28.gitbook.io/aber-28-docs/

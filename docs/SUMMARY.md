@@ -76,6 +76,7 @@
 * [Configuration](reference/configuration.md)
 * [HTTP API](reference/api.md)
 * [Security](reference/security.md)
+* [Security checklist and self-check](reference/security-checklist.md)
 * [Troubleshooting](reference/troubleshooting.md)
 
 ## Development

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.48.0
+
+- **Security self-check.** `bash scripts/security-check.sh` prints one plain report: who can reach Apiary, who can read its files, and whether a fake secret ever leaks into the files, log, export or pages. It changes nothing and the report is safe to share.
+- New **Security checklist** page in the docs; `SECURITY.md` now says what Apiary does by default.
+- A friendlier README with screenshots and a short tour, all made from invented data.
+- Fixed: the Library window's title and text sat against the edge.
+
 ## 0.47.0
 
 - **The map is redesigned.** Arrows are now smooth right-angle lines with rounded corners that go around boxes instead of through them. Where two arrows cross, one hops over the other with a small bump.

@@ -297,7 +297,7 @@ assert.ok(engine2.agents[lead2.id]);
   assert.equal(note.project, pkey); assert.equal(note.agent, null);
   assert.match(engine.memory.context('someone-else', pkey, 'x'), /51820/); assert.doesNotMatch(engine.memory.context('someone-else', '/other', 'x'), /51820/);
   // API: add / search / preview / delete
-  const added = (await call('/api/memory', 'POST', { text: 'Malcolm prefers short answers', scope: 'global' })).body;
+  const added = (await call('/api/memory', 'POST', { text: 'Sam prefers short answers', scope: 'global' })).body;
   assert.equal((await call('/api/memory', 'POST', { text: 'x', scope: 'agent' })).status, 400, 'agent notes need an agent');
   assert.ok((await call('/api/memory?q=short+answers')).body.items.some((m) => m.id === added.id));
   assert.match((await call(`/api/memory/preview/${ml.id}`)).body.text, /short answers/);
@@ -1934,8 +1934,8 @@ let orgIds;
   // no account: open as before
   assert.equal((await fetch(b + '/api/state')).status, 200);
   assert.equal((await post('/api/account', { username: 'bob', password: 'short' })).status, 400, 'weak password refused');
-  assert.equal((await post('/api/account', { username: 'malcolm', password: 'malcolm-is-the-password' })).status, 400, 'password containing the username refused');
-  const made = await post('/api/account', { username: 'malcolm', password: 'purple lamp seven rivers' });
+  assert.equal((await post('/api/account', { username: 'sam', password: 'sam-is-the-password' })).status, 400, 'password containing the username refused');
+  const made = await post('/api/account', { username: 'sam', password: 'purple lamp seven rivers' });
   assert.equal(made.status, 200);
   const setCookie = made.headers.get('set-cookie'); assert.match(setCookie, /HttpOnly/); assert.match(setCookie, /SameSite=Strict/);
   assert.ok(!JSON.stringify(fsRead(path.join(tmp, 'auth-test.json'), 'utf8')).includes('purple lamp'), 'the password is not stored');
@@ -1947,12 +1947,12 @@ let orgIds;
   assert.equal((await fetch(b + '/login')).status, 200); assert.equal((await fetch(b + '/login.js')).status, 200);
   assert.equal((await fetch(b + '/app.js')).status, 401, 'the app itself is behind the sign-in');
   // wrong then right
-  const bad = await post('/api/login', { username: 'malcolm', password: 'nope nope nope' }); assert.equal(bad.status, 401);
-  const ok = await post('/api/login', { username: 'Malcolm', password: 'purple lamp seven rivers' }); assert.equal(ok.status, 200);
+  const bad = await post('/api/login', { username: 'sam', password: 'nope nope nope' }); assert.equal(bad.status, 401);
+  const ok = await post('/api/login', { username: 'Sam', password: 'purple lamp seven rivers' }); assert.equal(ok.status, 200);
   const cookie = ok.headers.get('set-cookie').split(';')[0];
   assert.equal((await fetch(b + '/api/state', { headers: { cookie } })).status, 200);
   assert.equal((await fetch(b + '/api/state', { headers: { cookie: cookie.slice(0, -3) + 'abc' } })).status, 401, 'a forged cookie is refused');
-  assert.equal((await fetch(b + '/api/state', { headers: { cookie } }).then((r) => r.json())).account.username, 'malcolm');
+  assert.equal((await fetch(b + '/api/state', { headers: { cookie } }).then((r) => r.json())).account.username, 'sam');
   // changing needs the current password and signs everyone else out
   assert.equal((await post('/api/account', { password: 'another long phrase here' }, { cookie })).status, 403);
   const ch = await post('/api/account', { current: 'purple lamp seven rivers', password: 'another long phrase here' }, { cookie });
@@ -1961,7 +1961,7 @@ let orgIds;
   const fresh = ch.headers.get('set-cookie').split(';')[0];
   assert.equal((await fetch(b + '/api/state', { headers: { cookie: fresh } })).status, 200);
   // too many wrong tries are slowed down
-  let last; for (let i = 0; i < 6; i++) last = await post('/api/login', { username: 'malcolm', password: 'wrong wrong ' + i });
+  let last; for (let i = 0; i < 6; i++) last = await post('/api/login', { username: 'sam', password: 'wrong wrong ' + i });
   assert.equal(last.status, 429); assert.match((await last.json()).error, /Too many/);
   // a login page with a cross-site origin is blocked
   assert.equal((await post('/api/login', { username: 'x', password: 'y' }, { origin: 'http://evil.example' })).status, 403);

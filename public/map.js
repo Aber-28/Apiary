@@ -283,21 +283,22 @@ export function infraMap(items, types, onOpen, deps) {
   groupsFirst.forEach((i) => svgEl.append(drawBox(i)));
   const layer = mk('g', { class: 'edges' }); svgEl.append(layer);
   leaves.forEach((i) => svgEl.append(drawBox(i)));
+  const labelLayer = mk('g', { class: 'edge-labels', style: 'pointer-events:none' }); svgEl.append(labelLayer);
   // group boxes sit under the arrows, so their children are drawn after them: move leaf children above the arrows already (leaves come last)
   links.forEach((e) => {
-    const g = mk('g', { class: 'edge', 'data-from': e.from, 'data-to': e.to });
+    const g = mk('g', { class: 'edge', 'data-from': e.from, 'data-to': e.to }); let label = null;
     const d = linkPath(e.points, e.segs), a = box.get(e.from).item, c = box.get(e.to).item, tip = `${a.name} → ${c.name}${e.label ? ': ' + e.label : ''}`;
     g.append(mk('path', { d, class: 'hit', style: 'fill:none;stroke:transparent;stroke-width:12' }, mk('title', {}, document.createTextNode(tip))));
     g.append(mk('path', { d, class: 'line', 'marker-end': 'url(#arr)', style: 'fill:none;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round' }));
-    if (e.label) { const s = labelSpot(e.points); if (s) { const lt = txt(e.label, s[0], s[1] + (s[2] ? -6 : 4), 'var(--muted)', 11, 500, 150, 9); lt.setAttribute('text-anchor', 'middle'); lt.style.cssText += ';paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round'; g.append(lt); } }
-    layer.append(g); edges.push({ g, from: e.from, to: e.to });
+    if (e.label) { const s = labelSpot(e.points); if (s) { const lt = txt(e.label, s[0], s[1] + (s[2] ? -6 : 4), 'var(--muted)', 11, 500, 150, 9); lt.setAttribute('text-anchor', 'middle'); lt.style.cssText += ';paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round'; labelLayer.append(lt); label = lt; } }
+    layer.append(g); edges.push({ g, from: e.from, to: e.to, label });
   });
   // hover or focus a box and its arrows light up while the rest fade
   const light = (id) => {
-    const on = new Set([id]); edges.forEach((e) => { const hit = e.from === id || e.to === id; e.g.classList.toggle('on', hit); if (hit) { on.add(e.from); on.add(e.to); } });
+    const on = new Set([id]); edges.forEach((e) => { const hit = e.from === id || e.to === id; e.g.classList.toggle('on', hit); if (e.label) e.label.style.opacity = hit ? '1' : '0.1'; if (hit) { on.add(e.from); on.add(e.to); } });
     nodes.forEach((g, k) => g.classList.toggle('dim', !on.has(k))); svgEl.classList.add('hl');
   };
-  const unlight = () => { svgEl.classList.remove('hl'); edges.forEach((e) => e.g.classList.remove('on')); nodes.forEach((g) => g.classList.remove('dim')); };
+  const unlight = () => { svgEl.classList.remove('hl'); edges.forEach((e) => { e.g.classList.remove('on'); if (e.label) e.label.style.opacity = ''; }); nodes.forEach((g) => g.classList.remove('dim')); };
   nodes.forEach((g, id) => { g.addEventListener('mouseenter', () => light(id)); g.addEventListener('mouseleave', unlight); g.addEventListener('focus', () => light(id)); g.addEventListener('blur', unlight); });
 
   // move and zoom: the map sits in a scrollable window. Drag to move, slider or Ctrl + scroll to zoom

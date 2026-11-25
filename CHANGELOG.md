@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.39.0
+
+- **Discovery.** Press *Discover* on a server and Apiary lists the virtual machines and containers on it over SSH: Proxmox, KVM/libvirt, ESXi, XCP-ng, Hyper-V, Docker, LXC, Incus and LXD.
+- **Always read-only.** Only listing commands run, however often you press it.
+- **You decide.** Each new find waits for Yes or No (or *Yes to all*). No means it is dropped and comes back the next time you press Discover.
+- Known items get their running/stopped state refreshed, and ones no longer found are reported.
+
 ## 0.38.0
 
 - **Infrastructure map: text stays inside the boxes.** Names and addresses shrink to fit and are shortened with ... when still too long; hover a box to read all of it.

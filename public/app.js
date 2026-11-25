@@ -1975,6 +1975,24 @@ function infraMap(items, types, onOpen) {
   return { el: h('div', {}, bar, scroller), links: n };
 }
 
+// What Discovery found, in plain words.
+function discoveryDialog(r, after) {
+  const li = (t) => h('li', {}, t), n = r.added.length;
+  const dlg = h('dialog', { 'aria-labelledby': 'disc-title' }, h('div', {},
+    h('h2', { id: 'disc-title' }, `Discovery on ${r.host}`),
+    r.nothing ? h('p', {}, 'Nothing recognised on this host. Apiary looked for Proxmox, KVM and libvirt, VMware ESXi, XCP-ng, Hyper-V, Docker, LXC, Incus and LXD. If you expected something, check the login is allowed to list it.')
+      : h('p', { style: 'font-weight:600' }, n ? `${n} new ${n === 1 ? 'thing' : 'things'} found. Each one is waiting on this page for your Yes or No.` : 'Nothing new found.'),
+    r.detected.length ? h('ul', {}, ...r.detected.map((d) => li(d.ok ? `${d.label}: ${d.count} found` : `${d.label}: could not list (${d.note || 'unknown reason'})`))) : null,
+    n ? h('p', { class: 'hint' }, `New: ${r.added.slice(0, 12).join(', ')}${n > 12 ? ` and ${n - 12} more` : ''}`) : null,
+    r.known || r.waiting.length ? h('p', { class: 'hint' }, `${r.known} already on your map${r.waiting.length ? `, ${r.waiting.length} still waiting for your answer` : ''}.`) : null,
+    r.missing.length ? h('p', { class: 'hint' }, `Not found this time (nothing was removed): ${r.missing.join(', ')}`) : null,
+    ...r.notes.map((x) => h('p', { class: 'hint' }, x)),
+    h('p', { class: 'hint' }, 'Discovery only reads. Nothing was changed on the host. Anything you answer No to will show up again the next time you press Discover.'),
+    h('div', { class: 'dlg-actions' }, h('button', { class: 'btn primary', type: 'button', onclick: () => dlg.close() }, 'Done'))));
+  dlg.addEventListener('close', () => { dlg.remove(); after(); });
+  document.body.append(dlg); dlg.showModal();
+}
+
 async function pageInfra(tab) {
   crumbs('Infrastructure', tab === 'map' ? 'Map' : 'Devices');
   const draw = async () => {
@@ -1991,6 +2009,8 @@ async function pageInfra(tab) {
       h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
     const tabs = h('div', { class: 'tabs', role: 'tablist' }, [['devices', 'Devices', '#/infrastructure'], ['map', 'Map', '#/infrastructure/map']].map(([k, t, href]) => h('a', { role: 'tab', 'aria-selected': String(tab === k), class: 'btn', style: 'text-decoration:none', href }, t)));
     const proposed = items.filter((i) => i.state === 'proposed'), real = items.filter((i) => i.state !== 'proposed');
+    const fromDisc = proposed.filter((i) => i.by === 'Discovery');
+    const allBar = fromDisc.length >= 3 ? [h('div', { class: 'card', style: 'border-style:dashed' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('b', {}, `${fromDisc.length} things found by Discovery are waiting`), h('button', { class: 'btn primary', onclick: guard(async () => { if (!confirm(`Add all ${fromDisc.length} to your map?`)) return; for (const i of fromDisc) await api(`/api/infra/${i.id}/confirm`, 'POST', { ok: true }); draw(); }) }, 'Yes to all')), h('p', { class: 'hint' }, 'Or answer each one below. Anything you say No to comes back the next time you press Discover.'))] : [];
     const cards = proposed.map((i) => {
       const ans = h('input', { type: 'text', placeholder: 'Your answer', 'aria-label': `Answer about ${i.name}`, onkeydown: (e) => { if (e.key === 'Enter') send(); } });
       const send = guard(async () => { await api(`/api/infra/${i.id}/answer`, 'POST', { text: ans.value }); draw(); });
@@ -2007,13 +2027,14 @@ async function pageInfra(tab) {
     }
     const rows = real.map((i) => {
       const st = i.status ? h('span', { class: 'pill ' + (i.status.ok ? 'ok' : 'err'), title: `${ago(i.status.at)}` }, i.status.ok ? 'Reachable' : 'Not reachable') : h('span', { class: 'pill' }, 'Not tested');
+      const discover = i.secret ? h('button', { class: 'btn', title: 'Reads which virtual machines and containers this device runs. It never changes anything.', onclick: guard(async (e) => { const b = e.currentTarget; b.disabled = true; b.textContent = 'Looking…'; try { discoveryDialog(await api(`/api/infra/${i.id}/discover`, 'POST', {}), draw); } finally { b.disabled = false; b.textContent = 'Discover'; } }) }, 'Discover') : null;
       const test = h('button', { class: 'btn', onclick: guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { await api(`/api/infra/${i.id}/test`, 'POST', {}); } finally { draw(); } }) }, 'Test connection');
       return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', {}, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
         h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
         i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? h('p', { style: 'white-space:pre-wrap;margin:4px 0' }, i.notes) : null,
-        h('div', { class: 'formrow', style: 'margin-top:6px' }, test, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
+        h('div', { class: 'formrow', style: 'margin-top:6px' }, test, discover, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
     });
-    view.replaceChildren(head, tabs, ...cards, rows.length ? rows : (cards.length ? [] : h('div', { class: 'card empty' }, 'Nothing here yet. Add your Proxmox host, Raspberry Pi, VMs or websites, or press Help me map it and the CEO will ask you a few questions.')));
+    view.replaceChildren(head, tabs, ...allBar, ...cards, rows.length ? rows : (cards.length ? [] : h('div', { class: 'card empty' }, 'Nothing here yet. Add your Proxmox host, Raspberry Pi, VMs or websites, or press Help me map it and the CEO will ask you a few questions.')));
   };
   await draw(); page = { shows: () => true, update: (ev) => ev.type === 'infra' && !document.querySelector('dialog[open]') && draw() };
 }

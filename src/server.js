@@ -447,11 +447,12 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- infrastructure map -----
       if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
       if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.audit.add('infra', { actor: 'You', action: 'added a device', detail: it.name || it.id }); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
-      if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer))?$/))) {
+      if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer|discover))?$/))) {
         const [, id, act] = r;
         if (req.method === 'PUT' && !act) { const it = engine.infra.update(id, await readBody(req)); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
         if (req.method === 'DELETE' && !act) { engine.audit.add('infra', { actor: 'You', action: 'removed a device', detail: id }); engine.infra.remove(id); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && act === 'test') { const it = await engine.infra.test(id); engine.audit.add('infra', { actor: 'You', action: 'tested a connection', detail: `${it.name || id}: ${it.status || ''}` }); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
+        if (req.method === 'POST' && act === 'discover') { await readBody(req); return json(res, 200, await engine.discover(id)); }
         if (req.method === 'POST' && act === 'confirm') { const b = await readBody(req); engine.infra.confirm(id, b.ok !== false); engine.emit('event', { type: 'infra' }); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && act === 'answer') { const it = engine.infra.answer(id, (await readBody(req)).text); engine.emit('event', { type: 'infra' }); return json(res, 200, it); }
       }

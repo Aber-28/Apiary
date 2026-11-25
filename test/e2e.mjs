@@ -1827,6 +1827,122 @@ exit 0
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /Sign in with GitHub/); assert.match(app, /Install GitHub tool for me/);
 }
 
+// ---- Discovery: list what a host runs over SSH (fake ssh, read-only) ----
+{
+  const fs = await import('node:fs');
+  const D = await import('../src/discovery.js');
+  // 1. The commands are pinned. Anything that could change a host fails here.
+  const ALLOWED = [/^qm list$/, /^pct list$/, /^virsh -c qemu:\/\/\/system list --all$/, /^vim-cmd vmsvc\/getallvms$/, /^xe vm-list is-control-domain=false params=name-label,power-state$/,
+    /^docker ps -a --format \{\{\.Names\}\}\|\{\{\.State\}\}\|\{\{\.Image\}\}$/, /^lxc-ls -f$/, /^incus list --format csv -c ns4$/, /^lxc list --format csv -c ns4$/, /^Get-VM$/];
+  assert.equal(D.COMMANDS.length, ALLOWED.length);
+  for (const c of D.COMMANDS) assert.ok(ALLOWED.some((re) => re.test(c)), `command is not on the read-only list: ${c}`);
+  const script = D.posixScript(), ps = D.powershellScript();
+  const execLines = script.split('\n').filter((l) => /^if command -v/.test(l));
+  assert.equal(execLines.length, D.DETECTORS.length, 'one guarded listing line per detector');
+  for (const l of execLines) assert.match(l.replace(/'[^']*'/g, "'x'"), /^if command -v (\S+) >\/dev\/null 2>&1; then run \S+ \1 [^;&|<>`$()]*; fi$/, `no chaining or redirects: ${l}`);
+  assert.ok(!/\b(rm|reboot|shutdown|poweroff|start|stop|destroy|delete|kill|create|migrate|restore|rollback|snapshot|exec|prune|install|upgrade|write|edit|set)\b/i.test(execLines.join('\n').replace(/\bis-control-domain\b/g, '')), 'no changing verbs in the script');
+  assert.ok(!/Set-|Start-|Stop-|Remove-|New-|Restart-/.test(ps), 'PowerShell only reads');
+  // 2. Parsers on realistic output
+  const P = (tag, text) => D.BY_TAG.get(tag).parse(text);
+  assert.deepEqual(P('proxmox-vm', '      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID\n       100 web-proxy            running    2048              32.00 1234\n       101 db-main              stopped    4096              64.00 0\n').map((x) => [x.name, x.status]), [['web-proxy', 'running'], ['db-main', 'stopped']]);
+  assert.deepEqual(P('proxmox-ct', 'VMID       Status     Lock         Name\n200        running                 dns-ct\n201        stopped    backup       old-ct\n').map((x) => [x.name, x.status]), [['dns-ct', 'running'], ['old-ct', 'stopped']]);
+  assert.deepEqual(P('libvirt', ' Id   Name        State\n------------------------\n 3    kvm-guest   running\n -    kvm-off     shut off\n').map((x) => [x.name, x.status]), [['kvm-guest', 'running'], ['kvm-off', 'shut off']]);
+  assert.deepEqual(P('esxi', 'Vmid   Name         File                          Guest OS   Version   Annotation\n1      esx-web      [datastore1] esx-web/esx-web.vmx   ubuntu64Guest   vmx-19\n2      Old Box 2    [datastore1] Old Box 2/Old Box 2.vmx   otherGuest   vmx-14\n').map((x) => x.name), ['esx-web', 'Old Box 2']);
+  assert.deepEqual(P('xcp', 'name-label ( RW): xen-a\npower-state ( RO): running\n\nname-label ( RW): xen-b\npower-state ( RO): halted\n').map((x) => [x.name, x.status]), [['xen-a', 'running'], ['xen-b', 'halted']]);
+  assert.deepEqual(P('docker', 'nginx|running|nginx:latest\nredis|exited|redis:7\n').map((x) => [x.name, x.status]), [['nginx', 'running'], ['redis', 'exited']]);
+  assert.deepEqual(P('lxc', 'NAME  STATE   AUTOSTART GROUPS IPV4      IPV6 UNPRIVILEGED\nweb1  RUNNING 0         -      10.0.3.5  -    false\nweb2  STOPPED 0         -      -         -    false\n').map((x) => [x.name, x.status, x.address]), [['web1', 'running', '10.0.3.5'], ['web2', 'stopped', '']]);
+  assert.deepEqual(P('incus', 'c1,RUNNING,10.0.0.7 (eth0)\nc2,STOPPED,\n').map((x) => [x.name, x.address]), [['c1', '10.0.0.7'], ['c2', '']]);
+  assert.deepEqual(P('hyperv', 'win-vm-1|Running\nwin-vm-2|Off\n').map((x) => [x.name, x.status]), [['win-vm-1', 'running'], ['win-vm-2', 'off']]);
+  assert.match(D.explainSsh('Permission denied (publickey,password).', 255), /refused the login/);
+  assert.match(D.explainSsh('ssh: connect to host x port 22: Connection refused', 255), /refused the connection/);
+
+  // 3. End to end with a fake ssh on the PATH. It records what it was asked to run and answers from a mode file.
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-disc-')), bin = path.join(dir, 'bin'); fs.mkdirSync(bin);
+  const modeFile = path.join(dir, 'mode'), scriptFile = path.join(dir, 'script'), calls = path.join(dir, 'calls');
+  fs.writeFileSync(modeFile, 'full');
+  const SECTIONS = {
+    full: `@@APIARY begin
+@@APIARY proxmox-vm rc=0
+      VMID NAME                 STATUS     MEM(MB)    BOOTDISK(GB) PID
+       100 web-proxy            running    2048              32.00 1234
+       101 db-main              stopped    4096              64.00 0
+@@APIARY proxmox-ct rc=0
+VMID       Status     Lock         Name
+       200        running                 dns-ct
+@@APIARY docker rc=0
+nginx|running|nginx:latest
+@@APIARY incus rc=1
+Error: permission denied for secret-hunter2
+@@APIARY end
+`,
+  };
+  SECTIONS.fewer = SECTIONS.full.replace(/ {7}101 db-main.*\n/, '');
+  SECTIONS.none = '@@APIARY begin\n@@APIARY end\n';
+  SECTIONS.windows = '@@APIARY begin\n@@APIARY hyperv rc=0\nwin-vm-1|Running\n@@APIARY end\n';
+  fs.writeFileSync(path.join(dir, 'sections.json'), JSON.stringify(SECTIONS));
+  fs.writeFileSync(path.join(bin, 'ssh'), `#!/bin/sh
+mode=$(cat "${modeFile}"); script=$(cat); last=""; for a in "$@"; do last="$a"; done
+echo "$*" >> "${calls}"; printf '%s' "$script" > "${scriptFile}"
+case "$mode" in
+  down) echo "ssh: connect to host example-host port 22: Connection refused" >&2; exit 255;;
+  windows) case "$*" in *"sh -s"*) echo "'sh' is not recognized as an internal or external command" >&2; exit 1;; esac;;
+esac
+node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(s[process.argv[2]]||"")' "${path.join(dir, 'sections.json')}" "$mode"
+`, { mode: 0o755 });
+  const oldPath = process.env.PATH; process.env.PATH = bin + path.delimiter + oldPath;
+  try {
+    await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+    const sec = await call('/api/vault/secrets', 'POST', { name: 'Disc login', value: 'secret-hunter2', type: 'ssh', username: 'root', host: '10.0.0.5' });
+    assert.ok([200, 201].includes(sec.status));
+    const host = (await call('/api/infra', 'POST', { name: 'disc-host', type: 'proxmox', address: '10.0.0.5', secret: 'Disc login' })).body;
+    const noLogin = (await call('/api/infra', 'POST', { name: 'disc-nologin', type: 'server', address: '10.0.0.9' })).body;
+    assert.equal((await call(`/api/infra/${noLogin.id}/discover`, 'POST', {})).status, 400, 'a device without a login cannot be scanned');
+    const r1 = await call(`/api/infra/${host.id}/discover`, 'POST', {});
+    assert.equal(r1.status, 200, JSON.stringify(r1.body));
+    assert.deepEqual([...r1.body.added].sort(), ['db-main', 'dns-ct', 'nginx', 'web-proxy']);
+    assert.equal(r1.body.detected.find((d) => d.tag === 'incus').ok, false);
+    assert.ok(!JSON.stringify(r1.body).includes('secret-hunter2'), 'no secret value in the result (and the host error is redacted)');
+    let items = (await call('/api/infra')).body.items;
+    const web = items.find((i) => i.name === 'web-proxy');
+    assert.equal(web.state, 'proposed'); assert.equal(web.parentId, host.id); assert.equal(web.type, 'vm'); assert.equal(web.by, 'Discovery');
+    assert.equal(items.find((i) => i.name === 'dns-ct').type, 'container');
+    // what was run on the host is exactly the fixed script, sent on standard input
+    assert.equal(fs.readFileSync(scriptFile, 'utf8'), D.posixScript().trimEnd());
+    assert.match(fs.readFileSync(calls, 'utf8'), /root@10\.0\.0\.5 sh -s/);
+    // pressing it again adds nothing and does not duplicate
+    const r2 = (await call(`/api/infra/${host.id}/discover`, 'POST', {})).body;
+    assert.equal(r2.added.length, 0); assert.equal(r2.waiting.length, 4);
+    // Yes to one, No to another: No removes it, and it comes back next time
+    await call(`/api/infra/${web.id}/confirm`, 'POST', { ok: true });
+    const db = items.find((i) => i.name === 'db-main'); await call(`/api/infra/${db.id}/confirm`, 'POST', { ok: false });
+    const r3 = (await call(`/api/infra/${host.id}/discover`, 'POST', {})).body;
+    assert.deepEqual(r3.added, ['db-main'], 'an ignored item is offered again');
+    assert.equal(r3.known, 1, 'the confirmed one is known, not offered again');
+    // a name used elsewhere gets the host name added
+    await call('/api/infra', 'POST', { name: 'nginx-other', type: 'server' });
+    // something that disappears is reported, never removed
+    fs.writeFileSync(modeFile, 'fewer');
+    const r4 = (await call(`/api/infra/${host.id}/discover`, 'POST', {})).body;
+    assert.ok(!r4.missing.includes('db-main'), 'proposed items are not reported as missing');
+    await call(`/api/infra/${(await call('/api/infra')).body.items.find((i) => i.name === 'db-main').id}/confirm`, 'POST', { ok: true });
+    const r5 = (await call(`/api/infra/${host.id}/discover`, 'POST', {})).body;
+    assert.deepEqual(r5.missing, ['db-main']); assert.ok((await call('/api/infra')).body.items.some((i) => i.name === 'db-main'), 'nothing is deleted');
+    // nothing recognised, Windows (Hyper-V over PowerShell), and a server that is down
+    fs.writeFileSync(modeFile, 'none'); assert.equal((await call(`/api/infra/${host.id}/discover`, 'POST', {})).body.nothing, true);
+    fs.writeFileSync(modeFile, 'windows'); const w = (await call(`/api/infra/${host.id}/discover`, 'POST', {})).body;
+    assert.deepEqual(w.added, ['win-vm-1']); assert.equal(fs.readFileSync(scriptFile, 'utf8'), D.powershellScript().trimEnd());
+    fs.writeFileSync(modeFile, 'down'); const down = await call(`/api/infra/${host.id}/discover`, 'POST', {});
+    assert.equal(down.status, 502); assert.match(down.body.error, /refused the connection/);
+    // locked vault
+    await call('/api/vault/lock', 'POST', {}); assert.equal((await call(`/api/infra/${host.id}/discover`, 'POST', {})).status, 423);
+    await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' });
+    // audit has it, and nothing secret is in state or audit
+    const au = (await call('/api/audit?kind=infra')).body; assert.ok(JSON.stringify(au).includes('ran Discovery'));
+    assert.ok(!JSON.stringify(au).includes('secret-hunter2'));
+  } finally { process.env.PATH = oldPath; }
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /Discover/); assert.match(app, /Yes to all/);
+}
+
 // ---- infrastructure map: text fits its box, the map can be moved and zoomed ----
 {
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');

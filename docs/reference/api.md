@@ -91,6 +91,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 
 * `GET /api/infra` lists items. `POST /api/infra` adds one. `PUT /api/infra/:id` updates, `DELETE` removes.
 * `POST /api/infra/:id/test` checks reachability. `POST /api/infra/:id/confirm` `{ok}` accepts or rejects a suggestion. `POST /api/infra/:id/answer` `{text}` answers a question.
+* `POST /api/infra/:id/discover` runs read-only Discovery on a device that has an SSH login. Returns `{host, detected, added, waiting, known, missing, notes, at, nothing}`. Errors: 400 no login or not an SSH login, 404 unknown device, 409 already running, 423 vault locked, 502 could not connect.
 
 ## Factory reset
 

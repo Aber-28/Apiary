@@ -21,6 +21,7 @@ import { github, validateSource } from './github.js';
 import { Memory, parseRemember } from './memory.js';
 import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js';
 import { Infra } from './infra.js';
+import { probe as discoveryProbe, sshRun } from './discovery.js';
 import { Audit } from './audit.js';
 import { Health } from './health.js';
 import { Telegram } from './telegram.js';
@@ -95,6 +96,7 @@ export class Engine extends EventEmitter {
     this.memory = new Memory(path.join(path.dirname(store.file), 'memory.json'));
     this.backups = new Backups(this);
     this.infra = new Infra(path.join(path.dirname(store.file), 'infra.json'));
+    this.discovering = new Set();
     this._workStart = new Map();
     this.health = new Health(this);
     this.audit = new Audit(path.join(path.dirname(store.file), 'audit.jsonl'), (t) => this._redact(t));
@@ -415,6 +417,47 @@ export class Engine extends EventEmitter {
   }
 
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.
+  // Discovery: read what a host runs (VMs, containers) over SSH and offer each new find as an "Is this right?" card.
+  // Read-only on the host. The person pressing the button is the approval; the login comes from the vault.
+  async discover(id) {
+    const host = this.infra.get(id), bad = (status, message) => Object.assign(new Error(message), { status });
+    if (!host) throw bad(404, 'No such device');
+    if (!host.secret) throw bad(400, 'Link an SSH login to this device first (press Update and choose its login).');
+    if (!this.vault.unlocked) throw bad(423, 'The vault is locked. Unlock it first (Secrets page).');
+    const sec = this.vault.byName(host.secret); if (!sec) throw bad(400, `The login "${host.secret}" is not in the vault.`);
+    const meta = this.vault.list().find((x) => x.id === sec.id) || {}, type = typeOf(meta), user = this.vault.user(sec.id), value = this.vault.value(sec.id);
+    if (type === 'token' || value === null) throw bad(400, `"${host.secret}" is not an SSH login or a username and password.`);
+    if (!user) throw bad(400, `The login "${host.secret}" needs a username.`);
+    const addr = type === 'ssh' ? meta.host : host.address; if (!addr) throw bad(400, 'Give the device an address first.');
+    if (this.discovering.has(id)) throw bad(409, 'Discovery is already running for this device.');
+    this.discovering.add(id);
+    try {
+      const EV = envName(sec.name), env = { [EV]: value, [`${EV}_USER`]: user, [`${EV}_HOST`]: addr, [`${EV}_PORT`]: String(type === 'ssh' ? meta.port || 22 : 22), [`${EV}_AUTH`]: type === 'ssh' ? meta.auth || 'password' : 'password' };
+      const redact = (t) => this.vault.redact(String(t));
+      const { detected, found } = await discoveryProbe((shell, script) => (this.discoveryRun || sshRun)({ name: sec.name, env, shell, script }), redact);
+      const now = Date.now(), added = [], waiting = [], known = [], seen = new Set(found.map((f) => f.key)), notes = [];
+      const under = this.infra.items.filter((i) => i.parentId === host.id);
+      for (const f of found) {
+        const alt = `${f.name} (${host.name})`.slice(0, 60);
+        const ex = under.find((i) => i.found?.key === f.key) || under.find((i) => [f.name, alt].some((n) => n.toLowerCase() === i.name.toLowerCase()));
+        if (ex) { ex.found = { ...(ex.found || {}), key: f.key, status: f.status, at: now }; (ex.state === 'proposed' ? waiting : known).push(ex.name); continue; }
+        if (added.length >= 200) { notes.push('More than 200 new items were found. Confirm these first, then press Discover again for the rest.'); break; }
+        const name = this.infra.byName(f.name) ? alt : f.name;
+        if (this.infra.byName(name)) { notes.push(`"${f.name}" was skipped because the name is already used elsewhere on the map.`); continue; }
+        try {
+          const it = this.infra.add({ name, type: f.kind, address: f.address || undefined, parentId: host.id, notes: `Found by Discovery on ${host.name}.`, why: `Found on ${host.name} (${f.label}). It was ${f.status} when found.` }, { proposed: true, by: 'Discovery' });
+          it.found = { key: f.key, tag: f.tag, status: f.status, at: now }; added.push(it.name);
+        } catch (e) { notes.push(`Could not add "${f.name}": ${e.message}`); }
+      }
+      const okTags = new Set(detected.filter((d) => d.ok).map((d) => d.tag));
+      const missing = under.filter((i) => i.state !== 'proposed' && i.found?.key && okTags.has(i.found.tag || i.found.key.split(':')[0]) && !seen.has(i.found.key)).map((i) => i.name);
+      this.infra._save();
+      this.audit.add('infra', { actor: 'You', action: `ran Discovery on "${host.name}"`, detail: `${added.length} new, ${known.length + waiting.length} already known${missing.length ? `, ${missing.length} not found` : ''}` });
+      if (added.length) this.emit('event', { type: 'infra' });
+      return { host: host.name, detected, added, waiting, known: known.length, missing, notes, at: now, nothing: !detected.length };
+    } finally { this.discovering.delete(id); }
+  }
+
   // An agent suggests devices, links or a question about the person's infrastructure. They appear as "Is this right?" cards.
   _infra(agent, list) {
     const who = this._persona(agent);

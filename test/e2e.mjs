@@ -875,8 +875,16 @@ let orgIds;
   let pl = (await call(`/api/projects/${lead.id}/plan`)).body;
   assert.equal(pl.plan.phases[0].status, 'active'); assert.equal(pl.plan.phases[1].status, 'pending'); assert.equal(pl.stats.pct, 0); assert.equal(pl.stats.current, 'Plan and design');
   assert.match(engine._system(lead), /PROJECT PLAN \(where the project stands: 0% done, now in "Plan and design"/); assert.doesNotMatch(engine._system(lead), /BIG PROJECTS/);
+  { // every plan step is a task with its own ID, given to its owner (the lead by default), and closed when the step is done
+    const steps = lead.plan.phases.flatMap((p) => p.steps);
+    assert.ok(steps.every((x) => /^T-\d{4,}$/.test(x.task) && engine.tasks.all[x.taskId]), 'each step has a task ID');
+    const t0 = engine.tasks.all[lead.plan.phases[0].steps[0].taskId];
+    assert.equal(t0.status, 'todo'); assert.equal(t0.project, lead.id); assert.ok(t0.labels.includes('plan')); assert.equal(t0.assignee.id, lead.id, 'the lead owns steps with no owner');
+    assert.match(engine._system(lead), /\[ \] .* \(T-\d{4,}\)/, 'the lead is told each step\'s task ID');
+  }
   await call(`/api/agents/${lead.id}/messages`, 'POST', { text: 'progress:1:1' });
   await until(() => lead.plan.phases[0].steps[0].done && engine.agents[lead.id].status === 'idle', 8000);
+  assert.equal(engine.tasks.all[lead.plan.phases[0].steps[0].taskId].status, 'done', 'finishing a step closes its task');
   await call(`/api/agents/${lead.id}/messages`, 'POST', { text: 'progress:1:2' });
   await until(() => lead.plan.phases[0].status === 'done' && engine.agents[lead.id].status === 'idle', 8000);
   pl = (await call(`/api/projects/${lead.id}/plan`)).body;
@@ -1663,6 +1671,22 @@ let orgIds;
     const { plan } = await import('../src/reset.js'); assert.ok(!plan(engine).files.some((f) => /[\\/]icons([\\/]|$)/.test(f)), 'a factory reset keeps the icons');
     delete engine.iconFetch;
     const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function openLibrary/); assert.match(a, /iconIdOf\(i\) \? libIcon/, 'device cards show the icon');
+  }
+  { // a plan can be edited while it is approved: steps changed, given an owner, removed or added; the lead is told
+    const { cleanPhases } = await import('../src/engine.js');
+    assert.deepEqual(cleanPhases([{ title: ' A ', steps: ['x', { text: 'y', owner: 'Rex' }, '', { text: '' }] }]), [{ title: 'A', goal: '', steps: ['x', 'y'], owners: ['', 'Rex'] }]);
+    assert.deepEqual(cleanPhases([{ goal: 'no title' }, null]), []);
+    const pj = (await call('/api/agents', 'POST', { provider: 'mock', name: 'Edit plan', approvals: true })).body, ld = engine.agents[pj.id];
+    await call(`/api/agents/${ld.id}/messages`, 'POST', { text: 'plan-it for the edit test' });
+    let pa; await until(() => (pa = engine.approvals().find((a) => a.status === 'pending' && a.kind === 'plan' && a.agentId === ld.id)), 8000);
+    assert.equal((await call(`/api/approvals/${pa.id}/decide`, 'POST', { decision: 'approve', phases: [{ title: '' }] })).status, 400, 'an empty plan is refused');
+    const edited = [{ title: 'Edited phase', goal: 'g', steps: [{ text: 'Edited step one', owner: ld.name }, { text: 'Added step', owner: '' }] }];
+    assert.equal((await call(`/api/approvals/${pa.id}/decide`, 'POST', { decision: 'approve', phases: edited })).status, 200);
+    await until(() => ld.plan && engine.agents[ld.id].status === 'idle', 8000);
+    assert.deepEqual(ld.plan.phases.map((p) => p.title), ['Edited phase'], 'the approved plan is the edited one');
+    assert.deepEqual(ld.plan.phases[0].steps.map((x) => x.text), ['Edited step one', 'Added step']);
+    assert.ok(ld.plan.phases[0].steps.every((x) => x.task), 'edited steps get task IDs too');
+    assert.equal(engine.approvals().find((a) => a.id === pa.id).edited, true);
   }
   { // every ID is a status chip: tasks, tickets, approvals and secrets are all in /api/refs; a secret shows its name, never its value
     await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});

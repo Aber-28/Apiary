@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.42.0
+
+- **Edit the plan while you approve it.** Every step is an editable row: change it, choose who does it, remove it or add one, then approve. The lead is told to follow your version.
+- **Every plan step is a task with an ID,** given to its owner (the lead by default). The Plan tab shows the owner and ID, and finishing a step closes its task.
+- Plans can name an owner per step.
+
 ## 0.41.2
 
 - **More in the Library:** UniFi controller, Kubernetes, Windows server, MikroTik, pfSense, TrueNAS, Portainer, Pi-hole, AdGuard Home, Grafana, Uptime Kuma and Gitea, next to Docker, Proxmox, Home Assistant and the rest. 26 in all.

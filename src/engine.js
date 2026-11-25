@@ -40,6 +40,7 @@ import { Repos } from './repos.js';
 import { suggestModel } from './models.js';
 import { Limits } from './limits.js';
 import { GhLogin } from './ghlogin.js';
+import { AiLogin } from './aiLogin.js';
 import { ToolInstaller } from './tools.js';
 
 const ENV_LIMITS = {
@@ -107,6 +108,7 @@ export class Engine extends EventEmitter {
     this.providerLimits = new Limits();
     this.toolInstaller = new ToolInstaller({ onDone: () => { this.connections._cache.clear(); this.emit('event', { type: 'tools' }); } });
     this.ghLogin = new GhLogin({ onChange: (st) => { if (st.state === 'done') this.connections._cache.clear(); this.emit('event', { type: 'github-login' }); } });
+    this.aiLogin = new AiLogin({ onChange: (st) => { if (st.state === 'done') this.connections._cache.clear(); this.emit('event', { type: 'ai-login', provider: st.provider }); } });
     this.tasks = new Tasks(store);
     this.tasks.backfill();
     this.curTask = new Map();   // agent id -> the task it is working on right now

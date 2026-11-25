@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.35.0
+
+- **Updates wait for work in progress.** Install now waits while agents are working or approvals are waiting for you. The Updates page says what it is waiting for, new messages to agents are held meanwhile, and the update installs by itself once everything has finished. You can cancel the wait, or install now anyway (with a warning that running agents will be cut off).
+- **Safer rollback.** If an update fails, the packages are put back to the old versions along with the old code.
+
 ## 0.34.0
 
 - **Agents can ask to save a secret they made.** An agent names the secret and its kind, and you get a request on the Approvals page. You type the value there and save it to the vault. The value is never given to the agent, the chat or the request, and a denied request saves nothing. Agents cannot read or change existing secrets this way.

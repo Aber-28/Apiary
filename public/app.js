@@ -777,7 +777,7 @@ function renderUpdateChip() {
   const u = S.update;
   if (!u || u.state !== 'ready') { c?.remove(); return; }
   if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:12px' }); $('#theme').before(c); }
-  c.textContent = `Update ready: ${u.latest}`;
+  c.textContent = u.queued ? `Update waiting for ${u.busy || 'running'} to finish` : `Update ready: ${u.latest}`;
 }
 async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
@@ -906,16 +906,23 @@ function pageUpdates() {
     const msg = { uptodate: `You are up to date (version ${S.version}).`, ready: `Version ${u.latest} is downloaded and ready to install.`, error: u.error || 'The last check failed.', unsupported: u.error || 'Updates are not available for this install (it is not a git checkout).', checking: 'Checking…' }[u.state] || 'Not checked yet. Press Check for updates.';
     const busy = h('p', { class: 'hint', role: 'status' });
     const check = h('button', { class: 'btn', onclick: guard(async () => { busy.textContent = 'Checking GitHub…'; S.update = await api('/api/update/check', 'POST', {}); renderUpdateChip(); draw(); }) }, 'Check for updates');
-    const install = u.state === 'ready' ? h('button', { class: 'btn primary big', onclick: guard(async () => {
-      try { await api('/api/update/install', 'POST', {}); }
-      catch (e) { if (/working right now/i.test(e.message) && confirm(`${e.message}\n\nInstall anyway? Running agents will be stopped.`)) await api('/api/update/install', 'POST', { force: true }); else throw e; }
+    const queuedMsg = u.queued ? `Waiting for ${u.busy || 0} ${u.busy === 1 ? 'thing' : 'things'} to finish (agents still working or approvals waiting for you). Apiary installs the update by itself when they are done. New messages to agents are held until then.` : null;
+    const install = u.state === 'ready' && !u.queued ? h('button', { class: 'btn primary big', onclick: guard(async () => {
+      const r = await api('/api/update/install', 'POST', {});
+      if (r.queued) { toast('The update will install when the current work has finished.'); S.update = await api('/api/update'); renderUpdateChip(); draw(); return; }
       updateOverlay(S.version);
     }) }, `Install ${u.latest}`) : null;
+    const forceNow = u.queued ? h('button', { class: 'btn danger big', onclick: guard(async () => {
+      if (!confirm('Install now? Agents still working will be stopped, and anything they are doing on other machines may be cut off part way.')) return;
+      await api('/api/update/install', 'POST', { force: true }); updateOverlay(S.version);
+    }) }, 'Install now anyway') : null;
+    const cancelQueue = u.queued ? h('button', { class: 'btn', onclick: guard(async () => { await api('/api/update/cancel', 'POST', {}); S.update = await api('/api/update'); renderUpdateChip(); toast('Waiting cancelled. New messages are accepted again.'); draw(); }) }, 'Cancel waiting') : null;
     const auto = h('select', { 'aria-label': 'How often to check for updates', onchange: guard(async (e) => { const r = await api('/api/settings', 'PUT', { updateCheck: e.target.value }); S.updateCheck = r.updateCheck; S.autoUpdate = r.autoUpdate; toast(e.target.value === 'manual' ? 'Apiary will only check when you press the button' : `Apiary will check ${e.target.value}`); }) }, [['daily', 'Every day'], ['weekly', 'Every week'], ['monthly', 'Every month'], ['manual', 'Only when I press the button']].map(([v, l]) => h('option', { value: v, selected: S.updateCheck === v }, l)));
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Updates'), h('p', { class: 'sub-title' }, 'Apiary checks GitHub for a new version and downloads it without installing. You decide when to install; it then restarts and your browser refreshes.'))),
       h('div', { class: 'card' }, h('p', {}, h('b', {}, `Installed: ${S.version}`), u.latest && u.state === 'ready' ? ` · Available: ${u.latest}` : ''), h('p', {}, msg), u.checkedAt ? h('p', { class: 'hint' }, `Last checked ${new Date(u.checkedAt).toLocaleString()}`) : null,
         u.notes?.length ? h('details', { open: true }, h('summary', {}, 'What is new'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, [].concat(u.notes).join('\n'))) : null,
-        h('div', { class: 'kv', style: 'margin-top:12px' }, check, install), busy,
+        queuedMsg ? h('p', { class: 'hint', role: 'status', style: 'margin-top:10px' }, queuedMsg) : null,
+        h('div', { class: 'kv', style: 'margin-top:12px' }, check, install, forceNow, cancelQueue), busy,
         h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))));
   };
   draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };

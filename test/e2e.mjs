@@ -723,9 +723,9 @@ let orgIds;
   assert.equal((await c2('/api/update')).body.latest, '0.3.0');
   assert.equal((await c2('/api/state')).body.update.state, 'ready');
   const busyAgent = Object.values(engine.agents)[0]; const was = busyAgent.status; busyAgent.status = 'working';
-  const blocked = await c2('/api/update/install', 'POST', {}); assert.equal(blocked.status, 409); assert.ok(blocked.body.busy >= 1, 'asks before interrupting working agents');
+  const blocked = await c2('/api/update/install', 'POST', {}); assert.equal(blocked.status, 202); assert.equal(blocked.body.queued, true, 'waits for working agents instead of interrupting them'); assert.ok(blocked.body.busy >= 1);
   assert.equal(restarts, 0);
-  busyAgent.status = was;
+  busyAgent.status = was; engine.emit('event', { type: 'activity', agentId: busyAgent.id, text: '' });   // the queued install starts by itself
   const done2 = await c2('/api/update/install', 'POST', {}); assert.equal(done2.status, 202); assert.equal(done2.body.started, true);
   await until(async () => (await c2('/api/update')).body.progress?.steps[4].state === 'run', 5000);
   const prog = (await c2('/api/update')).body.progress; assert.equal(prog.failed, false); assert.ok(prog.log.some((l) => /Restarting/.test(l)) && prog.pct >= 80, 'the page can show what is happening');
@@ -1556,6 +1556,47 @@ let orgIds;
     engine.decide(dp.id, { decision: 'deny', note: 'no' });
     await df;
     assert.equal(engine.vault.byName('Example Denied Login'), undefined, 'nothing saved on deny');
+  }
+  { // updates wait for the work in progress, hold new messages meanwhile, install by themselves once idle, and can be cancelled or forced
+    // start from an idle team with nothing waiting, and put everything back afterwards
+    const savedStatus = Object.values(engine.agents).map((a) => [a, a.status]);
+    for (const a of Object.values(engine.agents)) a.status = 'idle';
+    const savedPending = Object.values(engine.store.data.approvals).filter((r) => r.status === 'pending');
+    for (const r of savedPending) r.status = 'cancelled';
+    let installs = 0;
+    const fake = { s: { state: 'ready', current: '0.1.0', latest: '0.2.0' }, get status() { return { ...this.s }; }, markRestarting() {}, install: async () => { installs++; return {}; } };
+    const usrv = createServer(engine, { updater: fake, restart: () => {} });
+    await new Promise((r) => usrv.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${usrv.address().port}`;
+    const post = (p, b = {}) => fetch(base + p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }).then(async (r) => [r.status, await r.json()]);
+    const someAgent = Object.keys(engine.agents)[0];
+    const tickUp = () => new Promise((r) => setTimeout(r, 30));
+    engine.ctls.set('example-run', new AbortController());
+    const [q1, qb] = await post('/api/update/install');
+    assert.equal(q1, 202); assert.equal(qb.queued, true, 'the install waits instead of stopping work');
+    assert.equal(installs, 0, 'not installed while work is running');
+    assert.equal(fake.s.queued, true); assert.equal(engine.updateHold, true, 'new messages are held');
+    assert.throws(() => engine.send(someAgent, 'example message'), /update is waiting/);
+    engine.ctls.delete('example-run'); engine.emit('event', { type: 'activity', agentId: someAgent, text: '' });
+    await tickUp();
+    assert.equal(installs, 1, 'installs by itself once the work has finished');
+    assert.equal(engine.updateHold, false, 'new messages are accepted again');
+    // cancel while waiting
+    fake.s.state = 'ready';
+    engine.ctls.set('example-run-2', new AbortController());
+    await post('/api/update/install');
+    assert.equal(fake.s.queued, true);
+    const [cs] = await post('/api/update/cancel');
+    assert.equal(cs, 200); assert.equal(fake.s.queued, false); assert.equal(engine.updateHold, false, 'cancel lifts the hold');
+    engine.ctls.delete('example-run-2');
+    // install now anyway
+    engine.ctls.set('example-run-3', new AbortController());
+    const [fs2, fb] = await post('/api/update/install', { force: true });
+    assert.equal(fs2, 202); assert.equal(fb.forced, true); assert.equal(installs, 2, 'forced install runs at once');
+    engine.ctls.delete('example-run-3');
+    usrv.close();
+    for (const [a, st] of savedStatus) a.status = st;
+    for (const r of savedPending) r.status = 'pending';
   }
   { // the master trust slider sets every agent at once; single agents can still be moved afterwards
     assert.throws(() => engine.setTrustAll({ level: 9 }), /0 to 5/);

@@ -1599,6 +1599,12 @@ let orgIds;
     for (const [a, st] of savedStatus) a.status = st;
     for (const r of savedPending) r.status = 'pending';
   }
+  { // the Copy buttons work on plain http too (the page falls back to a hidden text box), and task messages show when they were sent
+    const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+    assert.match(a, /document\.execCommand\('copy'\)/, 'copy has a fallback');
+    assert.match(a, /window\.isSecureContext/, 'the clipboard API is used only where it works');
+    assert.match(a, /timeStyle: 'short'/, 'each task message has a date and time');
+  }
   { // sign in to Claude from the page: the link is shown, the pasted code goes to the CLI, the login is confirmed, and the code is never kept
     const { AiLogin } = await import('../src/aiLogin.js');
     const { EventEmitter } = await import('node:events');

@@ -266,6 +266,24 @@ function diffView(d) {
   return h('div', {}, d.stat ? h('pre', { class: 'diffstat mono' }, d.stat) : h('p', { class: 'hint' }, 'No changes.'),
     d.patch ? h('details', {}, h('summary', {}, 'Show the full changes'), pre, d.truncated ? h('p', { class: 'hint' }, 'Only the first part is shown. Review the rest on the branch.') : null) : null);
 }
+// An agent asked to save a secret it made. The value is typed here and goes straight to the vault; it is not kept on the request.
+function newSecretForm(ap, decide) {
+  const nm = h('input', { type: 'text', value: ap.secretName || '', maxlength: '80', 'aria-label': 'Secret name' });
+  const ty = h('select', { 'aria-label': 'Kind of secret' }, [['login', 'Login (username and password)'], ['token', 'Token or API key'], ['ssh', 'SSH login (server, username, password or key)']].map(([k, t]) => h('option', { value: k, selected: (ap.secretType || 'login') === k }, t)));
+  const us = h('input', { type: 'text', value: ap.username || '', placeholder: 'Username (if any)', 'aria-label': 'Username' });
+  const ho = h('input', { type: 'text', value: ap.host || '', placeholder: 'Server (SSH logins only)', 'aria-label': 'Server' });
+  const po = h('input', { type: 'text', value: '22', inputmode: 'numeric', 'aria-label': 'Port (SSH logins only)' });
+  const va = h('input', { type: 'password', autocomplete: 'new-password', placeholder: 'Password, token or private key', 'aria-label': 'Secret value' });
+  const save = guard(async () => {
+    if (!va.value) throw new Error('Type the secret value first');
+    await api(`/api/approvals/${ap.id}/decide`, 'POST', { decision: 'approve', secret: { name: nm.value, type: ty.value, username: us.value, host: ho.value, port: po.value, value: va.value } });
+    va.value = ''; toast(`Saved "${nm.value}" to the vault`);
+  });
+  return h('div', { class: 'kv', style: 'margin-top:12px;flex-wrap:wrap;gap:8px;align-items:stretch' },
+    h('div', { style: 'width:100%;display:grid;gap:6px' }, nm, ty, us, ho, po, va),
+    h('button', { class: 'btn primary', onclick: save }, 'Save to the vault'),
+    h('button', { class: 'btn danger', onclick: decide('deny') }, 'Deny'));
+}
 function approvalCard(ap) {
   const isPending = ap.status === 'pending';
   const note = h('input', { type: 'text', placeholder: 'Optional note to the agent', 'aria-label': 'Note to the agent' });
@@ -288,7 +306,8 @@ function approvalCard(ap) {
     ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
     ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
     ap.diff ? diffView(ap.diff) : null,
-    isPending && ap.kind === 'command' ? h('div', { class: 'kv', style: 'margin-top:12px;flex-wrap:wrap' }, note,
+    isPending && ap.kind === 'newsecret' ? newSecretForm(ap, decide)
+    : isPending && ap.kind === 'command' ? h('div', { class: 'kv', style: 'margin-top:12px;flex-wrap:wrap' }, note,
       h('button', { class: 'btn primary', onclick: decide('approve', 'once') }, 'Allow once'),
       ap.canExact ? h('button', { class: 'btn', onclick: decide('approve', 'exact') }, 'Always allow this exact command') : null,
       ap.program ? h('button', { class: 'btn', onclick: decide('approve', 'program') }, `Always allow "${ap.program}" commands`) : null,

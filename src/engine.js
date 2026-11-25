@@ -54,6 +54,7 @@ const SEND_RE = /```apiary-send\s*([\s\S]*?)```/g;
 const HIRE_RE = /```apiary-hire\s*([\s\S]*?)```/g;
 const TYPE_LABEL = { login: 'login', ssh: 'SSH login', token: 'API key or token' };
 const SECRET_RE = /```apiary-secret\s*([\s\S]*?)```/g;
+const NEWSECRET_RE = /```apiary-newsecret\s*([\s\S]*?)```/g;
 const PLAN_RE = /```apiary-plan\s*([\s\S]*?)```/g;
 const PROGRESS_RE = /```apiary-progress\s*([\s\S]*?)```/g;
 const INFRA_RE = /```apiary-infra\s*([\s\S]*?)```/g;
@@ -181,12 +182,22 @@ export class Engine extends EventEmitter {
     this.store.save();
     return new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
   }
-  decide(id, { decision, note, only, names, mode, models } = {}) {
+  decide(id, { decision, note, only, names, mode, models, secret } = {}) {
     const rec = this.store.data.approvals[id];
     if (!rec) throw httpErr(404, 'No such approval');
     if (rec.status !== 'pending' || !this.pending.has(id)) throw httpErr(409, 'This request was already answered or has expired');
     if (!['approve', 'deny'].includes(decision)) throw httpErr(400, 'decision must be approve or deny');
     if (only !== undefined && (!Array.isArray(only) || only.some((i) => !Number.isInteger(i) || i < 0 || i >= (rec.items?.length || 0)))) throw httpErr(400, 'Bad selection');
+    if (decision === 'approve' && rec.kind === 'newsecret') {
+      // Saved first: if this fails the request stays pending. The value is not kept on the request or in the chat.
+      const sv = secret && typeof secret === 'object' ? secret : {};
+      const name = String(sv.name || rec.secretName || '').trim().slice(0, 80);
+      const type = ['login', 'token', 'ssh'].includes(sv.type) ? sv.type : (rec.secretType || 'login');
+      const meta = type === 'ssh' ? { type, host: String(sv.host || rec.host || ''), port: sv.port, auth: sv.auth === 'key' ? 'key' : 'password' } : { type };
+      this.vault.add(name, String(sv.value || ''), `Saved for ${rec.agentName || 'an agent'}`, type === 'token' ? '' : String(sv.username || rec.username || ''), meta);
+      rec.secretName = name;
+      note = `Saved to the vault as "${name}".`;
+    }
     rec.status = decision === 'approve' ? 'approved' : 'denied';
     rec.note = String(note || '').slice(0, 1000);
     if (decision === 'approve' && only) rec.only = only;
@@ -615,6 +626,15 @@ export class Engine extends EventEmitter {
     return { ...(this.metaLeases.get(agent.id) || {}), ...(mp ? Object.fromEntries([...mp].map(([name, v]) => [envName(name), v])) : {}), ...(us ? Object.fromEntries([...us].map(([name, v]) => [envName(name) + '_USER', v])) : {}) };
   }
   // An agent asked for secrets with apiary-secret. Needs: vault unlocked, secret assigned to this agent, and the human's yes.
+  // An agent asks to save a secret it made. The person types the value on the approval card; the agent never sees it.
+  async _newSecret(agent, reqs, notes) {
+    for (const r of reqs.slice(0, 3)) {
+      if (this.vault.exists && this.vault.byName(r.name)) { notes.push(`There is already a secret called "${r.name}". Use it by name, or ask to save this one under another name.`); continue; }
+      const d = await this._ask(agent, { kind: 'newsecret', title: `${agent.name} wants to save a secret "${r.name}"`, detail: r.why || `A ${r.type} for ${agent.name}.`, secretName: r.name, secretType: r.type, username: r.username, host: r.host, port: r.port, auth: r.auth });
+      if (d.decision === 'deny') notes.push(`The person did not save "${r.name}"${d.note ? ': ' + d.note : ''}.`);
+      else notes.push(`The person saved "${r.name}" in the vault. Ask to use it by name when you need it.`);
+    }
+  }
   async _secrets(agent, reqs, notes) {
     for (const r of reqs) {
       const it = this.vault.byName(r.name);
@@ -963,6 +983,7 @@ export class Engine extends EventEmitter {
     s += '\nTasks: you can add to the human\'s task board, or move a task, with ```apiary-task\n{"title":"Short task title","notes":"Optional detail","status":"todo|backburner|inprogress|blocked|done"}\n```. Use the same title to update a task. "backburner" is for ideas that are not ready yet.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSecrets: you never see passwords or keys. If a task needs one, ask with a block like ```apiary-secret\n{"name":"Name of the secret","why":"what you need it for"}\n```. If it is not assigned to you yet, the human is asked right then whether to allow it. The human approves each use unless they chose always. If approved, it is available to your shell commands as an environment variable named in the reply; use it there and never print or save it.\n';
     if ((agent.member || !agent.parentId) && this.vault.exists) s += this._secretsNote(agent);
+    if ((agent.member || !agent.parentId) && this.vault.exists) s += '\nSECRETS YOU MAKE: if you create a password, key or token that must be kept, do not print it. Ask to save it with ```apiary-newsecret\n{"name":"Short name","type":"login|token|ssh","username":"","host":"","why":"What it is for"}\n```. Never include the value; the person types it on the Approvals page.\n';
     if (agent.member || !agent.parentId) s += this._ownerNote(agent);
     if (agent.member) {
       const lead = this.agents[agent.parentId];
@@ -1414,7 +1435,7 @@ export class Engine extends EventEmitter {
         const raw = await this._exec(agent, prompt);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
-        const { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, runbooks, errors } = parseSpawns(mem.clean);
+        const { clean, spawns, sends, assigns, hires, secrets, newSecrets, tasks, plans, progress, infra, runbooks, errors } = parseSpawns(mem.clean);
         final = clean || final;
         if (clean) this._msg(agent, { role: 'agent', text: clean });
         if (tasks.length) this._agentTasks(agent, tasks);
@@ -1423,7 +1444,7 @@ export class Engine extends EventEmitter {
         const planNotes = [];
         if (plans.length) await this._plan(agent, plans.at(-1), planNotes);
         if (progress.length) this._progress(agent, progress, planNotes);
-        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !errors.length && !plans.length) || round === this.limits.maxRounds) break;
+        if ((!spawns.length && !sends.length && !assigns.length && !hires.length && !secrets.length && !newSecrets.length && !errors.length && !plans.length) || round === this.limits.maxRounds) break;
 
         const notes = [...errors, ...planNotes];
         let runnable = [];
@@ -1449,6 +1470,7 @@ export class Engine extends EventEmitter {
         }
         if (hires.length) await this._hire(agent, hires, notes);
         if (secrets.length) await this._secrets(agent, secrets, notes);
+        if (newSecrets.length) await this._newSecret(agent, newSecrets, notes);
         if (agent.git) await this._commit(agent, 'work before delegating');
         this._setStatus(agent, 'waiting');
 
@@ -1777,7 +1799,7 @@ export class Engine extends EventEmitter {
 }
 
 export function parseSpawns(reply) {
-  const spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], infra = [], runbooks = [], errors = [];
+  const newSecrets = [], spawns = [], sends = [], assigns = [], hires = [], secrets = [], tasks = [], plans = [], progress = [], infra = [], runbooks = [], errors = [];
   reply = reply.replace(PLAN_RE, (_, body) => {
     try {
       const o = JSON.parse(body.trim()), ph = [].concat(o.phases || []).filter((p) => p && String(p.title || '').trim());
@@ -1804,6 +1826,16 @@ export function parseSpawns(reply) {
   reply = reply.replace(TASK_RE, (_, body) => {
     try { for (const x of [].concat(JSON.parse(body.trim()))) { if (!x || !String(x.title || '').trim()) { errors.push('An apiary-task block needs a "title".'); continue; } tasks.push({ title: String(x.title), notes: String(x.notes || ''), status: x.status }); } }
     catch (err) { errors.push(`An apiary-task block was not valid JSON (${err.message}).`); }
+    return '';
+  });
+  reply = reply.replace(NEWSECRET_RE, (_, body) => {
+    try {
+      for (const x of [].concat(JSON.parse(body.trim()))) {
+        if (!x || !String(x.name || '').trim()) { errors.push('An apiary-newsecret block needs a "name".'); continue; }
+        if (['value', 'password', 'token', 'key', 'secret'].some((k) => k in x)) { errors.push(`Never put the value in an apiary-newsecret block. Ask to save "${x.name}" without it: the person types the value on the Approvals page.`); continue; }
+        newSecrets.push({ name: String(x.name).trim().slice(0, 80), type: ['login', 'token', 'ssh'].includes(x.type) ? x.type : 'login', username: String(x.username || '').slice(0, 200), host: String(x.host || '').slice(0, 200), port: x.port, auth: x.auth === 'key' ? 'key' : 'password', why: String(x.why || '').slice(0, 300) });
+      }
+    } catch (err) { errors.push(`An apiary-newsecret block was not valid JSON (${err.message}).`); }
     return '';
   });
   reply = reply.replace(SECRET_RE, (_, body) => {
@@ -1857,7 +1889,7 @@ export function parseSpawns(reply) {
     }
     return '';
   }).replace(/\n{3,}/g, '\n\n').trim();
-  return { clean, spawns, sends, assigns, hires, secrets, tasks, plans, progress, infra, runbooks, errors };
+  return { clean, spawns, sends, assigns, hires, secrets, newSecrets, tasks, plans, progress, infra, runbooks, errors };
 }
 
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };

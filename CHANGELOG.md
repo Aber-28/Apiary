@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.34.0
+
+- **Agents can ask to save a secret they made.** An agent names the secret and its kind, and you get a request on the Approvals page. You type the value there and save it to the vault. The value is never given to the agent, the chat or the request, and a denied request saves nothing. Agents cannot read or change existing secrets this way.
+
 ## 0.33.2
 
 - **Reports show the sub-agent's name.** Each sub-agent's reply appears as its own bubble under its name and colour, instead of one grey "Reports from sub-agents" box.

@@ -967,7 +967,8 @@ function pageUpdates() {
         u.notes?.length ? h('details', { open: true }, h('summary', {}, 'What is new'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, [].concat(u.notes).join('\n'))) : null,
         queuedMsg ? h('p', { class: 'hint', role: 'status', style: 'margin-top:10px' }, queuedMsg) : null,
         h('div', { class: 'kv', style: 'margin-top:12px' }, check, install, forceNow, cancelQueue), busy,
-        h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))));
+        h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))),
+      h('div', { class: 'card', style: 'margin-top:12px' }, h('p', {}, h('b', {}, 'Enjoying Apiary?')), h('p', { class: 'hint' }, 'It is free to use. If it saves you time, a coffee helps keep it going. Nothing is ever locked behind it.'), h('p', {}, h('a', { class: 'btn', href: 'https://buymeacoffee.com/aber28', target: '_blank', rel: 'noopener noreferrer' }, 'Buy me a coffee (5 euro)'))));
   };
   draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };
 }

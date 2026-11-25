@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.48.1
+
+- A small "Buy me a coffee" card on the Updates page and in the README. Entirely optional; nothing is locked behind it.
+
 ## 0.48.0
 
 - **Security self-check.** `bash scripts/security-check.sh` prints one plain report: who can reach Apiary, who can read its files, and whether a fake secret ever leaks into the files, log, export or pages. It changes nothing and the report is safe to share.

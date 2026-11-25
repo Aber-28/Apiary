@@ -54,6 +54,10 @@ Run `bash scripts/security-check.sh` for a self-test with a report you can share
 
 Agents can run commands as your user. Try Apiary on a machine or virtual machine you are happy to experiment on first, and never expose it directly to the internet.
 
+## Support
+
+Apiary is free to use. If it saves you time, you can [buy me a coffee](https://buymeacoffee.com/aber28) (5 euro). Nothing is locked behind it.
+
 ## Documentation
 
 Full guides (install, using Apiary, reference, security) are in [`docs/`](docs/README.md) and online at <https://aber-28.gitbook.io/aber-28-docs/>.

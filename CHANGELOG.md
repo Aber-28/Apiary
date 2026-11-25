@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.0
+
+- **Chat looks like a messaging app.** Your messages are on the right. Each agent is on the left in its own colour, with its name. A handoff reads as @Name: text (for example @Neo: do A, B, C). Task codes such as T-0012 are links that open the task.
+
 ## 0.32.2
 
 - **Secrets vault is compact.** Each secret is a small box showing its name and who it is assigned to. Click the name to open its details, connection, who may use it and its actions in a window.

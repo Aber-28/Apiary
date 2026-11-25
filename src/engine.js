@@ -23,6 +23,7 @@ import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js
 import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
+import { UP_MS, gatherFacts, basicAdvice, parseFix, stripFix, isSafeFix, SYSTEM as TROUBLE_SYSTEM } from './troubleshoot.js';
 import { verifyCloudflare, verifyGoogle, parseGoogleKey } from './cloud.js';
 import { Audit } from './audit.js';
 import { Health, LOGIN_RE } from './health.js';
@@ -492,6 +493,64 @@ export class Engine extends EventEmitter {
       } catch { /* leave the plain result */ }
     }
     return it;
+  }
+  // ---- troubleshooting a device that is down ----
+  // One "case" per outage. You approve repairs once for the case; it closes after the device has been back up for 15 minutes.
+  _sshTarget(it) {
+    if (!this.vault.unlocked) return null;
+    for (const x of [it, it.parentId && this.infra.get(it.parentId)]) {
+      if (!x?.secret) continue;
+      const sec = this.vault.byName(x.secret), meta = sec && this.vault.list().find((m) => m.id === sec.id);
+      if (meta?.type === 'ssh') { const EV = envName(sec.name); return { item: x, name: sec.name, env: { [EV]: this.vault.value(sec.id), [`${EV}_USER`]: this.vault.user(sec.id), [`${EV}_HOST`]: meta.host || x.address, [`${EV}_PORT`]: String(meta.port || 22), [`${EV}_AUTH`]: meta.auth || 'password' } }; }
+    }
+    return null;
+  }
+  async troubleshoot(id) {
+    const it = this.infra.get(id), bad = (status, message) => Object.assign(new Error(message), { status });
+    if (!it) throw bad(404, 'No such device');
+    if (this.troubling?.has(id)) return it;
+    await this.testDevice(id);
+    const now = Date.now(), up = !!it.status?.ok;
+    if (it.trouble && up && now - (it.status.since || now) >= UP_MS) delete it.trouble;   // stable again: the case is over
+    if (up && !it.trouble) { it.trouble = { openedAt: now, state: 'done', healthy: true, report: { basic: { summary: `${it.name} is reachable and has been for ${Math.max(1, Math.round((now - (it.status.since || now)) / 60000))} minute(s). Nothing to fix.`, checks: [] } }, log: [] }; this.infra._save(); this.emit('event', { type: 'infra' }); return it; }
+    const t = (it.trouble ||= { openedAt: now, approved: false, log: [] });
+    t.healthy = false; t.state = 'working'; t.report = null; this.infra._save(); this.emit('event', { type: 'infra' });
+    (this.troubling ||= new Set()).add(id);
+    this._troubleRun(it).catch((e) => { t.state = 'done'; t.report = { ...(t.report || {}), error: this.vault.redact(String(e.message)) }; }).finally(() => { this.troubling.delete(id); this.infra._save(); this.emit('event', { type: 'infra' }); });
+    return it;
+  }
+  async _troubleRun(it) {
+    const t = it.trouble, red = (x) => this.vault.redact(String(x));
+    const facts = await gatherFacts(this.infra, it, this.troubleProbe || {});
+    const report = t.report = { at: Date.now(), basic: basicAdvice(facts), ai: '', manual: [] };
+    this.infra._save(); this.emit('event', { type: 'infra' });
+    let fix = null;
+    try {
+      const text = await this._oneShot(TROUBLE_SYSTEM, `Facts (read-only checks made from the Apiary computer just now):\n${JSON.stringify(facts)}\n\nExplain what is probably wrong and what to check.`);
+      report.ai = red(stripFix(text)); fix = parseFix(text);
+    } catch (e) { report.aiNote = 'No AI answered, so this is the built-in analysis only.'; }
+    this.infra._save(); this.emit('event', { type: 'infra' });
+    if (!fix) return finish();
+    const safe = fix.commands.filter(isSafeFix); report.manual = fix.commands.filter((c) => !isSafeFix(c)).map(red);
+    const target = fix.on === 'host' && it.parentId ? this._sshTarget(this.infra.get(it.parentId)) : this._sshTarget(it);
+    if (!safe.length || !target) { if (safe.length) report.manual.push(...safe.map(red)); report.note = safe.length ? 'Apiary has no SSH login it can use for these, so they are listed for you to run.' : ''; return finish(); }
+    if (t.approved === undefined || t.approved === false) {
+      if (t.denied) { report.manual.push(...safe.map(red)); report.note = 'You declined repairs for this problem, so they are listed for you to run.'; return finish(); }
+      const d = await this._ask(await this.general(), { kind: 'troubleshoot', title: `Let the troubleshooter try to fix ${it.name}`, detail: `It would run on ${target.item.name} (through its saved login):\n${safe.map((c) => '• ' + c).join('\n')}\n\nWhy: ${fix.why || 'to bring it back'}.\nOnly restarting or starting things, rebooting and read-only checks are ever allowed. You are asked once for this problem; it ends after ${it.name} has been back up for 15 minutes.` });
+      if (d.decision === 'deny') { t.denied = true; report.manual.push(...safe.map(red)); report.note = 'You declined, so the repairs are listed for you to run.'; return finish(); }
+      t.approved = true; t.approvedAt = Date.now();
+    }
+    this.audit.add('infra', { actor: 'Troubleshooter', action: `tried to repair ${it.name}`, detail: safe.join('; ') });
+    for (const cmd of safe) {
+      const r = await (this.discoveryRun || sshRun)({ name: target.name, env: target.env, shell: 'sh', script: cmd + '\n', timeoutMs: 60000 });
+      t.log.push({ at: Date.now(), cmd, code: r.code, out: red((r.stdout || r.stderr || '').trim().slice(0, 600)) });
+      this.infra._save(); this.emit('event', { type: 'infra' });
+    }
+    await new Promise((r) => setTimeout(r, Number(process.env.APIARY_FIX_WAIT_MS ?? 20000)));
+    await this.testDevice(it.id);
+    report.outcome = it.status?.ok ? `${it.name} is reachable again.` : `${it.name} is still not reachable after the repair. Follow the checks above.`;
+    return finish();
+    function finish() { t.state = 'done'; }
   }
   async discover(id) {
     const host = this.infra.get(id), bad = (status, message) => Object.assign(new Error(message), { status });

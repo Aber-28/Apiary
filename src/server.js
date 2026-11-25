@@ -461,6 +461,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return createReadStream(f).pipe(res);
       }
       // ----- infrastructure map -----
+      { const tm = /^\/api\/infra\/([\w-]+)\/troubleshoot$/.exec(url.pathname); if (tm && req.method === 'POST') return json(res, 202, await engine.troubleshoot(tm[1])); }
       if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
       if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.audit.add('infra', { actor: 'You', action: 'added a device', detail: it.name || it.id }); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
       if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer|discover))?$/))) {

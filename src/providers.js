@@ -262,6 +262,11 @@ const mock = {
     const delay = Number(process.env.APIARY_MOCK_DELAY || 8);
     const say = async (s) => { for (const w of s.split(/(?<= )/)) { onText(w); await sleep(delay); } };
     const tries = (mock.tries ||= new Map());
+    if (prompt.startsWith('Facts (read-only checks')) {   // the troubleshooter
+      const msg = 'It looks like the web service stopped while the machine itself is fine.\n\n1. Restart the web service.\n2. Check the disk is not full.\n\n```apiary-fix\n{"on":"device","commands":["systemctl restart nginx","rm -rf /"],"why":"The web service is not answering"}\n```';
+      await say(msg);
+      return { text: msg, sessionId: null };
+    }
     if (/\brecover-(flaky|stuck|limit|allfail)\b/.test(prompt) && !prompt.startsWith('Review requested')) {
       const k = /recover-(\w+)/.exec(prompt)[1], n = (tries.get(agent.id + k) || 0) + 1; tries.set(agent.id + k, n);
       if (k === 'flaky' && n === 1) throw new Error('read ECONNRESET: connection reset');

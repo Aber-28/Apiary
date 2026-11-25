@@ -2062,10 +2062,25 @@ async function pageInfra(tab) {
       const st = i.status ? h('span', { class: 'pill ' + (i.status.ok ? 'ok' : 'err'), title: `${ago(i.status.at)}` }, i.status.ok ? 'Reachable' : 'Not reachable') : h('span', { class: 'pill' }, 'Not tested');
       const discover = i.secret ? h('button', { class: 'btn', title: 'Reads which virtual machines and containers this device runs. It never changes anything.', onclick: guard(async (e) => { const b = e.currentTarget; b.disabled = true; b.textContent = 'Looking…'; try { discoveryDialog(await api(`/api/infra/${i.id}/discover`, 'POST', {}), draw); } finally { b.disabled = false; b.textContent = 'Discover'; } }) }, 'Discover') : null;
       const test = h('button', { class: 'btn', onclick: guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { await api(`/api/infra/${i.id}/test`, 'POST', {}); } finally { draw(); } }) }, 'Test connection');
+      const tr = i.trouble, working = tr?.state === 'working';
+      const fixBtn = (i.status && !i.status.ok) || (tr && !tr.healthy) ? h('button', { class: 'btn primary', disabled: working, title: 'Finds out what is wrong, in plain words, and what to check. If it can repair it safely it asks you once.', onclick: guard(async (e) => { e.currentTarget.disabled = true; try { await api(`/api/infra/${i.id}/troubleshoot`, 'POST', {}); } finally { draw(); } }) }, working ? 'Troubleshooting…' : 'Troubleshoot') : null;
+      const rep = tr?.report, panel = tr && (rep || working) ? h('div', { class: 'trouble' },
+        h('b', {}, tr.healthy ? 'All good' : 'Troubleshooting'),
+        working && !rep ? h('p', { class: 'hint' }, 'Looking at it…') : null,
+        rep?.basic?.summary ? h('p', { style: 'margin:6px 0' }, rep.basic.summary) : null,
+        rep?.ai ? h('p', { style: 'white-space:pre-wrap;margin:6px 0' }, rep.ai) : null,
+        rep?.basic?.checks?.length && !rep.ai ? h('ol', {}, ...rep.basic.checks.map((c) => h('li', {}, c))) : null,
+        rep?.aiNote ? h('p', { class: 'hint' }, rep.aiNote) : null,
+        working && rep && rep.ai ? h('p', { class: 'hint' }, 'If a repair is possible, it is waiting for your yes on the Approvals page. You are asked once for this problem.') : null,
+        rep?.manual?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'For you to do yourself (Apiary will not run these):'), h('ul', {}, ...rep.manual.map((c) => h('li', {}, h('code', {}, c))))) : null,
+        rep?.note ? h('p', { class: 'hint' }, rep.note) : null,
+        tr.log?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'What it ran:'), h('ul', {}, ...tr.log.map((l) => h('li', {}, h('code', {}, l.cmd), l.code === 0 ? ' ✓' : ` (failed, code ${l.code})`)))) : null,
+        rep?.outcome ? h('p', { style: 'font-weight:600;margin:6px 0' }, rep.outcome) : null,
+        tr.approved ? h('p', { class: 'hint' }, 'You approved repairs for this problem. This ends once it has been back up for 15 minutes.') : null) : null;
       return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', { class: 'kv', style: 'gap:8px' }, iconIdOf(i) ? libIcon(iconIdOf(i), 26, i.name) : null, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
         h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
         i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? h('p', { style: 'white-space:pre-wrap;margin:4px 0' }, i.notes) : null,
-        h('div', { class: 'formrow', style: 'margin-top:6px' }, test, discover, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
+        panel, h('div', { class: 'formrow', style: 'margin-top:6px' }, fixBtn, test, discover, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
     });
     view.replaceChildren(head, tabs, ...allBar, ...cards, rows.length ? rows : (cards.length ? [] : h('div', { class: 'card empty' }, 'Nothing here yet. Add your Proxmox host, Raspberry Pi, VMs or websites, or press Help me map it and the CEO will ask you a few questions.')));
   };

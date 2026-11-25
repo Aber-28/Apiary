@@ -34,3 +34,11 @@ The map is saved in `~/.apiary/infra.json` and is part of an export.
 The map sits in a window you can move around in. Drag with the mouse (or use the scroll bars, or swipe on a touch screen). Use the **slider** or the **−** and **+** buttons to zoom from 30% to 200%. **Fit all** shows the whole map at once and **100%** goes back to normal size. Holding Ctrl while you scroll also zooms.
 
 Names and addresses shrink to fit their box. If one is still too long it is shortened with …, and hovering over the box shows all of it.
+
+## Troubleshoot a device that is down
+
+When a device is **Not reachable**, press **Troubleshoot** on its card. Apiary first tests it again, then looks (without logging in anywhere) at its name, its ports, the machine it runs on and its neighbours. The AI turns that into a plain-words explanation and a short list of what to check, most likely cause first. If no AI is connected you still get a built-in explanation.
+
+If a safe repair could help, the troubleshooter asks you **once** for that problem. The card on the Approvals page shows exactly what it would run and on which machine (the device itself, or the host it runs on, through a login already in your vault). Only these are ever allowed: restarting or starting a service, a container or a virtual machine, rebooting, and read-only checks such as `uptime`, `df -h` or `ping`. Anything else the AI suggests is listed for **you** to do, and Apiary does not run it. Everything it ran is shown on the card and in the audit log.
+
+You are not asked again while the problem lasts. Once the device has been back up for **15 minutes** the problem counts as over; if it goes down again later, the next press starts a fresh check and asks again. If you say no, it keeps the explanation and lists the repairs for you to do yourself.

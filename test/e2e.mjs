@@ -1809,6 +1809,37 @@ let orgIds;
       assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*html,body\{overflow-x:hidden\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /min-height:44px/); assert.match(css, /\.gsearch input\{font-size:16px!important\}/); assert.match(css, /\.team\{order:-1/);
       assert.match(css, /\.chat-head\.more \.ch-more\{display:flex\}/); assert.match(app, /class: 'ch-more'/); assert.match(app, /closest\('#menu'\)/, 'tapping outside the menu closes it');
     }
+    { // troubleshooting: explains, asks once per outage, repairs only from the safe list, closes after 15 minutes up
+      const net = await import('node:net');
+      const srv = net.createServer((s) => s.destroy()); await new Promise((r) => srv.listen(0, '127.0.0.1', r)); const livePort = srv.address().port;
+      process.env.APIARY_FIX_WAIT_MS = '0';
+      const ran = [];
+      engine.discoveryRun = async ({ script }) => { if (/apiary-ok/.test(script)) return { code: 0, stdout: 'apiary-ok', stderr: '' }; ran.push(script.trim()); dev.port = livePort; return { code: 0, stdout: 'done', stderr: '' }; };
+      engine.troubleProbe = { lookup: async () => ({ address: '127.0.0.1' }), probe: async () => ({ open: false, why: 'refused' }) };
+      engine.vault.add('Trouble SSH', 'pw-ts-1', '', 'root', { type: 'ssh', host: '127.0.0.1', port: 22, auth: 'password' });
+      const dev = engine.infra.add({ name: 'Trouble web', type: 'server', address: '127.0.0.1', port: 1, secret: 'Trouble SSH' });
+      const pend = () => Object.values(engine.store.data.approvals).filter((a) => a.kind === 'troubleshoot' && a.status === 'pending');
+      assert.equal((await call(`/api/infra/${dev.id}/troubleshoot`, 'POST', {})).status, 202);
+      await until(() => pend().length === 1, 8000);
+      assert.match(pend()[0].detail, /systemctl restart nginx/); assert.ok(!/rm -rf/.test(pend()[0].detail), 'unsafe commands are never offered for approval');
+      assert.ok(dev.trouble.report.basic.summary.length > 10 && /web service/.test(dev.trouble.report.ai), 'plain-words explanation');
+      assert.deepEqual(dev.trouble.report.manual, ['rm -rf /'], 'what it may not do is listed for the person');
+      assert.equal((await call(`/api/approvals/${pend()[0].id}/decide`, 'POST', { decision: 'approve' })).status, 200);
+      await until(() => dev.trouble.state === 'done', 8000);
+      assert.deepEqual(ran, ['systemctl restart nginx'], 'only the safe command ran'); assert.match(dev.trouble.report.outcome, /reachable again/);
+      // same outage, second click: no second approval
+      ran.length = 0; dev.port = 1;
+      await call(`/api/infra/${dev.id}/troubleshoot`, 'POST', {}); await until(() => dev.trouble.state === 'done' && ran.length === 1, 8000);
+      assert.equal(pend().length, 0, 'approval is asked once per problem');
+      // back up for over 15 minutes: the case is over, and a new outage asks again
+      dev.port = livePort; await engine.testDevice(dev.id); dev.status.since = Date.now() - 16 * 60000;
+      await call(`/api/infra/${dev.id}/troubleshoot`, 'POST', {}); assert.equal(dev.trouble.healthy, true); assert.equal(dev.trouble.approved, undefined);
+      dev.port = 1; ran.length = 0;
+      await call(`/api/infra/${dev.id}/troubleshoot`, 'POST', {}); await until(() => pend().length === 1, 8000);
+      await call(`/api/approvals/${pend()[0].id}/decide`, 'POST', { decision: 'deny' }); await until(() => dev.trouble.state === 'done', 8000);
+      assert.equal(ran.length, 0, 'a declined repair never runs'); assert.ok(dev.trouble.report.manual.includes('systemctl restart nginx'));
+      delete engine.discoveryRun; delete engine.troubleProbe; delete process.env.APIARY_FIX_WAIT_MS; srv.close();
+    }
     // testing checks the port and also signs in for real
     engine.discoveryRun = async () => ({ code: 0, stdout: 'apiary-ok\n', stderr: '' });
     const t1 = (await call(`/api/infra/${r1.body.id}/test`, 'POST', {})).body; assert.ok(t1.status.ok && /login works/.test(t1.status.detail), t1.status.detail);

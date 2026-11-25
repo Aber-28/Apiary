@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.52.0
+
+- **Troubleshoot button on devices.** When a device is not reachable, one press tests it again, looks at it (name, ports, the machine it runs on, its neighbours) and explains in plain words what is probably wrong and what to check. If a safe repair could help (restart a service, start a VM, reboot) it asks you once per problem and runs only from a short built-in list; everything else is listed for you. After the device has been back up for 15 minutes the problem is closed and the next press starts afresh.
+
 ## 0.51.0
 
 - **Cloudflare's official MCP server.** After you approve an agent's use of the Cloudflare login, that turn gets Cloudflare's own tools (the whole Cloudflare API) through their MCP server. The token only reaches the agent's process through its environment, for that turn, and is never written to a file. Claude agents for now; Google Workspace's MCP servers are next.

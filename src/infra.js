@@ -123,7 +123,8 @@ export class Infra {
         ok = true; detail = `Port ${port} is open`;
       } else throw new Error('Add an address or a web address first');
     } catch (e) { detail = e.cause?.code === 'ENOTFOUND' || e.code === 'ENOTFOUND' ? 'The name could not be found' : e.cause?.code === 'ECONNREFUSED' || e.code === 'ECONNREFUSED' ? 'Connection refused' : e.message; }
-    it.status = { ok, detail, at: Date.now(), ms: Date.now() - t0 }; this._save();
+    const prev = it.status, at = Date.now();
+    it.status = { ok, detail, at, ms: at - t0, since: prev && prev.ok === ok && prev.since ? prev.since : at }; this._save();
     return it;
   }
   // Short text for an agent: what is already on the map.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.1
+
+- **Fix:** the Copy buttons work when Apiary is opened over plain http on the local network. Before, the browser's clipboard was not available there, so Copy did nothing.
+
 ## 0.37.0
 
 - **Approve from Telegram.** Approval alerts have Approve and Deny buttons. Only the chat you linked can press them. A new secret can be denied from Telegram but not approved there, because its value is typed in Apiary.

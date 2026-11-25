@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.1
+
+- **Fix:** the Team list beside the chat no longer overlaps. Each person shows their name and up to two lines of what they do; hover for the full text.
+
 ## 0.37.0
 
 - **Approve from Telegram.** Approval alerts have Approve and Deny buttons. Only the chat you linked can press them. A new secret can be denied from Telegram but not approved there, because its value is typed in Apiary.

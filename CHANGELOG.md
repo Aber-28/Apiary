@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.51.0
+
+- **Cloudflare's official MCP server.** After you approve an agent's use of the Cloudflare login, that turn gets Cloudflare's own tools (the whole Cloudflare API) through their MCP server. The token only reaches the agent's process through its environment, for that turn, and is never written to a file. Claude agents for now; Google Workspace's MCP servers are next.
+
 ## 0.50.1
 
 - **Phone fixes.** Fields use 16 px text everywhere (including search), so iPhones no longer zoom in and push pop-ups off the screen. On a phone the project team is now a row of chips you swipe, above the chat, so you can still talk to each teammate.

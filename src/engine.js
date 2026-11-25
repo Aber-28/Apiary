@@ -739,6 +739,16 @@ export class Engine extends EventEmitter {
   }
 
   // ---------- secrets ----------
+  // MCP connectors this agent may use right now: a connected service whose login the person approved for this turn.
+  _connectorsFor(agent) {
+    const mp = this.leases.get(agent.id), out = {};
+    if (!mp) return out;
+    for (const it of this.infra.items) {
+      const lib = it.lib && libraryEntry(it.lib);
+      if (lib?.mcp && it.secret && mp.has(it.secret) && !out[lib.mcp.name]) out[lib.mcp.name] = { url: lib.mcp.url, envVar: envName(it.secret) };
+    }
+    return out;
+  }
   _leaseEnv(agent) {
     const mp = this.leases.get(agent.id);
     const us = this.userLeases.get(agent.id);
@@ -1305,7 +1315,7 @@ export class Engine extends EventEmitter {
       try {
         const run = cur.provider === agent.provider ? runner : providers.pick(cur);
         const res = await run.run({
-          agent: cur, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: rctl.signal, approval: bridge,
+          agent: cur, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
           history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
           onText: (text) => { ping(); this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }); },
           onActivity: (text) => { ping(); this.emit('event', { type: 'activity', agentId: agent.id, text }); },

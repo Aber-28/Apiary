@@ -32,7 +32,9 @@ Each entry shows its product's icon on the Library cards, on the device card and
 
 ## Cloudflare
 
-Pick **Cloudflare**, give it a name and paste an **API token**. Create the token at dash.cloudflare.com under *My Profile, API Tokens*, and give it only the permissions you need (for example *Zone, DNS, Edit* for one zone). There is no address to type: Apiary talks to Cloudflare's API. **Add and test** asks Cloudflare whether the token is active.
+Pick **Cloudflare**, give it a name and paste an **API token**. Create it at dash.cloudflare.com under *My Profile, API Tokens*, and give it only the permissions you need (for example *Zone, DNS, Edit* for one zone). There is no username, password or address to type. **Add and test** asks Cloudflare whether the token is active.
+
+Cloudflare's own **MCP server** (`https://mcp.cloudflare.com/mcp`, the official way for AI agents to use the whole Cloudflare API) is built in. When an agent needs Cloudflare it asks to use the login; once you approve, that turn has Cloudflare's tools available. The token goes to the agent's process through its environment for that turn only. It is never written into a file, the chat or the logs. For now this works for **Claude** agents; Codex agents can still use the token for direct calls.
 
 ## Google (Drive, Gmail, Calendar)
 

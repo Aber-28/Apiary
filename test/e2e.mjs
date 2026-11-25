@@ -1573,6 +1573,13 @@ let orgIds;
     assert.ok(!cliArgs.join(' ').includes('example-token-value'), 'B1: the token is not in the arguments');
     assert.equal((fsStat(cfg.configFile).mode & 0o777), 0o600, 'B1: the settings file is private');
     cfg.cleanup(); assert.ok(!fsExists(cfg.configFile), 'B1: removed after the run');
+    { // MCP connectors: the file names an environment variable, never the token
+      const c2 = writeApprovalConfig(null, { cloudflare: { url: 'https://mcp.cloudflare.com/mcp', envVar: 'APIARY_SECRET_CF' } });
+      const txt = fsRead(c2.configFile, 'utf8'), j = JSON.parse(txt).mcpServers;
+      assert.deepEqual(Object.keys(j), ['cloudflare']); assert.equal(j.cloudflare.url, 'https://mcp.cloudflare.com/mcp'); assert.equal(j.cloudflare.headers.Authorization, 'Bearer ${APIARY_SECRET_CF}');
+      assert.ok(claudeCliArgs({ access: 'full', system: 'x', mcpConfig: c2.configFile }).includes(c2.configFile), 'full access still gets the connector');
+      c2.cleanup();
+    }
     // C1 a decision made without asking is recorded and shown in the chat
     const cagent = engine._add({ id: 'auto1', name: 'Auto tester', role: 'Test', provider: 'claude', method: 'cli', model: '', cwd: tmp, access: 'safe', parentId: null, depth: 0, approvals: true, memKey: 'auto1' });
     engine.setTrust(cagent.id, { level: 5 });
@@ -1773,6 +1780,13 @@ let orgIds;
         const cf2 = (await call('/api/library/cloudflare/add', 'POST', { name: 'Lib CF bad', secret: 'cf-bad-token-999' })).body;
         const cf2t = (await call(`/api/infra/${cf2.id}/test`, 'POST', {})).body; assert.equal(cf2t.status.ok, false); assert.ok(!cf2t.status.detail.includes('cf-bad-token-999'), 'no token in the answer');
         assert.equal((await call('/api/library/cloudflare/add', 'POST', { name: 'Lib CF none' })).status, 400, 'a token is required');
+        { // only an approved (leased) login turns on Cloudflare's MCP server for that turn
+          assert.deepEqual(engine._connectorsFor({ id: 'nobody' }), {});
+          engine.leases.set('mcp-agent', new Map([[cf.body.secret, 'cf-good-token-123']]));
+          const got = engine._connectorsFor({ id: 'mcp-agent' }); assert.equal(got.cloudflare.url, 'https://mcp.cloudflare.com/mcp'); assert.match(got.cloudflare.envVar, /^APIARY_SECRET_/); assert.ok(!JSON.stringify(got).includes('cf-good-token'), 'no token in the connector');
+          engine.leases.delete('mcp-agent');
+          assert.match(engine.infra.summary(), /MCP connector "cloudflare"/);
+        }
         const { generateKeyPairSync } = await import('node:crypto');
         const pem = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
         const key = JSON.stringify({ type: 'service_account', client_email: 'bot@demo-project.iam.gserviceaccount.com', private_key: pem });

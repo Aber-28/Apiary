@@ -130,6 +130,7 @@ export class Infra {
   summary() {
     if (!this.items.length) return '';
     const nm = (id) => this.get(id)?.name;
-    return this.items.filter((i) => i.state !== 'proposed').map((i) => `- ${i.name} (${TYPES[i.type] || i.type})${i.address ? ' ' + i.address : ''}${i.parentId ? ` runs on ${nm(i.parentId)}` : ''}${(i.links || []).length ? ` connects to ${i.links.map((l) => nm(l.to)).join(', ')}` : ''}${i.secret ? ` [vault: ${i.secret}]` : ''}`).join('\n');
+    const mcp = (i) => { const e = i.lib && libraryEntry(i.lib); return e?.mcp && i.secret ? ` [MCP connector "${e.mcp.name}": ask to use its login "${i.secret}" and its tools appear on your next turn]` : ''; };
+    return this.items.filter((i) => i.state !== 'proposed').map((i) => `- ${i.name} (${TYPES[i.type] || i.type})${i.address ? ' ' + i.address : ''}${mcp(i)}${i.parentId ? ` runs on ${nm(i.parentId)}` : ''}${(i.links || []).length ? ` connects to ${i.links.map((l) => nm(l.to)).join(', ')}` : ''}${i.secret ? ` [vault: ${i.secret}]` : ''}`).join('\n');
   }
 }

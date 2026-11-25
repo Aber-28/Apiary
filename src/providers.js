@@ -83,21 +83,24 @@ function runProc(cmd, args, { cwd, input, signal, onLine, env }) {
 // would prompt is refused.
 // The bridge's settings, including this run's token, go in a private file (readable by this user only) instead of the
 // command line, where other users could read them in the process list. The caller removes the file when the run ends.
-export function writeApprovalConfig(approval) {
+export function writeApprovalConfig(approval, connectors = {}) {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'apiary-'));
   const file = path.join(dir, 'mcp.json');
-  const mcpServers = { apiary: { command: process.execPath, args: [approval.bridge], env: { APIARY_APPROVAL_URL: approval.url, APIARY_APPROVAL_TOKEN: approval.token } } };
+  const mcpServers = {};
+  if (approval) mcpServers.apiary = { command: process.execPath, args: [approval.bridge], env: { APIARY_APPROVAL_URL: approval.url, APIARY_APPROVAL_TOKEN: approval.token } };
+  // Connectors (for example Cloudflare's MCP server). The file only names an environment variable; the token itself reaches the process through its environment.
+  for (const [name, c] of Object.entries(connectors)) mcpServers[name] = { type: 'http', url: c.url, headers: { Authorization: `Bearer \${${c.envVar}}` } };
   writeFileSync(file, JSON.stringify({ mcpServers }), { mode: 0o600 });
   return { configFile: file, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-export function claudeCliArgs({ access, model, system, dirs = [], sessionId, approval }) {
+export function claudeCliArgs({ access, model, system, dirs = [], sessionId, approval, mcpConfig }) {
   const full = access === 'full';
   const args = ['-p', '--output-format', 'stream-json', '--verbose',
     '--permission-mode', full ? 'bypassPermissions' : 'acceptEdits'];
   if (!full && approval) {
     args.push('--mcp-config', approval.configFile, '--permission-prompt-tool', 'mcp__apiary__approve');
-  }
+  } else if (mcpConfig) args.push('--mcp-config', mcpConfig);
   args.push('--append-system-prompt', system);
   if (model) args.push('--model', model);
   for (const d of dirs) args.push('--add-dir', d);
@@ -106,9 +109,10 @@ export function claudeCliArgs({ access, model, system, dirs = [], sessionId, app
 }
 
 const claudeCli = {
-  async run({ agent, prompt, system, env, dirs = [], signal, approval, onText, onActivity, onLog }) {
-    const cfg = approval && agent.access !== 'full' ? writeApprovalConfig(approval) : null;
-    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval: cfg ? { configFile: cfg.configFile } : undefined });
+  async run({ agent, prompt, system, env, dirs = [], signal, approval, connectors, onText, onActivity, onLog }) {
+    const useBridge = approval && agent.access !== 'full', has = connectors && Object.keys(connectors).length;
+    const cfg = useBridge || has ? writeApprovalConfig(useBridge ? approval : null, connectors || {}) : null;
+    const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval: useBridge ? { configFile: cfg.configFile } : undefined, mcpConfig: !useBridge && cfg ? cfg.configFile : undefined });
     let sessionId = agent.sessionId, streamed = '', final = null, isError = false, usage = null;
     let runResult;
     try {

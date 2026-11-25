@@ -21,6 +21,9 @@ The test first checks that the address answers on its port. For an **SSH login**
 - **Proxmox:** SSH for Discovery, or an API token.
 - **Home Assistant, n8n, Coolify:** a long-lived token or API key.
 - **Nginx Proxy Manager:** the username and password of its admin page.
+- **Kubernetes:** a service account token for the API, or SSH into a control-plane node.
+- **UniFi, Pi-hole, AdGuard Home, Uptime Kuma:** the username and password of the admin page.
+- **Portainer, Grafana, Gitea, TrueNAS:** an access token or API key (TrueNAS also offers SSH).
 - **Website:** no login; Apiary only checks that it answers.
 
 ## Icons

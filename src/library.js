@@ -11,6 +11,8 @@ const di = (s) => `${DI}${s}.svg`, si = (s) => `${SI}${s}.svg`;
 const SSH = (note) => ({ id: 'ssh', label: 'SSH login', secret: 'ssh', port: 22, user: 'root', note: note || 'The safest way in. Use a private key if you can, or a password.' });
 const TOKEN = (label, note, port) => ({ id: 'token', label, secret: 'token', port: port || 0, user: '', note });
 
+const LOGIN = (port, note, user) => ({ id: 'login', label: 'Username and password', secret: 'login', port, user: user || '', note });
+
 export const LIBRARY = [
   { id: 'proxmox', name: 'Proxmox VE', type: 'proxmox', blurb: 'Hypervisor for virtual machines and containers', icons: [di('proxmox'), si('proxmox')],
     methods: [SSH('Lets Discovery list your virtual machines and containers.'), TOKEN('API token', 'Create it in Datacenter, Permissions, API Tokens. Paste it as user@realm!tokenid=secret.', 8006)], web: { scheme: 'https', port: 8006 } },
@@ -27,6 +29,20 @@ export const LIBRARY = [
   { id: 'n8n', name: 'n8n', type: 'service', blurb: 'Workflow automation', icons: [di('n8n'), si('n8n')], methods: [TOKEN('API key', 'Create it in n8n under Settings, n8n API.', 5678)], web: { scheme: 'http', port: 5678 } },
   { id: 'npm', name: 'Nginx Proxy Manager', type: 'service', blurb: 'Reverse proxy with a web page', icons: [di('nginx-proxy-manager')], methods: [{ id: 'login', label: 'Username and password', secret: 'login', port: 81, user: '', note: 'The login you use on its admin page.' }], web: { scheme: 'http', port: 81 } },
   { id: 'coolify', name: 'Coolify', type: 'service', blurb: 'Self-hosted app platform', icons: [di('coolify'), si('coolify')], methods: [TOKEN('API token', 'Create it in Coolify under Keys and Tokens, API tokens.', 8000)], web: { scheme: 'http', port: 8000 } },
+  { id: 'windows', name: 'Windows server', type: 'server', blurb: 'Windows computer with OpenSSH Server', icons: [di('windows-11')], methods: [{ ...SSH('Windows needs the OpenSSH Server feature switched on.'), user: 'Administrator' }] },
+  { id: 'kubernetes', name: 'Kubernetes', type: 'service', blurb: 'Cluster, through its API or a control-plane node', icons: [di('kubernetes'), si('kubernetes')],
+    methods: [TOKEN('Service account token', 'Create a service account and paste its token. The address is the API server.', 6443), SSH('SSH into a control-plane node and use kubectl there.')], web: { scheme: 'https', port: 6443 } },
+  { id: 'unifi', name: 'UniFi controller', type: 'service', blurb: 'UniFi network: switches and access points', icons: [di('unifi')],
+    methods: [LOGIN(443, 'A local admin account on the controller works best (not your Ubiquiti cloud login).')], web: { scheme: 'https', port: 443 } },
+  { id: 'mikrotik', name: 'MikroTik router', type: 'router', blurb: 'RouterOS router or switch', icons: [di('mikrotik'), si('mikrotik')], methods: [{ ...SSH(), user: 'admin' }] },
+  { id: 'pfsense', name: 'pfSense firewall', type: 'router', blurb: 'Firewall and router', icons: [di('pfsense'), si('pfsense')], methods: [SSH('Enable Secure Shell in System, Advanced, Admin Access.')] },
+  { id: 'truenas', name: 'TrueNAS', type: 'nas', blurb: 'Storage server', icons: [di('truenas'), si('truenas')], methods: [SSH('Turn on the SSH service first.'), TOKEN('API key', 'Create it under the user menu, API Keys.', 443)], web: { scheme: 'https', port: 443 } },
+  { id: 'portainer', name: 'Portainer', type: 'service', blurb: 'Web page to manage Docker', icons: [di('portainer'), si('portainer')], methods: [TOKEN('Access token', 'Create it in your user settings, Access tokens.', 9443)], web: { scheme: 'https', port: 9443 } },
+  { id: 'pihole', name: 'Pi-hole', type: 'service', blurb: 'Network-wide ad blocker', icons: [di('pi-hole')], methods: [LOGIN(80, 'The password you use on its admin page.')], web: { scheme: 'http', port: 80 } },
+  { id: 'adguard', name: 'AdGuard Home', type: 'service', blurb: 'Network-wide ad and tracker blocker', icons: [di('adguard-home')], methods: [LOGIN(3000, 'The login of its admin page.')], web: { scheme: 'http', port: 3000 } },
+  { id: 'grafana', name: 'Grafana', type: 'service', blurb: 'Dashboards and graphs', icons: [di('grafana'), si('grafana')], methods: [TOKEN('Service account token', 'Create it under Administration, Service accounts.', 3000)], web: { scheme: 'http', port: 3000 } },
+  { id: 'uptimekuma', name: 'Uptime Kuma', type: 'service', blurb: 'Uptime monitoring', icons: [di('uptime-kuma')], methods: [LOGIN(3001, 'The login of its admin page.')], web: { scheme: 'http', port: 3001 } },
+  { id: 'gitea', name: 'Gitea', type: 'service', blurb: 'Self-hosted Git', icons: [di('gitea'), si('gitea')], methods: [TOKEN('Access token', 'Create it in Settings, Applications.', 3000)], web: { scheme: 'http', port: 3000 } },
   { id: 'website', name: 'Website', type: 'website', blurb: 'A website you want to keep an eye on', icons: [], methods: [{ id: 'web', label: 'No login needed', secret: '', port: 0, user: '', note: 'Apiary only checks that it answers.' }] },
 ];
 

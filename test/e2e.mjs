@@ -1617,7 +1617,8 @@ let orgIds;
     await call('/api/vault/init', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
     await call('/api/vault/unlock', 'POST', { passphrase: 'correct horse battery' }).catch(() => {});
     const lib = (await call('/api/library')).body;
-    assert.ok(lib.entries.length >= 10 && lib.entries.some((e) => e.id === 'proxmox'));
+    assert.ok(lib.entries.length >= 20 && ['proxmox', 'unifi', 'kubernetes', 'docker'].every((id) => lib.entries.some((e) => e.id === id)));
+    assert.equal(new Set(lib.entries.map((e) => e.id)).size, lib.entries.length, 'library ids are unique');
     assert.ok(!JSON.stringify(lib).includes('raw.githubusercontent'), 'icon web addresses stay on the server');
     assert.ok(LIBRARY.every((e) => e.icons.every((u) => /^https:\/\/raw\.githubusercontent\.com\//.test(u))), 'only fixed public icon addresses are ever fetched');
     // a device from the Library: login in the vault, device linked to it, nothing secret on the map

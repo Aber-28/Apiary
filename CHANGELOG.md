@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.41.2
+
+- **More in the Library:** UniFi controller, Kubernetes, Windows server, MikroTik, pfSense, TrueNAS, Portainer, Pi-hole, AdGuard Home, Grafana, Uptime Kuma and Gitea, next to Docker, Proxmox, Home Assistant and the rest. 26 in all.
+
 ## 0.41.1
 
 - **Past decisions are archived after 3 hours** (it was 24). They are still listed under *Archived decisions* on the Approvals page.

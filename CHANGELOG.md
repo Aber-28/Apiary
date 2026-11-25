@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.43.0
+
+- **Reviewer agents.** Finished delegated work is checked by another teammate before it counts as done. Changes needed go back to the worker with notes; a second failure blocks the task and tells the lead why in plain words. Each review is a task with its own ID.
+- A "Review finished work" switch on the Delegation rules page (on by default).
+
 ## 0.42.0
 
 - **Edit the plan while you approve it.** Every step is an editable row: change it, choose who does it, remove it or add one, then approve. The lead is told to follow your version.

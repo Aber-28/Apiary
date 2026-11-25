@@ -153,6 +153,9 @@ export class Engine extends EventEmitter {
     return this.limits;
   }
 
+  // Finished team work is checked by another teammate before it counts as done. On by default.
+  get reviewWork() { return this.store.data.settings.reviewWork !== false; }
+  setReviewWork(v) { this.store.data.settings.reviewWork = !!v; this.store.save(); return this.reviewWork; }
   get approvalsDefault() { return this.store.data.settings.approvalsDefault !== false; }
   setApprovalsDefault(v) { this.store.data.settings.approvalsDefault = !!v; this.store.save(); return this.approvalsDefault; }
 
@@ -1890,7 +1893,13 @@ export class Engine extends EventEmitter {
       const text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, prompt, lead, { taskId: task.id }));
       let note = '';
       if (lead.git && worker.branch) { note = await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
-      return finish(`${text || '(no output)'}${note}\n\nPre-check results:\n${summary.join('\n') || '(none)'}${done.length ? '\nPrerequisites done first:\n' + done.join('\n') : ''}`);
+      let final = text, reviewTxt = '';
+      if (this.reviewWork && !/^\W*(NOT STARTED|FAILED)/i.test(text || '')) {
+        const rv = await this._reviewLoop({ lead, worker, roster, task, a, projRoot, text });
+        final = rv.text; reviewTxt = rv.summary ? `\n\nReview:\n${rv.summary}` : '';
+        if (rv.failed) return finish(`FAILED REVIEW. ${rv.reviewer.name} still asks for changes after two rounds: ${clipText(rv.notes, 300)}\n\nThe work so far:\n${final || '(no output)'}${note}${reviewTxt}\nDecide whether to change the task, try another teammate, or ask the human.`);
+      }
+      return finish(`${final || '(no output)'}${note}${reviewTxt}\n\nPre-check results:\n${summary.join('\n') || '(none)'}${done.length ? '\nPrerequisites done first:\n' + done.join('\n') : ''}`);
     } catch (e) {
       this.waitingOn.get(lead.id)?.delete(worker.id);
       if (e.name === 'AbortError') throw e;
@@ -1899,6 +1908,38 @@ export class Engine extends EventEmitter {
   }
 
   // The assignee asks one teammate for a verdict on the task. Unclear or missing replies are reported as such, never silently approved.
+  // ----- review: another teammate checks finished work; changes are sent back to the worker with notes, twice at most -----
+  _pickReviewer(roster, worker) {
+    const others = roster.filter((m) => m.id !== worker.id && m.consult !== false);
+    return others.find((m) => /review|qa\b|quality|test|editor|audit|check/i.test(`${m.title || ''} ${m.role || ''} ${m.department || ''}`)) || others[0] || null;
+  }
+  _taskNote(task, text) { const t = this.tasks.all[task.id]; if (!t) return; t.log.push({ at: Date.now(), text }); t.updatedAt = Date.now(); this.store.save(); }
+  async _reviewLoop({ lead, worker, roster, task, a, projRoot, text }) {
+    const reviewer = this._pickReviewer(roster, worker); if (!reviewer) return { text, summary: '', failed: false };
+    const root = this.rootOf(worker).id, lines = [];
+    for (let round = 1; round <= 2; round++) {
+      if (this.stopped.has(lead.id)) throw Object.assign(new Error('stopped'), { name: 'AbortError' });
+      if (!this._peerAllowed(root)) { lines.push('Review skipped: the project reached its limit of agent-to-agent messages this hour.'); this._peerLimitNote(worker); return { text, summary: lines.join('\n'), failed: false }; }
+      if (this._wouldDeadlock(worker.id, reviewer.id)) { lines.push(`Review skipped: ${reviewer.name} is waiting on ${worker.name}.`); return { text, summary: lines.join('\n'), failed: false }; }
+      this._peerCounted(root); this._edge(worker.id, reviewer.id);
+      this._msg(lead, { role: 'system', text: `${reviewer.name} is reviewing ${worker.name}'s work on ${task.code}${round > 1 ? ' (round 2)' : ''}`, agentId: reviewer.id });
+      if (lead.git && reviewer.branch) await this._sync(lead, reviewer);
+      const prompt = `Review requested by ${lead.name} for ${worker.name}'s work on ${task.code}${round > 1 ? ` (this is round ${round}: ${worker.name} changed things after your notes)` : ''}.\n\nThe task was:\n${a.task}\n\n${worker.name}'s report:\n${clipText(text, 3000)}\n\nCheck the actual work, not only the report. Do not change anything yourself. Reply in this shape:\nVERDICT: PASS or CHANGES NEEDED\nNOTES: what is good, or exactly what must change (short and specific)`;
+      let out;
+      try { out = await this._onProject(reviewer.id, projRoot, () => this.send(reviewer.id, prompt, lead)); }
+      catch (e) { if (e.name === 'AbortError') throw e; lines.push(`Review could not be done (${e.message}).`); return { text, summary: lines.join('\n'), failed: false }; }
+      finally { this.waitingOn.get(worker.id)?.delete(reviewer.id); }
+      const r = parseReview(out);
+      this._taskNote(task, `Review round ${round} by ${reviewer.name}: ${r.verdict === 'PASS' ? 'passed' : r.verdict === 'CHANGES' ? 'changes needed' : 'no clear verdict'}${r.notes ? ' - ' + clipText(r.notes, 200) : ''}`);
+      lines.push(`Round ${round}, ${reviewer.name}: ${r.verdict === 'PASS' ? 'passed' : r.verdict === 'CHANGES' ? 'changes needed: ' + r.notes : 'no clear verdict, so it was accepted'}`);
+      if (r.verdict !== 'CHANGES') return { text, summary: lines.join('\n'), failed: false, reviewer };
+      if (round === 2) return { text, summary: lines.join('\n'), failed: true, notes: r.notes, reviewer };
+      this._msg(lead, { role: 'system', text: `${reviewer.name} asked ${worker.name} for changes on ${task.code}: ${clipText(r.notes, 200)}`, agentId: worker.id });
+      text = await this._onProject(worker.id, projRoot, () => this.send(worker.id, `${reviewer.name} reviewed your work on ${task.code} and asked for changes:\n\n${r.notes}\n\nMake these changes now. Reply with what you changed.`, lead, { taskId: task.id }));
+      if (lead.git && worker.branch) { await this._mergeChild(lead, worker, true); await this._sync(lead, worker); }
+    }
+    return { text, summary: lines.join('\n'), failed: false };
+  }
   async _consult(worker, adv, task) {
     const root = this.rootOf(worker).id;
     const res = { adviser: adv, verdict: 'NO ANSWER', reason: '', prerequisites: [] };
@@ -2057,6 +2098,14 @@ export function parseSpawns(reply) {
 const clipText = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 // Reads the VERDICT / REASON / PREREQUISITE lines of a pre-check reply.
+// A reviewer answers "VERDICT: PASS" or "VERDICT: CHANGES NEEDED" with NOTES saying what must change.
+export function parseReview(text) {
+  const t = String(text || '');
+  const v = /^\W*VERDICT\W*(PASS(?:ED)?|CHANGES(?:\s+NEEDED)?)\b/im.exec(t);
+  const m = /^\W*NOTES?\W*([\s\S]+)$/im.exec(t), notes = (m ? m[1] : '').trim().slice(0, 1200);
+  if (!v) return { verdict: 'UNCLEAR', notes: clipText(t, 300) };
+  return { verdict: /^PASS/i.test(v[1]) ? 'PASS' : 'CHANGES', notes };
+}
 export function parseVerdict(text) {
   const t = String(text || '');
   const v = /^\W*VERDICT\W*(GO|CONDITIONS?|BLOCK)\b/im.exec(t);

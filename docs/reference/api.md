@@ -37,7 +37,7 @@ The web interface uses a small JSON API. It is the same API the `apiary` command
 | `GET/POST /api/teams`, `PUT/DELETE /api/teams/:id` | Teams (a lead plus members); `POST /api/agents` accepts `team` |
 | `GET/POST /api/memory`, `DELETE /api/memory/:id` | Search (`q`, `agent`, `kind`) and add notes, forget items |
 | `GET /api/memory/preview/:agentId?q=` | The MEMORY text an agent would be given |
-| `PUT /api/settings` | also accepts `memory` (true/false) |
+| `PUT /api/settings` | also accepts `memory` and `reviewWork` (true/false) |
 
 
 

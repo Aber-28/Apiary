@@ -298,6 +298,11 @@ const mock = {
       else if (/firewall/i.test(prompt) && (agent.title || agent.name) === 'Security') out = 'VERDICT: CONDITIONS\nREASON: The current rules must be reviewed first.\nPREREQUISITE: Review and write down the current firewall rules';
       else if (/garble/i.test(prompt) && (agent.title || agent.name) === 'Research') out = 'Sounds fine to me.';
       else out = 'VERDICT: GO\nREASON: Nothing in my area stands in the way.';
+    } else if (prompt.includes('Review requested by')) {
+      onActivity('Reviewing the work');
+      if (/reviewalways/i.test(prompt) || (/reviewfail/i.test(prompt) && !/round 2/i.test(prompt))) out = 'VERDICT: CHANGES NEEDED\nNOTES: Add a short note explaining the result.';
+      else if (/reviewgarble/i.test(prompt)) out = 'Looks fine to me.';
+      else out = 'VERDICT: PASS\nNOTES: It matches the task.';
     } else if (prompt.includes('Prerequisite for ') && agent.member) {
       onActivity('Doing the prerequisite');
       if (/failprereq/i.test(prompt)) out = 'FAILED: could not complete it.';

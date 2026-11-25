@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.2
+
+- **Secrets vault is compact.** Each secret is a small box showing its name and who it is assigned to. Click the name to open its details, connection, who may use it and its actions in a window.
+
 ## 0.32.1
 
 - **Fix:** All agents lists the whole team, including the CEO and its team members (it showed "No agents yet" when the team had no project lead).

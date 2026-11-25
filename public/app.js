@@ -438,7 +438,7 @@ function pageProject(leadId, general = false) {
     if (msgsEl.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't wipe a note being typed
     const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
     refreshTaskIndex();
-    const list = (S.msgs[a.id] || []).map((m) => {
+    const list = (S.msgs[a.id] || []).flatMap((m) => {
       const t = timeOf(m.ts);
       if (m.role === 'system') {
         // "Asked Neo: …", "Told Neo: …" and "Assigned to Neo: …" are handoffs: shown as @Name with their text, from this chat's agent.
@@ -448,7 +448,7 @@ function pageProject(leadId, general = false) {
       }
       if (m.role === 'user' && !m.from) return bubble('me', null, null, t, linkify(m.text || ''));
       if (m.role === 'user' && m.from) return bubble('them', m.from.name, colourOf(m.from.id), t, linkify(m.text || ''));
-      if (m.role === 'report') return bubble('them', 'Reports from sub-agents', '#64748b', t, linkify(m.text || ''));
+      if (m.role === 'report') return reportBubbles(m.text, t);
       const who = m.by ? m.by.name : (!a.parentId && !a.kind && !a.member ? ownerOf(a)?.name : null) || a.name;
       return bubble('them', who, colourOf(m.by?.id || a.id), t, linkify(m.text || ''));
     });
@@ -1204,6 +1204,22 @@ function linkify(text) {
   return out;
 }
 // side: 'me' (yours, right) or 'them' (an agent, left, in its colour)
+// A report holds several sub-agents' replies under "### Name (T-…)" headings. Each one is shown under its own name.
+function reportBubbles(text, time) {
+  const str = String(text || '');
+  const cut = str.search(/^\s*(Notes from Apiary:|Continue:)/m);
+  const main = cut >= 0 ? str.slice(0, cut) : str;
+  const rest = cut >= 0 ? str.slice(cut).trim() : '';
+  const out = main.split(/^### /m).slice(1).map((sec) => {
+    const nl = sec.indexOf('\n');
+    const head = (nl < 0 ? sec : sec.slice(0, nl)).trim();
+    const body = nl < 0 ? '' : sec.slice(nl + 1).trim();
+    const name = head.replace(/\s*\(T-\d+[^)]*\)\s*$/, '').trim() || 'Sub-agent';
+    return bubble('them', name, colourOf(name), time, linkify(body || '(no reply)'));
+  });
+  if (rest) out.push(h('div', { class: 'cb-line' }, ...linkify(rest)));
+  return out.length ? out : [bubble('them', 'Report', '#64748b', time, linkify(str))];
+}
 function bubble(side, who, colour, time, body) {
   const bub = h('div', { class: 'cb-bub', style: side === 'them' ? `--c:${colour}` : '' },
     who ? h('div', { class: 'cb-who', style: `color:${colour}` }, who) : null,

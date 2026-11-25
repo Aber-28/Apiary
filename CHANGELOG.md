@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.33.2
+
+- **Reports show the sub-agent's name.** Each sub-agent's reply appears as its own bubble under its name and colour, instead of one grey "Reports from sub-agents" box.
+
 ## 0.33.1
 
 - **Runbooks have a "why".** Each runbook has its title, a short explanation of why it is needed, and its steps. The title is kept as written.
@@ -289,3 +293,4 @@ Security hardening after a full review.
 - Terminal (CLI) and web (API key / token) connections
 - GitHub: clone, branch and checkout per agent, auto-commit, merge, pull requests
 - Take over in your own terminal; `apiary` command; documentation in `docs/`
+

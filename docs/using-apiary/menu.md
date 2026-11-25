@@ -10,3 +10,8 @@ The menu on the left is a tree. Each heading opens to show its pages and, where 
 - **Settings:** Appearance, Telegram alerts, Setup guide. Folder *Data*: Backups, Export and import, Factory reset. Folder *System*: Updates, Startup, Folders.
 
 The page you are on is always opened for you, and the path above the page (for example Settings / Data / Backups) follows the menu. The search box at the top (Ctrl+K) finds things without using the menu.
+
+## On a phone
+
+Apiary works in a phone browser. Tap the menu button (top left) to open the menu; tap outside it to close it. The search is the magnifier at the top. In a project, tap **Details** to show the stage, owner and action buttons. Wide things such as tables, the task columns and the map swipe sideways. To open Apiary from your phone, see [Using it beyond your own computer](../reference/security.md) (use a VPN or SSH tunnel, not the open internet).
+

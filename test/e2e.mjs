@@ -1786,6 +1786,11 @@ let orgIds;
       } finally { globalThis.fetch = realFetch; }
     }
     assert.match(fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8'), /forceBottom = true;[\s\S]*?\/messages`, 'POST'/, 'sending a chat message scrolls to it');
+    { // phones: no sideways scrolling, a compact top bar and chat header, comfortable touch targets
+      const css = fsRead(path.join(import.meta.dirname, '..', 'public', 'style.css'), 'utf8'), idx = fsRead(path.join(import.meta.dirname, '..', 'public', 'index.html'), 'utf8'), app = fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8');
+      assert.match(idx, /viewport-fit=cover/); assert.match(css, /@media \(max-width:900px\)\{\s*html,body\{overflow-x:hidden\}/); assert.match(css, /\.doc-top\{display:none\}/); assert.match(css, /min-height:44px/);
+      assert.match(css, /\.chat-head\.more \.ch-more\{display:flex\}/); assert.match(app, /class: 'ch-more'/); assert.match(app, /closest\('#menu'\)/, 'tapping outside the menu closes it');
+    }
     // testing checks the port and also signs in for real
     engine.discoveryRun = async () => ({ code: 0, stdout: 'apiary-ok\n', stderr: '' });
     const t1 = (await call(`/api/infra/${r1.body.id}/test`, 'POST', {})).body; assert.ok(t1.status.ok && /login works/.test(t1.status.detail), t1.status.detail);

@@ -124,6 +124,9 @@ if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includ
 }
 $('#theme').onclick = themeMenu;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
+// tapping outside the open menu (or pressing Escape) closes it
+document.addEventListener('click', (e) => { const sd = $('#side'); if (sd.classList.contains('open') && !sd.contains(e.target) && !e.target.closest('#menu')) sd.classList.remove('open'); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#side').classList.remove('open'); });
 applyTheme(window.apiaryTheme.get());
 
 // ---------- sidebar ----------
@@ -471,17 +474,19 @@ function pageProject(leadId, general = false) {
     el.head.replaceChildren(...[
       h('div', { class: 't' }, h('h1', {}, a.name), h('div', { class: 'hint' }, `${!a.parentId && !a.kind && !a.member ? `Led by ${ownerOf(a)?.name || 'your CEO'}` : a.role || ''} · ${PNAME[a.provider] || a.provider} · ${a.method === 'api' ? 'Web' : 'Terminal'}`, a.git ? h('span', { class: 'mono' }, ` · ${a.git.branch}`) : '')),
       !a.parentId && a.plan ? (() => { const st = planStats(a.plan); return h('a', { class: 'chip s-inprogress', href: '#', onclick: (e) => { e.preventDefault(); S.tab = 'plan'; drawTabs(); drawBody(); }, 'aria-label': `Project ${st.pct} percent done. Open the plan` }, `${st.pct}% done`); })() : null,
+      pill(a.status),
+      h('button', { class: 'btn only-small ch-toggle', 'aria-expanded': String(el.head.classList.contains('more')), onclick: () => { el.head.classList.toggle('more'); drawHead(); } }, el.head.classList.contains('more') ? 'Hide details' : 'Details'),
+      h('div', { class: 'ch-more' }, ...[
       modelPicker(a),
       !a.parentId && !a.kind ? stagePicker(a) : null,
       !a.parentId && !a.kind ? ownerPicker(a) : null,
-      pill(a.status),
       a.kind === 'general' || a.title || a.mdFile ? h('button', { class: 'btn', onclick: () => openProfile(a) }, 'Edit profile') : null,
       a.status !== 'idle' ? h('button', { class: 'btn', onclick: guard(() => api(`/api/agents/${a.id}/stop`, 'POST', {})) }, 'Stop') : null,
       a.git ? h('button', { class: 'btn', onclick: () => openReview(a) }, 'Review changes') : null,
       a.method !== 'api' ? h('button', { class: 'btn', onclick: guard(() => takeOver(a)) }, 'Take over') : null,
       l.git && a.id === l.id ? (l.git.prUrl ? h('a', { class: 'btn', href: l.git.prUrl, target: '_blank', rel: 'noopener' }, 'View pull request') : h('button', { class: 'btn', onclick: () => openPrDialog(l) }, 'Open pull request')) : null,
       a.id === l.id && !general ? h('button', { class: 'btn', title: 'Keep this goal, plan and team to start similar projects', onclick: () => openSaveTemplate(l) }, 'Save as template') : null,
-      a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents for good? To keep everything, set the stage to Closed instead. Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean));
+      a.id === l.id && !general ? h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Delete "${a.name}" and its sub-agents for good? To keep everything, set the stage to Closed instead. Git branches are kept.`)) return; await api(`/api/agents/${a.id}`, 'DELETE'); location.hash = '#/projects'; }) }, 'Delete') : null].filter(Boolean))].filter(Boolean));
   };
   const TABS = { chat: 'Chat', plan: 'Plan', org: 'Organisation', files: 'Files', terminal: 'Terminal' };
   const drawTabs = () => el.tabs.replaceChildren(...(general ? (S.orgDone ? ['chat', 'org'] : ['chat']) : Object.keys(TABS)).map((t) => h('button', { role: 'tab', 'aria-selected': String(S.tab === t), onclick: () => { S.tab = t; drawTabs(); drawBody(); } }, TABS[t])));

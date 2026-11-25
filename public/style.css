@@ -290,3 +290,36 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .secret-row{display:grid;grid-template-columns:minmax(150px,1.1fr) 78px minmax(0,2fr);align-items:center;gap:6px 16px}
 .secret-row .secret-id{white-space:nowrap}
 @media (max-width:720px){.secret-row{grid-template-columns:1fr auto}.secret-row>small.hint:last-child{grid-column:1/-1}}
+
+/* ---- phones ---- */
+.ch-more{display:contents}.ch-toggle{display:none}
+html{-webkit-text-size-adjust:100%}
+@media (max-width:900px){
+ html,body{overflow-x:hidden}
+ .shell{min-height:100dvh}.main{height:100dvh}.side{height:100dvh;padding-bottom:calc(18px + env(safe-area-inset-bottom))}
+ .doc-top{display:none}
+ .top{gap:8px;padding:8px 12px;min-height:56px}
+ .crumbs{min-width:0;flex:1 1 0}
+ .gsearch{flex:0 0 auto}
+ .ch-toggle{display:inline-flex}
+ .ch-more{display:none;width:100%;flex-wrap:wrap;gap:8px;align-items:center}
+ .chat-head.more .ch-more{display:flex}
+ .chat-head{padding-top:10px;padding-bottom:10px;gap:8px}.chat-head .t{min-width:0}
+ .tabs{overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}.tabs::-webkit-scrollbar{display:none}.tabs button{flex:0 0 auto}
+ .composer{padding-bottom:calc(10px + env(safe-area-inset-bottom))}
+ .view table{display:block;overflow-x:auto;max-width:100%}
+ .board{scroll-snap-type:x proximity;grid-template-columns:repeat(5,minmax(240px,78vw))}.board>*{scroll-snap-align:start}
+ dialog{max-height:92dvh;width:min(640px,96vw)}dialog form,.libdlg{padding:16px}
+ .btn,button.btn,select,input[type=text],input[type=password],input[type=number],input[type=search],textarea{min-height:44px}
+ input,select,textarea{font-size:16px}
+ .toast{bottom:calc(20px + env(safe-area-inset-bottom))}
+}
+@media (max-width:600px){
+ .gsearch input{width:40px;height:40px;min-height:40px;padding:0;color:transparent;cursor:pointer;background:var(--surface2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%238a93a6' stroke-width='2.2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='M20 20l-4-4'/%3E%3C/svg%3E") center/18px no-repeat}
+ .gsearch input::placeholder{color:transparent}
+ .gsearch input:focus{position:fixed;left:12px;right:12px;top:8px;width:auto;height:44px;padding:0 14px;z-index:60;color:var(--text);background-image:none;cursor:text}
+ .gsearch input:focus::placeholder{color:var(--muted)}
+ .gres{position:fixed;left:12px;right:12px;top:60px;width:auto}
+ .view{padding:14px}
+ .cb-row{max-width:100%}
+}

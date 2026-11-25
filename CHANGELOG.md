@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.50.0
+
+- **Works on a phone.** No more sideways wobble on any page; a compact top bar (search becomes a magnifier that opens full width); the project header folds its buttons behind a **Details** button; tabs and task columns swipe sideways; bigger tap targets, 16 px text in fields so iPhones do not zoom in, and room for the home bar and on-screen keyboard.
+- Tapping outside the open menu (or pressing Escape) closes it.
+
 ## 0.49.0
 
 - **Cloudflare and Google in the Library.** Connect Cloudflare with an API token and Google (Drive, Calendar, Gmail) with a service-account key. No address to type, and **Add and test** really checks the token or key.

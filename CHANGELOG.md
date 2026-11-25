@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.38.0
+
+- **Infrastructure map: text stays inside the boxes.** Names and addresses shrink to fit and are shortened with ... when still too long; hover a box to read all of it.
+- **Move around the map.** It sits in a scrollable window. Drag with the mouse to move, or use the scroll bars.
+- **Zoom slider.** Zoom from 30% to 200% with the slider or the − and + buttons, press *Fit all* to see everything, or *100%* to reset. Ctrl + scroll zooms too.
+
 ## 0.37.3
 
 - **Task conversations show times.** Each message on a task page shows when it was sent, so the latest is easy to see.

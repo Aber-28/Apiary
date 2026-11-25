@@ -1827,6 +1827,15 @@ exit 0
   const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(app, /Sign in with GitHub/); assert.match(app, /Install GitHub tool for me/);
 }
 
+// ---- infrastructure map: text fits its box, the map can be moved and zoomed ----
+{
+  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(app, /const fit = \(t, maxW, size2, minSize, weight\)/, 'map text is fitted to the box width');
+  assert.ok(!/t\.length > 30 \? t\.slice\(0, 29\)/.test(app), 'map text is not cut by a fixed number of characters');
+  assert.match(app, /class: 'mapscroll'/); assert.match(app, /type: 'range', min: String\(MIN \* 100\)/); assert.match(app, /Drag to move . Ctrl \+ scroll to zoom/);
+  assert.match(fsRead(new URL('../public/style.css', import.meta.url), 'utf8'), /\.mapscroll\{overflow:auto/);
+}
+
 // ---- infrastructure map ----
 {
   const net = await import('node:net');

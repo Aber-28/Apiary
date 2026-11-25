@@ -1905,12 +1905,27 @@ function infraMap(items, types, onOpen) {
   svgEl.append(mk('defs', {}, mk('marker', { id: 'arr', viewBox: '0 0 10 10', refX: '9', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' }, mk('path', { d: 'M0 0L10 5L0 10z', style: 'fill:var(--muted)' }))));
   const stroke = (i) => (i.status ? (i.status.ok ? INFRA_COLORS.ok : INFRA_COLORS.bad) : INFRA_COLORS.none);
   const order = [...items].sort((a, b) => (box.get(a.id).depth) - (box.get(b.id).depth));
-  const txt = (t, x2, y2, st, size2 = 13, weight = 400) => { const e = mk('text', { x: x2, y: y2, style: `fill:${st};font:${weight} ${size2}px Inter,system-ui,sans-serif` }); e.textContent = t.length > 30 ? t.slice(0, 29) + '…' : t; return e; };
+  // Text is shrunk (down to a minimum size) and then shortened with ... so it never leaves its box. The full text is a tooltip.
+  const cx2 = document.createElement('canvas').getContext('2d');
+  const width = (t, size2, weight) => { cx2.font = `${weight} ${size2}px Inter, system-ui, sans-serif`; return cx2.measureText(t).width; };
+  const fit = (t, maxW, size2, minSize, weight) => {
+    t = String(t); maxW *= 0.95; let sz = size2;
+    while (sz > minSize && width(t, sz, weight) > maxW) sz -= 0.5;
+    if (width(t, sz, weight) <= maxW) return { t, sz };
+    let n = t.length; while (n > 1 && width(t.slice(0, n) + '…', sz, weight) > maxW) n--;
+    return { t: t.slice(0, n).trimEnd() + '…', sz };
+  };
+  const txt = (t, x2, y2, st, size2 = 13, weight = 400, maxW = Infinity, minSize = size2) => {
+    const f = Number.isFinite(maxW) ? fit(t, maxW, size2, minSize, weight) : { t: String(t), sz: size2 };
+    const e = mk('text', { x: x2, y: y2, style: `fill:${st};font:${weight} ${f.sz}px Inter,system-ui,sans-serif` }); e.textContent = f.t; return e;
+  };
   for (const i of order) {
     const b = box.get(i.id), g = mk('g', { tabindex: '0', role: 'button', 'aria-label': `${i.name}, ${types[i.type] || i.type}${i.state === 'proposed' ? ', waiting for your confirmation' : ''}`, style: 'cursor:pointer' });
     g.append(mk('rect', { x: b.x, y: b.y, width: b.w, height: b.h, rx: 10, style: `fill:${b.leaf ? 'var(--surface)' : 'var(--surface2)'};stroke:${stroke(i)};stroke-width:${i.status ? 2 : 1.2};${i.state === 'proposed' ? 'stroke-dasharray:5 4' : ''}` }));
-    g.append(txt(i.name, b.x + 12, b.y + 22, 'var(--text)', 14, 600));
-    g.append(txt([types[i.type] || i.type, i.address].filter(Boolean).join(' · '), b.x + 12, b.y + (b.leaf ? 42 : 38), 'var(--muted)', 11.5));
+    const tag = i.state === 'proposed' ? 70 : 0, sub = [types[i.type] || i.type, i.address].filter(Boolean).join(' · ');
+    g.append(mk('title', {}, document.createTextNode(`${i.name}${sub ? '\n' + sub : ''}`)));
+    g.append(txt(i.name, b.x + 12, b.y + 22, 'var(--text)', 14, 600, b.w - 24 - tag, 10.5));
+    g.append(txt(sub, b.x + 12, b.y + (b.leaf ? 42 : 38), 'var(--muted)', 11.5, 400, b.w - 24, 9));
     if (i.state === 'proposed') g.append(txt('to confirm', b.x + b.w - 12 - 62, b.y + 22, 'var(--accent-text)', 11, 600));
     g.addEventListener('click', () => onOpen(i)); g.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(i); } });
     svgEl.append(g);
@@ -1922,9 +1937,42 @@ function infraMap(items, types, onOpen) {
     const a = box.get(i.id), c = box.get(l.to); if (!a || !c) continue; n++;
     const [x1, y1] = edge(a, c), [x2, y2] = edge(c, a);
     svgEl.append(mk('line', { x1, y1, x2, y2, style: 'stroke:var(--muted);stroke-width:1.6', 'marker-end': 'url(#arr)' }));
-    if (l.label) svgEl.append(txt(l.label, (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 4, 'var(--muted)', 11));
+    if (l.label) { const lt = txt(l.label, (x1 + x2) / 2 + 4, (y1 + y2) / 2 - 4, 'var(--muted)', 11, 400, 150, 9); lt.style.cssText += ';paint-order:stroke;stroke:var(--surface);stroke-width:4px;stroke-linejoin:round'; lt.append(mk('title', {}, document.createTextNode(l.label))); svgEl.append(lt); }
   }
-  return { el: svgEl, links: n };
+  // Move and zoom: the map sits in a scrollable window. Drag to move, slider or Ctrl + scroll to zoom.
+  const MIN = 0.3, MAX = 2, clamp = (v, a, b2) => Math.max(a, Math.min(b2, v));
+  let zoom = 1;
+  const scroller = h('div', { class: 'mapscroll', tabindex: '0', role: 'region', 'aria-label': 'Infrastructure map. Drag to move around, use the slider to zoom.' }, svgEl);
+  const pct = h('span', { class: 'mono', style: 'min-width:3.2em;text-align:right' }, '100%');
+  const slider = h('input', { type: 'range', min: String(MIN * 100), max: String(MAX * 100), step: '5', value: '100', 'aria-label': 'Zoom' });
+  const apply = (z, fx = 0, fy = 0) => {
+    z = clamp(z, MIN, MAX); const r = z / zoom, px = scroller.scrollLeft + fx, py = scroller.scrollTop + fy; zoom = z;
+    svgEl.setAttribute('width', String(W * z)); svgEl.setAttribute('height', String(H * z)); svgEl.style.maxWidth = 'none';
+    scroller.scrollLeft = px * r - fx; scroller.scrollTop = py * r - fy;
+    scroller.style.height = clamp(H * z + 4, 220, Math.max(320, Math.min(window.innerHeight * 0.72, 760))) + 'px';   // as tall as the map, up to a limit; then it scrolls
+    slider.value = String(Math.round(z * 100)); pct.textContent = Math.round(z * 100) + '%';
+  };
+  const mid = () => [scroller.clientWidth / 2, scroller.clientHeight / 2];
+  slider.addEventListener('input', () => apply(Number(slider.value) / 100, ...mid()));
+  const fitAll = () => { apply(clamp(Math.min((scroller.clientWidth - 4) / W, (scroller.clientHeight - 4) / H), MIN, 1)); scroller.scrollTo(0, 0); };
+  scroller.addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) return; e.preventDefault(); const r = scroller.getBoundingClientRect(); apply(zoom * Math.exp(-e.deltaY * 0.0025), e.clientX - r.left, e.clientY - r.top); }, { passive: false });
+  scroller.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'mouse' || e.button !== 0) return;
+    const sx = e.clientX, sy = e.clientY, sl = scroller.scrollLeft, st = scroller.scrollTop; let moved = false;
+    const mv = (ev) => { const dx = ev.clientX - sx, dy = ev.clientY - sy; if (!moved && Math.hypot(dx, dy) < 5) return; moved = true; scroller.classList.add('drag'); scroller.scrollLeft = sl - dx; scroller.scrollTop = st - dy; };
+    const up = () => {
+      window.removeEventListener('pointermove', mv); window.removeEventListener('pointerup', up); scroller.classList.remove('drag');
+      if (moved) { const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); }; scroller.addEventListener('click', stop, { capture: true, once: true }); setTimeout(() => scroller.removeEventListener('click', stop, true), 0); }
+    };
+    window.addEventListener('pointermove', mv); window.addEventListener('pointerup', up);
+  });
+  const step = (d) => () => apply(zoom + d, ...mid());
+  const bar = h('div', { class: 'mapbar' }, h('button', { class: 'btn', type: 'button', 'aria-label': 'Zoom out', onclick: step(-0.1) }, '−'), slider, h('button', { class: 'btn', type: 'button', 'aria-label': 'Zoom in', onclick: step(0.1) }, '+'), pct,
+    h('button', { class: 'btn', type: 'button', onclick: fitAll }, 'Fit all'), h('button', { class: 'btn', type: 'button', onclick: () => apply(1, ...mid()) }, '100%'),
+    h('span', { class: 'hint' }, 'Drag to move · Ctrl + scroll to zoom'));
+  // start at full size, or narrower if the map is wider than the window
+  requestAnimationFrame(() => { if (scroller.clientWidth) apply(clamp((scroller.clientWidth - 4) / W, 0.5, 1)); });
+  return { el: h('div', {}, bar, scroller), links: n };
 }
 
 async function pageInfra(tab) {
@@ -1954,7 +2002,7 @@ async function pageInfra(tab) {
     });
     if (tab === 'map') {
       const m = items.length ? infraMap(items, types, edit) : null;
-      view.replaceChildren(head, tabs, ...cards, items.length ? h('div', { class: 'card', style: 'overflow:auto' }, m.el, h('p', { class: 'hint', style: 'margin-top:8px' }, 'Boxes inside another box run on it. Arrows are connections. Green or red outlines show the last connection test; dashed boxes are waiting for you to confirm. Click a box to update it.')) : h('div', { class: 'card empty' }, 'Nothing here yet. Press Add new, or Help me map it and answer a few questions.'));
+      view.replaceChildren(head, tabs, ...cards, items.length ? h('div', { class: 'card' }, m.el, h('p', { class: 'hint', style: 'margin-top:8px' }, 'Boxes inside another box run on it. Arrows are connections. Green or red outlines show the last connection test; dashed boxes are waiting for you to confirm. Click a box to update it.')) : h('div', { class: 'card empty' }, 'Nothing here yet. Press Add new, or Help me map it and answer a few questions.'));
       return;
     }
     const rows = real.map((i) => {

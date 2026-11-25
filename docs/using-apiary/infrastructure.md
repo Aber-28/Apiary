@@ -22,3 +22,9 @@ Press **Help me map it** and the CEO asks a few short questions, guesses what it
 Agents also suggest items on their own when you mention a device or they discover one while working.
 
 The map is saved in `~/.apiary/infra.json` and is part of an export.
+
+## Moving and zooming the map
+
+The map sits in a window you can move around in. Drag with the mouse (or use the scroll bars, or swipe on a touch screen). Use the **slider** or the **−** and **+** buttons to zoom from 30% to 200%. **Fit all** shows the whole map at once and **100%** goes back to normal size. Holding Ctrl while you scroll also zooms.
+
+Names and addresses shrink to fit their box. If one is still too long it is shortened with …, and hovering over the box shows all of it.

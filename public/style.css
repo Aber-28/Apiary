@@ -257,3 +257,9 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .cb-line.error{color:var(--err)}
 @media (max-width:700px){.cb-row{max-width:96%}}
 
+
+.mapbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+.mapbar input[type=range]{width:min(220px,40vw);accent-color:var(--accent)}
+.mapscroll{overflow:auto;height:360px;border:1px solid var(--line);border-radius:10px;background:var(--bg);cursor:grab}
+.mapscroll.drag{cursor:grabbing;user-select:none}
+.mapscroll svg{display:block}

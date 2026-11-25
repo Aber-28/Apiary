@@ -13,7 +13,13 @@ Passwords are never stored here. An item only names a login in the [Secrets vaul
 
 ## Map
 
-A diagram drawn from your devices. A box inside another box runs on it (a VM inside Proxmox, a website inside its VM). Arrows are connections, with the label you gave. A green outline means the last test worked, red that it failed, and a dashed box is waiting for you to confirm it. Click a box to update it. The map redraws by itself as things change.
+A diagram drawn from your devices.
+
+* **Boxes.** A box inside another box runs on it (a VM inside Proxmox, a website inside its VM). Each box has a small icon (the real logo when Apiary knows one), its name and what it is. A green or red dot shows whether the last connection test worked, and a dashed box is waiting for you to confirm it.
+* **Layout.** Groups that talk to each other are placed next to each other. Things that run on nothing go in a tidy block underneath, "On their own".
+* **Arrows.** Connections are drawn as smooth right-angle lines with rounded corners. They go around boxes instead of through them, and they carry the label you gave. Where two arrows cross, one hops over the other with a small bump, so you can tell they are separate.
+* **Follow one box.** Hover over a box (or tab to it) and its arrows light up while everything else fades. Hover over an arrow to see which two things it joins.
+* **Moving around.** Drag to move, use the slider or Ctrl + scroll to zoom, **Fit all** shows everything. Click a box to update it. The map redraws by itself as things change.
 
 ## Help me map it
 

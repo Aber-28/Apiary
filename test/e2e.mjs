@@ -406,6 +406,33 @@ assert.ok(engine2.agents[lead2.id]);
   await call('/api/agents/' + gl.id, 'DELETE');
 }
 
+// ---- the map: layout keeps groups together, arrows are tidy right-angle curves around boxes, and crossings get a bump ----
+{
+  const map = await import('../public/map.js');
+  assert.equal((await fetch(base + '/map.js')).status, 200, 'the map module is served');
+  const it = (id, name, extra = {}) => ({ id, name, type: 'vm', links: [], ...extra });
+  const A = it('a', 'A', { links: [{ to: 'b', label: 'east' }, { to: 'd' }] }), B = it('b', 'B'), Cc = it('c', 'C', { links: [{ to: 'd' }] }), D = it('d', 'D');
+  const mk = (x, y) => ({ x, y, w: 200, h: 66, leaf: true, depth: 0 });
+  const boxes = new Map([['a', { id: 'a', item: A, ...mk(64, 200) }], ['b', { id: 'b', item: B, ...mk(520, 200) }], ['c', { id: 'c', item: Cc, ...mk(292, 64) }], ['d', { id: 'd', item: D, ...mk(292, 420) }]]);
+  const routes = map.routeLinks([A, B, Cc, D], boxes, 900, 600);
+  assert.equal(routes.length, 3);
+  for (const r of routes) {
+    assert.ok(r.points.every((p, i) => i === 0 || p[0] === r.points[i - 1][0] || p[1] === r.points[i - 1][1]), 'every part of an arrow is horizontal or vertical');
+    for (const p of r.points.slice(1, -1)) for (const b of boxes.values()) assert.ok(!(p[0] > b.x && p[0] < b.x + b.w && p[1] > b.y && p[1] < b.y + b.h), 'arrows do not run through boxes');
+  }
+  const ab = routes.find((r) => r.from === 'a' && r.to === 'b'), ad = routes.find((r) => r.to === 'd' && r.from === 'a'), cd = routes.find((r) => r.from === 'c');
+  assert.ok(ab.segs.some((s) => s.hops.length) || cd.segs.some((s) => s.hops.length), 'where arrows cross, one hops over the other');
+  const hopper = [ab, cd].find((r) => r.segs.some((s) => s.hops.length));
+  assert.match(map.linkPath(hopper.points, hopper.segs), /A5 5 0 0 [01] /, 'the hop is drawn as a small bump'); assert.ok(ad.points.length >= 3 && /Q/.test(map.linkPath(ad.points, ad.segs)), 'corners are rounded');
+  // layout: a thing that runs on another sits inside it; linked groups end up next to each other
+  const items = [it('h1', 'Host 1', { type: 'proxmox' }), it('h2', 'Host 2', { type: 'proxmox' }), it('h3', 'Host 3', { type: 'proxmox' }), it('v1', 'V1', { parentId: 'h1' }), it('v2', 'V2', { parentId: 'h2' }), it('v3', 'V3', { parentId: 'h3', links: [{ to: 'v1' }] }), it('s', 'Solo', { type: 'service' })];
+  const L = map.layoutMap(items), b = (id) => L.box.get(id), inside = (c, p) => c.x >= p.x && c.y >= p.y && c.x + c.w <= p.x + p.w && c.y + c.h <= p.y + p.h;
+  assert.ok(inside(b('v1'), b('h1')) && inside(b('v3'), b('h3')), 'children are drawn inside their host');
+  assert.ok(Math.abs(b('h1').x - b('h3').x) < Math.abs(b('h1').x - b('h2').x), 'hosts that talk to each other are placed side by side');
+  assert.ok(b('s').y > b('h1').y + b('h1').h, 'things on their own go underneath');
+  const loop = map.layoutMap([it('p', 'P', { parentId: 'q' }), it('q', 'Q', { parentId: 'p' })]); assert.equal(loop.box.size, 2, 'a loop in "runs on" does not hide anything');
+}
+
 // ---- themes: every theme in the list is served, defined and complete ----
 {
   const js = await (await fetch(base + '/theme.js')).text(), css = await (await fetch(base + '/themes.css')).text(), page = await (await fetch(base + '/')).text();
@@ -2154,10 +2181,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 
 // ---- infrastructure map: text fits its box, the map can be moved and zoomed ----
 {
-  const app = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(app, /const fit = \(t, maxW, size2, minSize, weight\)/, 'map text is fitted to the box width');
+  const app = fsRead(new URL('../public/map.js', import.meta.url), 'utf8');
+  assert.match(app, /const fit = \(t, maxW, s, min, w\)/, 'map text is fitted to the box width');
   assert.ok(!/t\.length > 30 \? t\.slice\(0, 29\)/.test(app), 'map text is not cut by a fixed number of characters');
-  assert.match(app, /class: 'mapscroll'/); assert.match(app, /type: 'range', min: String\(MIN \* 100\)/); assert.match(app, /Drag to move . Ctrl \+ scroll to zoom/);
+  assert.match(app, /class: 'mapscroll'/); assert.match(app, /type: 'range', min: String\(MIN \* 100\)/); assert.match(app, /Drag to move . Ctrl \+ scroll to zoom/); assert.match(fsRead(new URL('../public/app.js', import.meta.url), 'utf8'), /from '\.\/map\.js'/, 'the page uses the map module');
   assert.match(fsRead(new URL('../public/style.css', import.meta.url), 'utf8'), /\.mapscroll\{overflow:auto/);
 }
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.47.0
+
+- **The map is redesigned.** Arrows are now smooth right-angle lines with rounded corners that go around boxes instead of through them. Where two arrows cross, one hops over the other with a small bump.
+- Hover (or tab to) a box and its arrows light up while the rest fades; hover an arrow to see what it joins.
+- Cleaner boxes with an icon tile and a status dot, groups that talk to each other placed side by side, and things that run on nothing in a tidy block underneath.
+- Secret IDs (SC-0001…) now sit in their own aligned column on the Secrets page.
+
 ## 0.46.0
 
 - **Themes.** Eleven looks next to the default Dark and Bright: Matrix (green on black with falling code), Glass and Glass Dark (frosted panels over a soft wallpaper), Nord, Tokyo Night, Dracula, Solarized Light, Graphite and High contrast. Pick from the palette button at the top or on Settings, Appearance.

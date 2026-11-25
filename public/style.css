@@ -278,3 +278,15 @@ input[type=time],input[type=date],input[type=datetime-local]{min-height:42px;pad
 .libdlg{max-width:min(760px,94vw)}
 .libicon{object-fit:contain;flex:0 0 auto;border-radius:6px}
 .libicon.fb{display:inline-flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent-text);font-weight:700}
+
+.mapsvg .edge .line{stroke:var(--muted);transition:opacity .15s}
+.mapsvg .edge .hit{cursor:help}
+.mapsvg .edge.on .line{stroke:var(--accent);stroke-width:2.4;marker-end:url(#arrOn)}
+.mapsvg.hl .edge:not(.on){opacity:.1}
+.mapsvg .node{transition:opacity .15s}.mapsvg .node.dim{opacity:.38}
+.mapsvg .node:focus-visible rect{stroke:var(--accent);stroke-width:2.5}
+.mapsvg .node:focus{outline:none}
+
+.secret-row{display:grid;grid-template-columns:minmax(150px,1.1fr) 78px minmax(0,2fr);align-items:center;gap:6px 16px}
+.secret-row .secret-id{white-space:nowrap}
+@media (max-width:720px){.secret-row{grid-template-columns:1fr auto}.secret-row>small.hint:last-child{grid-column:1/-1}}

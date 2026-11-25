@@ -43,6 +43,10 @@ export const LIBRARY = [
   { id: 'grafana', name: 'Grafana', type: 'service', blurb: 'Dashboards and graphs', icons: [di('grafana'), si('grafana')], methods: [TOKEN('Service account token', 'Create it under Administration, Service accounts.', 3000)], web: { scheme: 'http', port: 3000 } },
   { id: 'uptimekuma', name: 'Uptime Kuma', type: 'service', blurb: 'Uptime monitoring', icons: [di('uptime-kuma')], methods: [LOGIN(3001, 'The login of its admin page.')], web: { scheme: 'http', port: 3001 } },
   { id: 'gitea', name: 'Gitea', type: 'service', blurb: 'Self-hosted Git', icons: [di('gitea'), si('gitea')], methods: [TOKEN('Access token', 'Create it in Settings, Applications.', 3000)], web: { scheme: 'http', port: 3000 } },
+  { id: 'cloudflare', name: 'Cloudflare', type: 'service', blurb: 'DNS, tunnels and website protection (API)', icons: [di('cloudflare'), si('cloudflare')], fixed: { address: 'api.cloudflare.com', url: 'https://api.cloudflare.com' },
+    methods: [TOKEN('API token', 'Create it at dash.cloudflare.com under My Profile, API Tokens. Give it only the permissions you need, for example Zone, DNS, Edit for one zone.', 0)] },
+  { id: 'google', name: 'Google (Drive, Gmail, Calendar)', type: 'service', blurb: 'Google Workspace through a service account', icons: [di('google-drive'), si('googledrive')], fixed: { address: 'www.googleapis.com', url: 'https://www.googleapis.com' },
+    methods: [TOKEN('Service-account key (JSON)', 'In the Google Cloud console create a service account, add a JSON key and paste the whole file here. Share the Drive folders or calendars you want agents to use with the service account\'s email. Gmail needs a Google Workspace admin to allow it.', 0)] },
   { id: 'website', name: 'Website', type: 'website', blurb: 'A website you want to keep an eye on', icons: [], methods: [{ id: 'web', label: 'No login needed', secret: '', port: 0, user: '', note: 'Apiary only checks that it answers.' }] },
 ];
 

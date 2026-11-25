@@ -29,3 +29,12 @@ The test first checks that the address answers on its port. For an **SSH login**
 ## Icons
 
 Each entry shows its product's icon on the Library cards, on the device card and on the map. Apiary fetches an icon live from a public icon set on the internet the first time it is needed. Once downloaded it is **kept for good and never deleted**, and not downloaded again, so it works offline afterwards. A [factory reset](factory-reset.md) leaves the icons alone. If an icon cannot be fetched (or none exists, as for Hyper-V), a letter shows instead. Only the fixed addresses built into Apiary are ever fetched, and anything active inside an icon file is removed.
+
+## Cloudflare
+
+Pick **Cloudflare**, give it a name and paste an **API token**. Create the token at dash.cloudflare.com under *My Profile, API Tokens*, and give it only the permissions you need (for example *Zone, DNS, Edit* for one zone). There is no address to type: Apiary talks to Cloudflare's API. **Add and test** asks Cloudflare whether the token is active.
+
+## Google (Drive, Gmail, Calendar)
+
+Pick **Google** and paste a **service-account key**: in the Google Cloud console create a service account, add a JSON key, and paste the whole file. Apiary checks the key by signing in with it and shows the service account's email. To let agents use a Drive folder, a calendar or a sheet, **share it with that email address**, like sharing with a person. Gmail only works if a Google Workspace admin allows it for the service account. The key is stored in the Secrets vault and only reaches an agent you approve.
+

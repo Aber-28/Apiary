@@ -23,6 +23,7 @@ import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js
 import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
+import { verifyCloudflare, verifyGoogle, parseGoogleKey } from './cloud.js';
 import { Audit } from './audit.js';
 import { Health, LOGIN_RE } from './health.js';
 import { Telegram } from './telegram.js';
@@ -443,17 +444,20 @@ export class Engine extends EventEmitter {
     const m = e.methods.find((x) => x.id === b.method) || e.methods[0];
     const name = String(b.name || e.name).replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, 60);
     if (!name) throw bad(400, 'Give it a name');
-    const address = String(b.address || '').trim();
+    const address = e.fixed ? e.fixed.address : String(b.address || '').trim();
     if (!address) throw bad(400, e.id === 'website' ? 'Enter the web address' : 'Enter its address (a name or IP like 10.0.0.5)');
     if (this.infra.byName(name)) throw bad(409, `You already have "${name}"`);
     const port = b.port === undefined || b.port === '' ? m.port : Number(b.port);
     let url = '', host = address;
     if (e.id === 'website') { if (!/^https?:\/\/[^\s]+$/i.test(address)) throw bad(400, 'The web address must start with http:// or https://'); url = address; host = ''; }
+    else if (e.fixed) { url = e.fixed.url; host = ''; }
     else if (e.web && m.id !== 'ssh') url = `${e.web.scheme}://${address}:${port || e.web.port}`;
     let secret = '';
     if (m.secret) {
       const value = String(b.secret || ''); if (!value) throw bad(400, m.secret === 'ssh' && b.auth === 'key' ? 'Paste the private key' : `Enter the ${m.secret === 'token' ? 'token' : 'password'}`);
-      const user = String(b.username || m.user || '').trim(); if (m.secret !== 'token' && !user) throw bad(400, 'Enter the username');
+      let user = String(b.username || m.user || '').trim();
+      if (e.id === 'google') { const gk = parseGoogleKey(value); if (!gk) throw bad(400, 'That is not a Google service-account key. Paste the whole JSON file from the Google Cloud console.'); user = gk.client_email; }
+      if (m.secret !== 'token' && !user) throw bad(400, 'Enter the username');
       let n = `${name} login`, k = 2; while (this.vault.byName(n)) n = `${name} login ${k++}`;
       this.vault.add(n, value, `Made from the Library (${e.name})`, user, m.secret === 'ssh' ? { type: 'ssh', host, port: port || 22, auth: b.auth === 'key' ? 'key' : 'password' } : { type: m.secret });
       secret = n;
@@ -466,7 +470,15 @@ export class Engine extends EventEmitter {
   // Reachability, and for an SSH login also a real sign-in with a harmless command, so "works" means it works.
   async testDevice(id) {
     const it = await this.infra.test(id);
-    if (it.status?.ok && it.secret && this.vault.unlocked) {
+    if (it.status?.ok && it.secret && this.vault.unlocked && (it.lib === 'cloudflare' || it.lib === 'google')) {
+      try {
+        const sec = this.vault.byName(it.secret), value = sec && this.vault.value(sec.id);
+        if (value) {
+          const r = await (it.lib === 'cloudflare' ? verifyCloudflare : verifyGoogle)(value, this.cloudFetch || fetch);
+          it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save();
+        }
+      } catch { /* leave the plain result */ }
+    } else if (it.status?.ok && it.secret && this.vault.unlocked) {
       try {
         const sec = this.vault.byName(it.secret), meta = sec && this.vault.list().find((x) => x.id === sec.id);
         if (meta && meta.type === 'ssh') {

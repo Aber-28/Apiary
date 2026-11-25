@@ -1752,6 +1752,40 @@ let orgIds;
     assert.equal(pm.status, 201); assert.equal(engine.vault.list().find((x) => x.name === pm.body.secret).type, 'token'); assert.equal(pm.body.port, 8006); assert.match(pm.body.url, /^https:\/\/127\.0\.0\.1:8006$/);
     const web = await call('/api/library/website/add', 'POST', { name: 'Lib site', address: 'https://example.com' });
     assert.equal(web.status, 201); assert.equal(web.body.secret, ''); assert.equal((await call('/api/library/website/add', 'POST', { name: 'Lib site 2', address: 'example.com' })).status, 400);
+    // cloud connectors: fixed address, a real check of the token / key, and no secret in any answer
+    {
+      const realFetch = globalThis.fetch; const calls = [];
+      globalThis.fetch = async (u, o = {}) => {
+        const url = String(u); calls.push(url);
+        if (url.startsWith('http://127.0.0.1')) return realFetch(u, o);
+        const J = (obj, status = 200) => new Response(JSON.stringify(obj), { status, headers: { 'content-type': 'application/json' } });
+        if (url.includes('api.cloudflare.com/client/v4/user/tokens/verify')) return J(o.headers.authorization === 'Bearer cf-good-token-123' ? { success: true, result: { status: 'active' } } : { success: false, result: null }, o.headers.authorization === 'Bearer cf-good-token-123' ? 200 : 401);
+        if (url.includes('api.cloudflare.com/client/v4/accounts')) return J({ success: false }, 403);
+        if (url.includes('api.cloudflare.com')) return new Response('{}', { status: 404 });
+        if (url.includes('oauth2.googleapis.com/token')) return String(o.body).includes('assertion=') ? J({ access_token: 'ya29.fake' }) : J({ error: 'invalid_request' }, 400);
+        if (url.includes('googleapis.com')) return new Response('{}', { status: 404 });
+        return new Response('{}', { status: 200 });
+      };
+      try {
+        const cf = await call('/api/library/cloudflare/add', 'POST', { name: 'Lib CF', secret: 'cf-good-token-123', address: 'ignored.example' });
+        assert.equal(cf.status, 201); assert.equal(cf.body.url, 'https://api.cloudflare.com'); assert.equal(cf.body.address, '', 'the address is fixed, not typed');
+        const cft = (await call(`/api/infra/${cf.body.id}/test`, 'POST', {})).body; assert.ok(cft.status.ok && /accepted the token/.test(cft.status.detail), cft.status.detail);
+        const cf2 = (await call('/api/library/cloudflare/add', 'POST', { name: 'Lib CF bad', secret: 'cf-bad-token-999' })).body;
+        const cf2t = (await call(`/api/infra/${cf2.id}/test`, 'POST', {})).body; assert.equal(cf2t.status.ok, false); assert.ok(!cf2t.status.detail.includes('cf-bad-token-999'), 'no token in the answer');
+        assert.equal((await call('/api/library/cloudflare/add', 'POST', { name: 'Lib CF none' })).status, 400, 'a token is required');
+        const { generateKeyPairSync } = await import('node:crypto');
+        const pem = generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' });
+        const key = JSON.stringify({ type: 'service_account', client_email: 'bot@demo-project.iam.gserviceaccount.com', private_key: pem });
+        assert.equal((await call('/api/library/google/add', 'POST', { name: 'Lib G bad', secret: 'not json' })).status, 400, 'a non-key is refused');
+        const g = await call('/api/library/google/add', 'POST', { name: 'Lib Google', secret: key });
+        assert.equal(g.status, 201); assert.equal(g.body.url, 'https://www.googleapis.com');
+        assert.equal(engine.vault.list().find((x) => x.name === g.body.secret).username || '', '', 'the key owner is not exposed as a vault username field');
+        const gt = (await call(`/api/infra/${g.body.id}/test`, 'POST', {})).body; assert.ok(gt.status.ok && /bot@demo-project/.test(gt.status.detail), gt.status.detail);
+        assert.ok(!JSON.stringify(gt).includes('BEGIN PRIVATE KEY'), 'the key never appears in the result');
+        assert.ok(calls.some((c) => c.includes('oauth2.googleapis.com')), 'signed in for real');
+      } finally { globalThis.fetch = realFetch; }
+    }
+    assert.match(fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8'), /forceBottom = true;[\s\S]*?\/messages`, 'POST'/, 'sending a chat message scrolls to it');
     // testing checks the port and also signs in for real
     engine.discoveryRun = async () => ({ code: 0, stdout: 'apiary-ok\n', stderr: '' });
     const t1 = (await call(`/api/infra/${r1.body.id}/test`, 'POST', {})).body; assert.ok(t1.status.ok && /login works/.test(t1.status.detail), t1.status.detail);

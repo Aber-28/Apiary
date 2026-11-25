@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.49.0
+
+- **Cloudflare and Google in the Library.** Connect Cloudflare with an API token and Google (Drive, Calendar, Gmail) with a service-account key. No address to type, and **Add and test** really checks the token or key.
+- **The chat jumps to your message.** After you press Enter, the chat scrolls to show what you sent and the answer coming in, so you no longer scroll down every time.
+
 ## 0.48.1
 
 - A small "Buy me a coffee" card on the Updates page and in the README. Entirely optional; nothing is locked behind it.

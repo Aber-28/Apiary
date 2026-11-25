@@ -495,10 +495,11 @@ function pageProject(leadId, general = false) {
     const walk = (a, d) => [node(a, d), ...kidsOf(a.id).flatMap((k) => walk(k, d + 1))];
     el.team.replaceChildren(h('h3', {}, 'Team'), ...walk(S.agents.find((x) => x.id === leadId) || lead, 0));
   };
+  let forceBottom = false; // after you send something, always show it (and the answer coming in) without scrolling
   const drawMsgs = () => {
     if (!msgsEl) return;
     if (msgsEl.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // don't wipe a note being typed
-    const a = sel(), near = msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
+    const a = sel(), near = forceBottom || msgsEl.scrollHeight - msgsEl.scrollTop - msgsEl.clientHeight < 80;
     refreshTaskIndex();
     const list = (S.msgs[a.id] || []).flatMap((m) => {
       const t = timeOf(m.ts);
@@ -643,8 +644,9 @@ function pageProject(leadId, general = false) {
     } });
     const send = guard(async () => {
       const text = input.value.trim(); if (!text) return;
+      forceBottom = true; setTimeout(() => { forceBottom = false; }, 4000);
       const r = await api(`/api/agents/${sel().id}/messages`, 'POST', { text });
-      input.value = ''; closePop();
+      input.value = ''; closePop(); drawMsgs();
       if (r.tagged?.length) toast(`Sent to ${r.tagged.join(' and ')}. The answer will appear here.`);
     });
     el.body.replaceChildren(msgsEl, liveEl, h('div', { class: 'composer' }, pop, input, h('button', { class: 'btn primary big', onclick: send }, 'Send')));
@@ -1937,11 +1939,11 @@ function openLibraryForm(e, vault, done) {
   const body = h('div', {});
   const draw = () => {
     port.value = m.port || ''; user.value = m.user || ''; note.textContent = m.note || '';
-    const secretLabel = m.secret === 'token' ? 'Token' : 'Password';
+    const secretLabel = m.secret === 'token' ? (e.id === 'google' ? 'Service-account key (paste the whole JSON file)' : 'Token') : 'Password';
     body.replaceChildren(
       e.methods.length > 1 ? f('Connect with', methodSel) : null,
-      f('Name', name), f(e.id === 'website' ? 'Web address' : 'Address (name or IP)', address),
-      m.secret && e.id !== 'website' ? f('Port', port) : null,
+      f('Name', name), e.fixed ? null : f(e.id === 'website' ? 'Web address' : 'Address (name or IP)', address),
+      m.secret && e.id !== 'website' && !e.fixed ? f('Port', port) : null,
       m.secret && m.secret !== 'token' ? f('Username', user) : null,
       m.secret === 'ssh' ? f('Sign in with', auth) : null,
       m.secret ? (m.secret === 'ssh' && auth.value === 'key' ? f('Private key', key) : f(secretLabel, pass)) : null,
@@ -1965,7 +1967,7 @@ function openLibraryForm(e, vault, done) {
   const dlg = h('dialog', {}, h('form', { method: 'dialog' }, h('div', { class: 'kv', style: 'gap:10px;margin-bottom:6px' }, e.hasIcon ? libIcon(e.id, 36, e.name) : null, h('h2', { style: 'margin:0' }, `Connect ${e.name}`)),
     h('p', { class: 'hint', style: blocked ? 'color:var(--err)' : '' }, blocked || 'The login goes into the encrypted Secrets vault. Only its name is kept on the device.'),
     body, err, h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), add)));
-  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal(); address.focus();
+  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal(); (e.fixed ? name : address).focus();
 }
 async function openInfraForm(types, items, secrets, item, done) {
   const cur = item || {};

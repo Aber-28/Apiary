@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.37.0
+
+- **Approve from Telegram.** Approval alerts have Approve and Deny buttons. Only the chat you linked can press them. A new secret can be denied from Telegram but not approved there, because its value is typed in Apiary.
+
 ## 0.35.0
 
 - **Updates wait for work in progress.** Install now waits while agents are working or approvals are waiting for you. The Updates page says what it is waiting for, new messages to agents are held meanwhile, and the update installs by itself once everything has finished. You can cancel the wait, or install now anyway (with a warning that running agents will be cut off).

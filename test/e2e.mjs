@@ -1558,7 +1558,8 @@ let orgIds;
     assert.equal(engine.vault.byName('Example Denied Login'), undefined, 'nothing saved on deny');
   }
   { // updates wait for the work in progress, hold new messages meanwhile, install by themselves once idle, and can be cancelled or forced
-    // start from an idle team with nothing waiting, and put everything back afterwards
+    // start from an idle team with nothing waiting: wait for background work from earlier tests to finish, then put everything back afterwards
+    for (let i = 0; i < 150 && engine.busy().total > 0; i++) await new Promise((r) => setTimeout(r, 40));
     const savedStatus = Object.values(engine.agents).map((a) => [a, a.status]);
     for (const a of Object.values(engine.agents)) a.status = 'idle';
     const savedPending = Object.values(engine.store.data.approvals).filter((r) => r.status === 'pending');
@@ -2029,6 +2030,25 @@ exit 0
   const ag = Object.values(engine.agents)[0];
   engine._ask(ag, { kind: 'plan', title: 'Review the deployment plan' }).catch(() => {});
   await until2(() => fake.sent.some((m) => /Approval waiting.*Review the deployment plan/.test(m.text)));
+  { // approve or deny from the phone: the alert carries the buttons; only the linked chat can press them; a new secret can only be denied there
+    const alertMsg = fake.sent.find((m) => /Approval waiting.*Review the deployment plan/.test(m.text));
+    assert.ok(alertMsg.reply_markup?.inline_keyboard?.[0]?.some((b) => /Approve/.test(b.text)), 'the alert has an Approve button');
+    const plan = Object.values(engine.store.data.approvals).find((r) => r.status === 'pending' && r.title === 'Review the deployment plan');
+    const press = (chatId, data) => { fake.updates.push({ update_id: 900 + fake.updates.length, callback_query: { id: 'cb' + fake.id++, data, message: { message_id: 7, text: 'Approval waiting', chat: { id: chatId, type: 'private' } } } }); };
+    press(999, `ap:${plan.id}:a`);   // a stranger's press
+    await new Promise((r) => setTimeout(r, 500));
+    assert.equal(engine.store.data.approvals[plan.id].status, 'pending', 'a stranger cannot approve');
+    press(42, `ap:${plan.id}:a`);     // the linked chat approves
+    await until2(() => engine.store.data.approvals[plan.id].status === 'approved');
+    // a new-secret request can be denied from the phone, but never approved there
+    const ns = engine._ask(ag, { kind: 'newsecret', title: 'Example phone secret', detail: 'x', secretName: 'Example phone secret' }).catch(() => {});
+    const nsRec = await new Promise((r) => { const t0 = Date.now(); const f = () => { const x = Object.values(engine.store.data.approvals).find((q) => q.status === 'pending' && q.kind === 'newsecret'); if (x) return r(x); if (Date.now() - t0 > 3000) throw new Error('no newsecret'); setTimeout(f, 30); }; f(); });
+    press(42, `ap:${nsRec.id}:a`); await new Promise((r) => setTimeout(r, 500));
+    assert.equal(engine.store.data.approvals[nsRec.id].status, 'pending', 'a new secret is not approved from Telegram');
+    press(42, `ap:${nsRec.id}:d`);
+    await until2(() => engine.store.data.approvals[nsRec.id].status === 'denied');
+    await ns;
+  }
   engine.emit('health-new', { id: 'x', level: 'err', title: 'The disk is almost full', problem: 'secret detail /home/x', fix: 'free space' });
   await until2(() => fake.sent.some((m) => /Health: The disk is almost full/.test(m.text)));
   assert.ok(!fake.sent.some((m) => /secret detail/.test(m.text)), 'health detail is not sent, only the title');

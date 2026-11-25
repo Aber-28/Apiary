@@ -56,7 +56,9 @@ Agents can run commands as your user. Try Apiary on a machine or virtual machine
 
 ## Support
 
-Apiary is free to use. If it saves you time, you can [buy me a coffee](https://buymeacoffee.com/aber28) (5 euro). Nothing is locked behind it.
+Apiary is free to use. If it saves you time, a coffee helps keep it going. Nothing is locked behind it.
+
+<a href="https://www.buymeacoffee.com/aber28" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me a Coffee" style="height: 60px !important;width: 217px !important;" ></a>
 
 ## Documentation
 

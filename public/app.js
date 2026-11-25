@@ -448,7 +448,7 @@ function pageProject(leadId, general = false) {
     el.team.style.display = '';
     const node = (a, d) => h('button', { class: 'node', style: `padding-left:${10 + d * 18}px`, 'aria-current': String(a.id === S.sel), onclick: () => { S.sel = a.id; drawAll(); } },
       h('span', { class: 'dot ' + ({ working: 'work pulse', waiting: 'info pulse', error: 'err' }[a.status] || 'ok') }),
-      h('span', { class: 'n' }, h('b', {}, a.name), h('small', {}, S.activity[a.id] || `${PNAME[a.provider] || a.provider}${a.role ? ' · ' + a.role : ''}`)));
+      h('span', { class: 'n', title: `${a.name}: ${S.activity[a.id] || `${PNAME[a.provider] || a.provider}${a.role ? ' · ' + a.role : ''}`}` }, h('b', {}, a.name), h('small', {}, S.activity[a.id] || `${PNAME[a.provider] || a.provider}${a.role ? ' · ' + a.role : ''}`)));
     const walk = (a, d) => [node(a, d), ...kidsOf(a.id).flatMap((k) => walk(k, d + 1))];
     el.team.replaceChildren(h('h3', {}, 'Team'), ...walk(S.agents.find((x) => x.id === leadId) || lead, 0));
   };

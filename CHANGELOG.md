@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.37.1
+## 0.37.2
 
 - **Fix:** the Copy buttons work when Apiary is opened over plain http on the local network. Before, the browser's clipboard was not available there, so Copy did nothing.
+
+## 0.37.1
+
+- **Fix:** the Team list beside the chat no longer overlaps. Each person shows their name and up to two lines of what they do; hover for the full text.
 
 ## 0.37.0
 

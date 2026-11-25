@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.32.2
+
+- **Secrets vault is compact.** Each secret is a small box showing its name and who it is assigned to. Click the name to open its details, connection, who may use it and its actions in a window.
+
 ## 0.32.0
 
 Fixes from a review of the approval, trust, messaging and task code.

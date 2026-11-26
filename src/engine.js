@@ -1019,8 +1019,10 @@ export class Engine extends EventEmitter {
   // Work that is running or waiting on the person. An update waits for this to reach zero.
   busy() {
     const ids = new Set([...this.ctls.keys(), ...Object.values(this.agents).filter((a) => a.status === 'working' || a.status === 'waiting').map((a) => a.id)]);
-    const approvals = Object.values(this.store.data.approvals).filter((r) => r.status === 'pending').length;
-    return { runs: ids.size, approvals, total: ids.size + approvals };
+    const pend = Object.values(this.store.data.approvals).filter((r) => r.status === 'pending');
+    // An agent that is waiting for its own approval is one piece of work, not two.
+    const extra = pend.filter((r) => !ids.has(r.agentId)).length;
+    return { runs: ids.size, approvals: pend.length, total: ids.size + extra };
   }
   // While an update is queued, no new work starts: messages are refused with a clear reason until it is cancelled or installed.
   holdNewWork(on) { this.updateHold = !!on; }

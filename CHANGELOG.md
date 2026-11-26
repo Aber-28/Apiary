@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.56.3
+
+- "Update waiting for N to finish" counted an agent twice when it was waiting for your approval (once as working, once as the approval). It now counts each piece of work once.
+
 ## 0.56.2
 
 - Live activity is no longer a main menu item; open it from "See live activity" in the Working now box.

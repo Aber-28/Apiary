@@ -974,6 +974,9 @@ function pageUpdates() {
     const check = h('button', { class: 'btn', onclick: guard(async () => { busy.textContent = 'Checking GitHub…'; S.update = await api('/api/update/check', 'POST', {}); renderUpdateChip(); draw(); }) }, 'Check for updates');
     const queuedMsg = u.queued ? `Waiting for ${u.busy || 0} ${u.busy === 1 ? 'thing' : 'things'} to finish (agents still working or approvals waiting for you). Apiary installs the update by itself when they are done. New messages to agents are held until then.` : null;
     const install = u.state === 'ready' && !u.queued ? h('button', { class: 'btn primary big', onclick: guard(async () => {
+      // Ask first when something is running, so nobody is surprised by held messages.
+      const now = await api('/api/update'); const n = now.busyNow || 0;
+      if (n && !confirm(`${n === 1 ? 'One thing is' : `${n} things are`} still running (agents working or approvals waiting for you).\n\nOK = wait for ${n === 1 ? 'it' : 'them'} to finish, then install the update by itself. New messages to agents are held until then.\nCancel = do not update now.`)) return;
       const r = await api('/api/update/install', 'POST', {});
       if (r.queued) { toast('The update will install when the current work has finished.'); S.update = await api('/api/update'); renderUpdateChip(); draw(); return; }
       updateOverlay(S.version);

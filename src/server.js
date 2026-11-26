@@ -501,7 +501,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
           if (req.method === 'DELETE') { v.remove(r[1]); return json(res, 200, { ok: true }); }
         }
       }
-      if (url.pathname === '/api/update' && req.method === 'GET') { if (updater?.s.queued) runQueuedUpdate(); } if (url.pathname === '/api/update' && req.method === 'GET') return json(res, 200, updater ? updater.status : { state: 'unsupported', error: 'Updates are not available here.' });
+      if (url.pathname === '/api/update' && req.method === 'GET') { if (updater?.s.queued) runQueuedUpdate(); } if (url.pathname === '/api/update' && req.method === 'GET') return json(res, 200, updater ? { ...updater.status, busyNow: engine.busy().total } : { state: 'unsupported', error: 'Updates are not available here.' });
       if (url.pathname === '/api/update/check' && req.method === 'POST') { if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 }); engine.markUpdateChecked(); return json(res, 200, await updater.check()); }
       if (url.pathname === '/api/update/install' && req.method === 'POST') {
         if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });

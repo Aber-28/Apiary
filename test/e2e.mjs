@@ -2801,5 +2801,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   if (!/updPoll/.test(js) || !/redraw: draw/.test(js)) throw new Error('a queued update must keep refreshing its count'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (/\['#\/activity', 'Live activity'\]/.test(js) || !/href: '#\/activity' }, 'See live activity'/.test(js)) throw new Error('Live activity lives in the Working now box, not the menu'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  if (!/now\.busyNow/.test(js) || !/do not update now/.test(js)) throw new Error('install must ask before waiting on running work'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

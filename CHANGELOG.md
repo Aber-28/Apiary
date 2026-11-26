@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.57.0
+
+- Pressing Install while something is running now asks first (OK / Cancel): wait for the running work and install by itself, or don't update now. Nothing is queued or held unless you say yes.
+
 ## 0.56.3
 
 - "Update waiting for N to finish" counted an agent twice when it was waiting for your approval (once as working, once as the approval). It now counts each piece of work once.

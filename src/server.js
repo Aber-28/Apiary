@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // HTTP + SSE server. Binds to localhost by default because agents can run commands on this machine.
+import { typeOf } from './vault.js';
 import { createHash, timingSafeEqual } from 'node:crypto';
 import http from 'node:http';
 import { spawn, spawnSync } from 'node:child_process';
@@ -470,7 +471,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       }
       // ----- infrastructure map -----
       { const tm = /^\/api\/infra\/([\w-]+)\/troubleshoot$/.exec(url.pathname); if (tm && req.method === 'POST') return json(res, 202, await engine.troubleshoot(tm[1])); }
-      if (url.pathname === '/api/infra' && req.method === 'GET') return json(res, 200, { items: engine.infra.view(), types: TYPES });
+      if (url.pathname === '/api/infra' && req.method === 'GET') { const meta = engine.vault.list(); return json(res, 200, { items: engine.infra.view().map((i) => { const m = i.secret ? meta.find((x) => x.name === i.secret) : null; return m ? { ...i, secretKind: typeOf(m) } : i; }), types: TYPES }); }
       if (url.pathname === '/api/infra' && req.method === 'POST') { const it = engine.infra.add(await readBody(req)); engine.audit.add('infra', { actor: 'You', action: 'added a device', detail: it.name || it.id }); engine.emit('event', { type: 'infra' }); return json(res, 201, it); }
       if ((r = m(/^\/api\/infra\/([\w-]+)(?:\/(test|confirm|answer|discover))?$/))) {
         const [, id, act] = r;

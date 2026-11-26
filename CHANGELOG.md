@@ -2,6 +2,7 @@
 
 ## 0.55.2
 
+- Discover is also hidden when the linked login is an API token, even on devices added another way (the UniFi case). Pop-up messages now have a blurred backdrop so long ones stay readable over the page.
 - Discover is no longer shown on devices connected only with an API token (it needs SSH or a login), so it can't produce that error. If you reach it another way, the message now explains why.
 
 ## 0.55.1

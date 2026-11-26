@@ -87,8 +87,24 @@ export const github = {
       if (r.code !== 0) throw new GitHubError(`GitHub could not answer: ${(r.stderr || '').trim().slice(0, 160) || 'is gh signed in?'}`, 409);
       return JSON.parse(r.stdout || 'null');
     };
-    const [info, branches, pulls, commits] = await Promise.all([get(`/repos/${repo}`), get(`/repos/${repo}/branches?per_page=100`), get(`/repos/${repo}/pulls?state=open&per_page=30`), get(`/repos/${repo}/commits?per_page=15`)]);
+    const [info, branches, pulls, commits30, tags] = await Promise.all([get(`/repos/${repo}`), get(`/repos/${repo}/branches?per_page=100`), get(`/repos/${repo}/pulls?state=open&per_page=30`), get(`/repos/${repo}/commits?per_page=30`), get(`/repos/${repo}/tags?per_page=50`).catch(() => [])]);
+    const commits = (commits30 || []).slice(0, 15);
+    // The simple map, built from GitHub's own answers: the main line (first parents only), and each unmerged branch with where it started.
+    const byFull = new Map((commits30 || []).map((c) => [c.sha, c])); const line = []; let cur = commits30 && commits30[0];
+    for (let i = 0; cur && i < 8; i++) { line.unshift(cur); cur = byFull.get(cur.parents?.[0]?.sha); }
+    const tagBySha = new Map((tags || []).map((t) => [t.commit?.sha, t.name]));
+    const mline = line.map((c) => ({ full: c.sha, hash: c.sha.slice(0, 7), subject: String(c.commit?.message || '').split('\n')[0], tag: tagBySha.get(c.sha) || '', date: c.commit?.author?.date }));
+    const others = (branches || []).filter((b) => b.name !== info.default_branch).slice(0, 24), mbranches = [], merged = [];
+    await Promise.all(others.map(async (b) => {
+      let cmp; try { cmp = await get(`/repos/${repo}/compare/${encodeURIComponent(info.default_branch)}...${b.name.split('/').map(encodeURIComponent).join('/')}`); } catch { return; }
+      if (!cmp.ahead_by) { merged.push(b.name); return; }
+      const tip = (cmp.commits || [])[cmp.commits.length - 1], i = mline.findIndex((c) => c.full === cmp.merge_base_commit?.sha);
+      mbranches.push({ name: b.name, subject: String(tip?.commit?.message || '').split('\n')[0], date: tip?.commit?.author?.date, ahead: cmp.ahead_by, behind: cmp.behind_by, local: false, remote: true, current: false, agentProject: /^apiary\//.test(b.name) ? 'an Apiary project' : null, index: i >= 0 ? i : 0, earlier: i < 0 });
+    }));
+    mbranches.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const map = mline.length ? { base: info.default_branch, line: mline, here: null, branches: mbranches.slice(0, 8), hiddenBranches: Math.max(0, mbranches.length - 8), merged: merged.slice(0, 12), mergedCount: merged.length } : null;
     return {
+      map,
       name: info.full_name || repo, private: !!info.private, description: info.description || '', defaultBranch: info.default_branch, url: info.html_url, pushedAt: info.pushed_at,
       branches: (branches || []).map((b) => ({ name: b.name, sha: String(b.commit?.sha || '').slice(0, 7), protected: !!b.protected })),
       pulls: (pulls || []).map((x) => ({ number: x.number, title: x.title, from: x.head?.ref, into: x.base?.ref, author: x.user?.login, draft: !!x.draft, url: x.html_url, updatedAt: x.updated_at })),

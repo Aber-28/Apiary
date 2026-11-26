@@ -2879,6 +2879,25 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.equal(pic.base, 'main'); assert.ok(pic.line.length >= 2 && pic.here.onMain === false, 'the picture knows you are on a side branch');
   assert.ok(pic.branches.some((x) => x.name === 'side' && x.ahead === 1 && Number.isInteger(x.index)), 'an unmerged branch hangs off the main line');
   assert.ok(pic.merged.includes('release/1.2') === false && pic.branches.some((x) => x.name === 'release/1.2'), 'your own unmerged branch is shown');
+  {
+    const http = await import('node:http');
+    const sha = (c) => c.repeat(40).slice(0, 40);
+    const cm = (c, par, msg) => ({ sha: sha(c), parents: par ? [{ sha: sha(par) }] : [], commit: { message: msg, author: { name: 'T', date: '2026-01-02T00:00:00Z' } } });
+    const api = { '/repos/o/r': { full_name: 'o/r', default_branch: 'main', private: false, html_url: 'https://github.com/o/r' },
+      '/repos/o/r/branches': [{ name: 'main', commit: { sha: sha('3') } }, { name: 'feat/x', commit: { sha: sha('4') } }, { name: 'old', commit: { sha: sha('2') } }],
+      '/repos/o/r/pulls': [], '/repos/o/r/commits': [cm('3', '2', 'third'), cm('2', '1', 'second'), cm('1', null, 'first')], '/repos/o/r/tags': [{ name: 'v1.0', commit: { sha: sha('2') } }],
+      '/repos/o/r/compare/main...feat/x': { ahead_by: 1, behind_by: 1, merge_base_commit: { sha: sha('2') }, commits: [cm('4', '2', 'side work')] },
+      '/repos/o/r/compare/main...old': { ahead_by: 0, behind_by: 1, merge_base_commit: { sha: sha('2') }, commits: [] } };
+    const srv = http.createServer((q, r) => { const u = decodeURIComponent(q.url.split('?')[0]); r.setHeader('content-type', 'application/json'); if (api[u]) r.end(JSON.stringify(api[u])); else { r.statusCode = 404; r.end('{"message":"nope"}'); } });
+    await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+    const { github: gh } = await import('../src/github.js'); process.env.APIARY_GITHUB_API = `http://127.0.0.1:${srv.address().port}`;
+    try {
+      const ov = await gh.overview({ method: 'token', token: 'example' }, 'o/r');
+      assert.deepEqual(ov.map.line.map((c) => c.subject), ['first', 'second', 'third'], 'the main line is read oldest to newest'); assert.equal(ov.map.line[1].tag, 'v1.0', 'tags label the line');
+      assert.equal(ov.map.branches.length, 1); assert.equal(ov.map.branches[0].name, 'feat/x'); assert.equal(ov.map.branches[0].index, 1, 'it hangs off the save it started at'); assert.equal(ov.map.branches[0].subject, 'side work');
+      assert.deepEqual(ov.map.merged, ['old'], 'a branch with nothing new is listed as merged');
+    } finally { delete process.env.APIARY_GITHUB_API; srv.close(); }
+  }
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function simpleMap') && appjs.includes('Not merged into main yet'), 'the simple map is drawn'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
 }
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.64.1
+
+- Fixed: repositories picked from "On your GitHub account" only showed lists, with no map. They now get the same picture: the main line with version tags, and unmerged branches hanging off the save they started from.
+
 ## 0.64.0
 
 - Changed: the Repository map now opens with a simple picture: the main branch as a line of recent saves, a green "You are here" marker, and unmerged branches hanging off it on dashed curves with a "Not merged into main yet" note. The detailed lane graph moved into a collapsed "Detailed history".

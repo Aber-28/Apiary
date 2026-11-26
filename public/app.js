@@ -1810,13 +1810,13 @@ function simpleMap(m, remote, when) {
       el('path', { d: `M${cx} ${y + 36} L${cx} ${toY}`, class: 'rm2-arrow' }), el('path', { d: `M${cx - 5} ${toY - 6} L${cx} ${toY} L${cx + 5} ${toY - 6}`, class: 'rm2-arrow' }));
   };
   m.line.forEach((c, i) => {
-    const last = i === n - 1, hereMain = m.here.onMain && last;
+    const last = i === n - 1, hereMain = !!m.here?.onMain && last;
     svg.append(el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: hereMain ? 'rm2-node rm2-on' : 'rm2-node' }));
     svg.append(el('text', { x: X(i), y: MAINY + 46, 'text-anchor': 'middle', class: last ? 'rm2-lab rm2-labb' : 'rm2-lab' }, cut(c.tag || c.subject, 16)),
       el('text', { x: X(i), y: MAINY + 64, 'text-anchor': 'middle', class: 'rm2-sub' }, when(c.date)));
     svg.append(Object.assign(el('title'), { textContent: `${c.subject} (${c.hash})` }));
   });
-  if (m.here.onMain) callout(X(n - 1), 36, 'You are here', MAINY - 22);
+  if (m.here?.onMain) callout(X(n - 1), 36, 'You are here', MAINY - 22);
   rows.forEach((b, i) => {
     const xf = X(b.index), xb = xf + GAP - 8, y = rowY(i), sx = statusX(b);
     svg.append(el('path', { d: `M${xf} ${MAINY + 74} C${xf} ${y} ${xf + 24} ${y} ${xb - 17} ${y}`, class: 'rm2-br' }));
@@ -1825,7 +1825,7 @@ function simpleMap(m, remote, when) {
     svg.append(el('line', { x1: xb + 17, y1: y, x2: sx - 8, y2: y, class: 'rm2-br' }));
     svg.append(el('rect', { x: sx, y: y - 24, width: 236, height: 48, rx: 9, class: 'rm2-warn' }), el('text', { x: sx + 118, y: y - 3, 'text-anchor': 'middle', class: 'rm2-warnt' }, 'Not merged into main yet'),
       el('text', { x: sx + 118, y: y + 14, 'text-anchor': 'middle', class: 'rm2-sub' }, cut([b.agentProject ? `Agent work: ${b.agentProject}` : '', `${b.ahead} save${b.ahead === 1 ? '' : 's'} ahead`, b.remote ? '' : 'only on this computer'].filter(Boolean).join(' · '), 40)));
-    if (b.current || (!m.here.onMain && m.here.branch === b.name)) callout(xb, y - 74, 'You are here', y - 22);
+    if (b.current || (m.here && !m.here.onMain && m.here.branch === b.name)) callout(xb, y - 74, 'You are here', y - 22);
   });
   return svg;
 }
@@ -1903,6 +1903,9 @@ function pageRepoMap() {
   const remote = (d) => h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
       h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
+    d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, true, when)),
+      d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
+      d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Open pull requests (${d.pulls.length})`),
       d.pulls.length ? d.pulls.map((p) => h('div', { class: 'rm-commit' }, h('b', {}, `#${p.number}`), h('span', {}, p.title), p.draft ? h('span', { class: 'pill' }, 'draft') : null, h('small', { class: 'hint' }, `${p.from} → ${p.into} · ${p.author} · ${when(p.updatedAt)}`), h('a', { href: p.url, target: '_blank', rel: 'noopener' }, 'Open'))) : h('p', { class: 'hint' }, 'None open.')),
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${d.branches.length})`), d.branches.map((b) => h('div', { class: 'rm-commit' }, h('b', {}, b.name), b.name === d.defaultBranch ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px' }, 'main') : null, b.protected ? h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, 'protected') : null, h('small', { class: 'hint mono' }, b.sha)))),

@@ -19,7 +19,7 @@ The drop-down at the top has two groups:
 
 ## For a repository on GitHub
 
-The main branch, when it was last pushed, **open pull requests** (from and into which branch, who, and a link), all branches (protected ones are marked) and the latest saves.
+The same **Map** as above (without a "You are here" marker, because the repository is not on this computer), then the main branch, when it was last pushed, **open pull requests** (from and into which branch, who, and a link), all branches (protected ones are marked) and the latest saves.
 
 ## Good to know
 

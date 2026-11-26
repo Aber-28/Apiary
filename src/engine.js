@@ -593,7 +593,7 @@ export class Engine extends EventEmitter {
     if (!this.vault.unlocked) throw bad(423, 'The vault is locked. Unlock it first (Secrets page).');
     const sec = this.vault.byName(host.secret); if (!sec) throw bad(400, `The login "${host.secret}" is not in the vault.`);
     const meta = this.vault.list().find((x) => x.id === sec.id) || {}, type = typeOf(meta), user = this.vault.user(sec.id), value = this.vault.value(sec.id);
-    if (type === 'token' || value === null) throw bad(400, `"${host.secret}" is not an SSH login or a username and password.`);
+    if (type === 'token' || value === null) throw bad(400, `Discover needs an SSH login or a username and password, and "${host.secret}" is an API token. The token is used for the official API only, so there is nothing to discover over SSH here. To also list its machines, press Update and add an SSH login.`);
     if (!user) throw bad(400, `The login "${host.secret}" needs a username.`);
     const addr = type === 'ssh' ? meta.host : host.address; if (!addr) throw bad(400, 'Give the device an address first.');
     if (this.discovering.has(id)) throw bad(409, 'Discovery is already running for this device.');

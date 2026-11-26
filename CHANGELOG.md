@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.55.2
+
+- Discover is no longer shown on devices connected only with an API token (it needs SSH or a login), so it can't produce that error. If you reach it another way, the message now explains why.
+
 ## 0.55.1
 
 - Decisions your rules made automatically are no longer listed on the Approvals page (they stay in the audit log).

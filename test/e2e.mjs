@@ -1622,7 +1622,7 @@ let orgIds;
       const notes = [];
       const job = await engine._peerJob(mem, { to: other.name, text: 'example question', wait: true }, notes);
       assert.equal(job, null, 'E2: no reply job is started');
-      assert.ok(notes.some((n) => /without waiting: a reply from a teammate cannot start another reply/.test(n)), 'E2: the sender is told why');
+      assert.ok(notes.some((n) => /without waiting: a reply from a teammate cannot start another reply/.test(n)), `E2: the sender is told why: ${JSON.stringify(notes)} mem=${mem.name} other=${other.name}`);
       engine.replyTurns.delete(mem.id);
     }
     // F1 trust input

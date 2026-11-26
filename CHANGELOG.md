@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.60.3
+
+- Fixed: two teammates hired at the same moment could be given the same codename. Names being handed out are now reserved straight away.
+- Fixed: the automatic checks that run on GitHub sometimes failed for no real reason; they no longer cancel each other when one fails.
+
 ## 0.60.2
 
 - Fixed: guesses sent at the same moment could skip the sign-in lock, so a password could be guessed much faster than intended. Every try is now counted before it is checked.

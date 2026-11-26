@@ -426,17 +426,23 @@ export class Engine extends EventEmitter {
   // Create a permanent team member: name (comic-book style unless given), full profile, Markdown file.
   async _makeMember(root, spec) {
     const roster = this._roster(root);
-    const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
+    // Names being handed out right now count as taken too: two hires at the same moment must not pick the same codename.
+    const claimed = (this._claimedNames ||= new Map()); if (!claimed.has(root.id)) claimed.set(root.id, new Set());
+    const mine = claimed.get(root.id);
+    const taken = new Set([root.name, ...roster.map((m) => m.name), ...mine].map((n) => n.toLowerCase()));
     const title = String(spec.title || spec.name || 'Specialist').trim().slice(0, 60);
     const dept = DEPARTMENTS[spec.department] ? spec.department : inferDepartment(title, spec.role);
     let name = String(spec.name || '').trim().slice(0, 40) || pickName(dept, taken);
     if (taken.has(name.toLowerCase())) { let i = 2; while (taken.has(`${name} ${i}`.toLowerCase())) i++; name = `${name} ${i}`; }
+    mine.add(name);
+    try {
     const profile = buildProfile({ name, title, role: spec.role, department: dept, reason: spec.reason, instructions: spec.instructions, guardrails: spec.guardrails });
     const boss = this.agents[spec.reportsTo] || root;
     const child = await this._makeChild(root, { name, title, role: profile.role, instructions: profile.instructions, provider: spec.provider || root.provider, model: spec.model, member: true, consult: spec.consult !== false, memKey: slug(title), department: profile.department, profile, reportsTo: boss.id, hiredAt: Date.now() });
     child.mdFile = orgfiles.writeAgent(this._scope(root), child.memKey, { name, title, department: profile.departmentLabel, reportsTo: boss.name, reason: spec.reason, instructions: profile.instructions, hired: child.hiredAt });
     this.store.save();
     return child;
+    } finally { mine.delete(name); }
   }
 
   // A proposal is turned into complete profiles (instructions + guardrails), shown for approval, then the agents join the team.

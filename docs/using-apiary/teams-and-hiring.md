@@ -4,7 +4,7 @@ A project can work like a small company: a **CEO** (the lead) who hands each job
 
 ## Starting with a team
 
-Choose a team when you create a project (**Start with a team?**), or create your own under **Agents → Teams**. The built-in **Operations team** has a CEO and Networking, Security and Research specialists. These members stay on the project, keep their own memory and work on their own git branch.
+Once your CEO is set up, every project is led by your CEO, who brings in specialists from your team as the work needs them; there is nothing to choose. Before a CEO exists, the new-project form asks **Start with a team?** (just a lead, or a built-in team). You can also create your own under **Agents → Teams**. The built-in **Operations team** has a CEO and Networking, Security and Research specialists. These members stay on the project, keep their own memory and work on their own git branch.
 
 ## How a job flows
 

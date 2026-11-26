@@ -2807,5 +2807,8 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   if (!/function unwall\(/.test(js) || !/h\('div', \{ class: 'task' \}, rich\(it\.task\)\)/.test(js) || !/inlineCode\(unwall\(/.test(js)) throw new Error('long text must be broken into paragraphs everywhere'); }
 { const leads = Object.values(engine.agents).filter((a) => !a.parentId && a.role !== 'Chief executive'); assert.ok(leads.every((a) => a.role !== 'Lead agent'), 'project leads say which project they lead'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/function boldIn\(/.test(js), 'chat shows **bold** as bold'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.ok(/\.\.\.\(S\.orgDone \? \[h\('p', \{ class: 'hint' \}, 'Your CEO leads this project/.test(js) && /st\.team && !S\.orgDone/.test(js), 'with a CEO set up, no lead/team choice is offered'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/hide = \(a\) => S\.orgDone && !a\.parentId && a\.kind !== 'general'/.test(js), 'project leads are not listed again when a CEO exists'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

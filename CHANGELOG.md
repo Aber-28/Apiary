@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.58.1
+
+- New project: with a CEO set up there is no "Just a lead / team" choice any more. The CEO leads every project and brings in specialists as needed, and the form says so. (Before a CEO exists the old choice is still there.) The Agents list no longer shows a separate lead row for every project; a project's helpers are listed with "Project: <name>" after their role.
+
 ## 0.58.0
 
 - With "Agents write in plain, simple English" ticked, agents now report back in a few short sentences about what changed for you, and leave out file names, function names, test details and numbered code-change lists unless you ask. They end with one line offering the technical details. Commands you must run still come in a code block.

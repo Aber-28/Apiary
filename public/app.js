@@ -1118,14 +1118,14 @@ async function openNewProject() {
   const go = h('button', { class: 'btn primary big', type: 'button' }, 'Start project');
   const dlg = h('dialog', { 'aria-label': 'New project' }, h('form', { method: 'dialog' }, h('h2', { style: 'font-size:20px' }, 'New project'),
     h('label', { class: 'f' }, 'What should the team do?', goal), h('label', { class: 'f' }, 'Project name', name),
-    h('div', { class: 'f' }, 'Your CEO uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, h('div', { class: 'f' }, 'Start with a team?'), teamBox, h('div', { class: 'f' }, 'Access'), accBox, h('label', { class: 'check' }, appr, h('span', {}, h('b', {}, 'Ask me before agents create sub-agents or merge changes'), h('small', { class: 'hint', style: 'display:block' }, 'Recommended. You can review exactly what will happen first.'))), err,
+    h('div', { class: 'f' }, 'Your CEO uses'), aiBox, h('div', { class: 'f' }, 'Where does the work happen?'), sourceBox, ...(S.orgDone ? [h('p', { class: 'hint' }, 'Your CEO leads this project and brings in specialists from your team as the work needs them.')] : [h('div', { class: 'f' }, 'Start with a team?'), teamBox]), h('div', { class: 'f' }, 'Access'), accBox, h('label', { class: 'check' }, appr, h('span', {}, h('b', {}, 'Ask me before agents create sub-agents or merge changes'), h('small', { class: 'hint', style: 'display:block' }, 'Recommended. You can review exactly what will happen first.'))), err,
     h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', value: 'cancel' }, 'Cancel'), go)));
   go.onclick = async () => {
     err.textContent = '';
     if (!st.ai) { err.textContent = 'Connect an AI first (Connections).'; return; }
     if (!goal.value.trim() && !name.value.trim()) { err.textContent = 'Describe what you want done.'; return; }
     const body = { provider: st.ai, goal: goal.value.trim(), name: name.value.trim(), access: st.access, approvals: appr.checked };
-    if (st.team) body.team = st.team;
+    if (st.team && !S.orgDone) body.team = st.team;
     if (st.src === 'folder') { if (!folder.value.trim()) { err.textContent = 'Enter a folder path.'; return; } body.source = folder.value.trim(); }
     if (st.src === 'github') { if (!st.repo) { err.textContent = 'Choose a repository.'; return; } body.source = st.repo; if (st.base) body.base = st.base; }
     go.disabled = true; go.textContent = st.src === 'github' ? 'Cloning…' : 'Starting…';
@@ -1153,10 +1153,11 @@ function pageTerminals() {
 function pageAgents() {
   crumbs('Agents', 'All agents');
   const draw = () => {
-    const rows = []; const walk = (a, d) => { rows.push([a, d]); kidsOf(a.id).forEach((k) => walk(k, d + 1)); }; S.agents.filter((a) => !a.parentId).sort((a, b) => (b.kind === 'general') - (a.kind === 'general') || a.createdAt - b.createdAt).forEach((l) => walk(l, 0));
-    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'All agents'), h('p', { class: 'sub-title' }, `${S.agents.length} agents across ${S.agents.filter((a) => !a.parentId).length} ${S.agents.filter((a) => !a.parentId).length === 1 ? 'group' : 'groups'}.`))),
+    const rows = [], hide = (a) => S.orgDone && !a.parentId && a.kind !== 'general'; // with a CEO set up, a project's own lead is the CEO, so it is not listed again
+    const walk = (a, d) => { if (!hide(a)) rows.push([a, d, hide(a.parentId ? rootOf(a) : a) ? rootOf(a) : null]); kidsOf(a.id).forEach((k) => walk(k, hide(a) ? 0 : d + 1)); }; S.agents.filter((a) => !a.parentId).sort((a, b) => (b.kind === 'general') - (a.kind === 'general') || a.createdAt - b.createdAt).forEach((l) => walk(l, 0));
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'All agents'), h('p', { class: 'sub-title' }, S.orgDone ? `${rows.length} ${rows.length === 1 ? 'agent' : 'agents'}.` : `${S.agents.length} agents across ${S.agents.filter((a) => !a.parentId).length} ${S.agents.filter((a) => !a.parentId).length === 1 ? 'group' : 'groups'}.`))),
       rows.length ? h('div', { class: 'card scroll-x', style: 'padding:0' }, h('table', { class: 'tbl' }, h('thead', {}, h('tr', {}, ['Name', 'Role', 'AI', 'Via', 'Status', 'Branch'].map((t) => h('th', {}, t)))),
-        h('tbody', {}, rows.map(([a, d]) => h('tr', {}, h('td', { style: `padding-left:${16 + d * 22}px` }, h('a', { href: `#/project/${rootOf(a).id}`, onclick: () => (S.sel = a.id), style: 'font-weight:600' }, a.name)), h('td', { class: 'hint' }, a.role), h('td', {}, PNAME[a.provider] || a.provider), h('td', {}, a.method === 'api' ? 'Web' : 'Terminal'), h('td', {}, pill(a.status)), h('td', { class: 'mono hint' }, a.git?.branch || '—')))))) : h('div', { class: 'card empty' }, 'No agents yet.'));
+        h('tbody', {}, rows.map(([a, d, proj]) => h('tr', {}, h('td', { style: `padding-left:${16 + d * 22}px` }, h('a', { href: `#/project/${rootOf(a).id}`, onclick: () => (S.sel = a.id), style: 'font-weight:600' }, a.name)), h('td', { class: 'hint' }, a.role, proj ? ` · Project: ${proj.name}` : ''), h('td', {}, PNAME[a.provider] || a.provider), h('td', {}, a.method === 'api' ? 'Web' : 'Terminal'), h('td', {}, pill(a.status)), h('td', { class: 'mono hint' }, a.git?.branch || '—')))))) : h('div', { class: 'card empty' }, 'No agents yet.'));
   };
   draw(); page = { update: (ev) => ['agent', 'removed'].includes(ev.type) && draw() };
 }

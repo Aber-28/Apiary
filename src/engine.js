@@ -129,6 +129,7 @@ export class Engine extends EventEmitter {
     this.metaLeases = new Map(); // agentId -> { ENV_NAME: value } for the non-secret details of a lease (host, port, how to log in)
     this.leases = new Map();   // agentId -> Map(secret name -> value), only for the turn that was approved
     for (const a of Object.values(store.data.agents)) if (a.status !== 'idle') a.status = 'idle'; // interrupted by a restart
+    for (const a of Object.values(store.data.agents)) if (!a.parentId && a.role === 'Lead agent') a.role = `Leads the ${a.name} project`; // older projects get the clearer wording
     this.seedTeams();
     for (const r of Object.values(store.data.approvals)) if (r.status === 'pending') r.status = 'expired'; // nobody is waiting any more
   }
@@ -969,7 +970,7 @@ export class Engine extends EventEmitter {
     const id = id8();
     const title = (name || goal || 'New project').trim().split('\n')[0].slice(0, 48);
     const pslug = slug(title);
-    const fields = { id, name: title, role: 'Lead agent', provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, ownerId: this.orgDone ? this._ceo()?.id : undefined, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
+    const fields = { id, name: title, role: `Leads the ${title} project`, provider, method, model: model || this.defaultModel(provider), access: access === 'full' ? 'full' : 'safe', parentId: null, depth: 0, ownerId: this.orgDone ? this._ceo()?.id : undefined, approvals: approvals === undefined ? this.approvalsDefault : !!approvals };
 
     // Where does the work happen?
     let repo = null;

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.57.2
+
+- A project's lead agent now has the role "Leads the <project> project" instead of the generic "Lead agent", so the Agents list says which project each lead belongs to. Existing projects are updated automatically.
+
 ## 0.57.1
 
 - No more walls of text. Long text is now cut into short paragraphs everywhere it is shown (approval briefs, task details, chat replies, reports): "Label:" sections start a new paragraph, "(1) ... (2) ..." runs become numbered lists, and long runs of sentences are grouped.

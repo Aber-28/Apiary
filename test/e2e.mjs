@@ -2797,5 +2797,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
     assert.ok(!(await call('/api/health/check', 'POST', {})).body.items.some((x) => x.id === sug.id), 'it stays hidden after the next check'); }
   assert.equal((await call('/api/health/snooze', 'POST', {})).status, 400);
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/HEALTH_GROUPS/.test(js) && /Hide for 30 days/.test(js), 'health page is grouped'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  if (!/updPoll/.test(js) || !/redraw: draw/.test(js)) throw new Error('a queued update must keep refreshing its count'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

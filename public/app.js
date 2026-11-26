@@ -832,14 +832,20 @@ function pageSecrets() {
 }
 
 // ---------- updates ----------
+let updPoll = null;
 function renderUpdateChip() {
   let c = document.getElementById('upd');
   const u = S.update;
+  // While an update waits for work to finish, keep the count live so nobody waits on a stale number.
+  if (u?.queued && !updPoll) updPoll = setInterval(() => { if (!document.hidden) refreshUpdate(); }, 3000);
+  else if (!u?.queued && updPoll) { clearInterval(updPoll); updPoll = null; }
   if (!u || u.state !== 'ready') { c?.remove(); return; }
   if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:12px' }); $('#theme').before(c); }
   c.textContent = u.queued ? `Update waiting for ${u.busy || 'running'} to finish` : `Update ready: ${u.latest}`;
 }
-async function refreshUpdate() { try { S.update = await api('/api/update'); renderUpdateChip(); } catch { /* ignore */ } }
+async function refreshUpdate() {
+  try { S.update = await api('/api/update'); renderUpdateChip(); if (location.hash === '#/updates' && typeof page?.redraw === 'function') page.redraw(); } catch { /* ignore */ }
+}
 setInterval(() => { if (!document.hidden) refreshUpdate(); }, 5 * 60 * 1000);
 // A full-screen view of the installation, so nobody thinks it has frozen.
 // ---------- install the AI tools from inside Apiary ----------
@@ -985,7 +991,7 @@ function pageUpdates() {
         h('div', { class: 'kv', style: 'margin-top:12px' }, check, install, forceNow, cancelQueue), busy,
         h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))));
   };
-  draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };
+  draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true, redraw: draw };
 }
 
 // ---------- teams ----------

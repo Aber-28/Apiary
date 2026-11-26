@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.56.1
+
+- "Update waiting for N to finish" now counts down live (every 3 seconds) in the top bar and on the Updates page, and the update installs itself as soon as the count reaches zero. Before, the number only refreshed every 5 minutes.
+
 ## 0.56.0
 
 - Health page is calmer: one summary line on top, then collapsible groups (Devices, Storage and backups, Logins, Security and vault, Suggestions). Groups with problems start open, healthy ones stay closed, and each item is a one-line row that opens to show the problem, what to do and a Go there button. Only the most serious item starts expanded.

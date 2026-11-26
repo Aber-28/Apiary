@@ -573,11 +573,11 @@ assert.ok(engine2.agents[lead2.id]);
 // ---- approvals archive ----
 {
   const rec = (status, hoursAgo) => { const id = 'arch' + status + hoursAgo; engine.store.data.approvals[id] = { id, agentId: 'x', agentName: 'x', projectId: 'x', status, kind: 'spawn', title: 't', createdAt: Date.now() - (hoursAgo + 1) * 3600000, decidedAt: Date.now() - hoursAgo * 3600000 }; return id; };
-  const a1 = rec('approved', 1), a2 = rec('denied', 30), a3 = rec('approved', 2.5), a4 = rec('denied', 3.5);
+  const a1 = rec('approved', 0.2), a2 = rec('denied', 30), a3 = rec('approved', 0.5), a4 = rec('denied', 1.5);
   const list = (await call('/api/approvals')).body;
   const get = (id) => list.find((x) => x.id === id);
   assert.equal(get(a1).archived, false); assert.equal(get(a3).archived, false);
-  assert.equal(get(a2).archived, true); assert.equal(get(a4).archived, true, 'older than 3 hours is archived');
+  assert.equal(get(a2).archived, true); assert.equal(get(a4).archived, true, 'older than 1 hour is archived');
   assert.ok(list.filter((x) => x.status === 'pending').every((x) => !x.archived));
   for (const id of [a1, a2, a3, a4]) delete engine.store.data.approvals[id];
 }

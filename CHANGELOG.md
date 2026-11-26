@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.55.1
+
+- Decided approvals move to the collapsed "Archived decisions" list after 1 hour instead of 3, so the Approvals page stays short. Pending ones always stay on top.
+
 ## 0.55.0
 
 - Library is now its own page under Infrastructure, no longer a button above Devices.

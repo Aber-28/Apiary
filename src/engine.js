@@ -173,7 +173,7 @@ export class Engine extends EventEmitter {
   _stampApprovals() { for (const r of Object.values(this.store.data.approvals).filter((x) => !x.num).sort((a, b) => a.createdAt - b.createdAt)) this._approvalNo(r); }
   approvals() {
     this._stampApprovals();
-    const cut = Date.now() - 3 * 3600000;
+    const cut = Date.now() - 3600000;
     return Object.values(this.store.data.approvals).sort((a, b) => b.createdAt - a.createdAt).map((r) => ({ ...r, archived: r.status !== 'pending' && (r.decidedAt || r.createdAt) < cut }));
   }
   _needsApproval(agent) { return this.rootOf(agent).approvals !== false; }

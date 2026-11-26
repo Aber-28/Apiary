@@ -376,7 +376,7 @@ function pageApprovals() {
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Approvals'), h('p', { class: 'sub-title' }, 'Agents ask you before they create sub-agents or merge their work. Nothing is pushed to GitHub until you open a pull request.'))),
       p.length ? p.map(approvalCard) : h('div', { class: 'card empty' }, 'Nothing is waiting for you.'),
       done.length ? h('h2', { style: 'margin-top:28px' }, 'Earlier decisions') : null, ...done.slice(0, 30).map(approvalCard),
-      old.length ? h('details', { style: 'margin-top:28px' }, h('summary', {}, h('b', {}, `Archived decisions (${old.length})`), ' · decisions move here after 3 hours'), ...old.slice(0, 100).map(approvalCard)) : null);
+      old.length ? h('details', { style: 'margin-top:28px' }, h('summary', {}, h('b', {}, `Archived decisions (${old.length})`), ' · decisions move here after 1 hour'), ...old.slice(0, 100).map(approvalCard)) : null);
   };
   draw(); page = { shows: () => true, update: (ev) => ev.type === 'approval' && draw() };
 }

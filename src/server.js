@@ -7,6 +7,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { CONNECTION_IDS } from './connections.js';
 import { github } from './github.js';
+import { localRepos, inspect as inspectRepo } from './repomap.js';
 import { providers } from './providers.js';
 import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
@@ -375,6 +376,21 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       }
       if (req.method === 'GET' && url.pathname === '/api/github/repos') {
         return json(res, 200, await github.listRepos(engine.connections.get('github'), url.searchParams.get('q') || ''));
+      }
+      if (req.method === 'GET' && url.pathname === '/api/repomap') {
+        const local = localRepos(engine).map(({ id, name, path: p, uses, projects }) => ({ id, name, path: p, uses, projects }));
+        let remote = [], remoteError = '';
+        const conn = engine.connections.get('github');
+        try { remote = (await github.listRepos(conn)).map((x) => ({ name: x.name, private: x.private, description: x.description, defaultBranch: x.defaultBranch })); } catch (e) { remoteError = e.message; }
+        return json(res, 200, { local, remote, remoteError });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/repomap/local') {
+        const found = localRepos(engine).find((x) => x.id === url.searchParams.get('id'));
+        if (!found) return json(res, 404, { error: 'That repository is not known to Apiary' });
+        return json(res, 200, { name: found.name, uses: found.uses, projects: found.projects, ...(await inspectRepo(engine, found.path)) });
+      }
+      if (req.method === 'GET' && url.pathname === '/api/repomap/github') {
+        return json(res, 200, await github.overview(engine.connections.get('github'), url.searchParams.get('repo') || ''));
       }
       if (req.method === 'GET' && url.pathname === '/api/github/branches') {
         return json(res, 200, await github.listBranches(engine.connections.get('github'), url.searchParams.get('repo') || ''));

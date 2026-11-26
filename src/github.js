@@ -78,6 +78,24 @@ export const github = {
     return r.stdout.split('\n').filter(Boolean);
   },
 
+  // What GitHub shows about a repository: default branch, branches, open pull requests, latest commits.
+  async overview(conn, repo) {
+    if (!SPEC_REPO.test(repo)) throw new GitHubError('Bad repository name');
+    const get = async (p) => {
+      if (conn.method === 'token') { if (!conn.token) throw new GitHubError('Add a GitHub token under Connections first', 409); return rest(conn.token, p); }
+      const r = await run('gh', ['api', p.replace(/^\//, '')], { timeout: 30000, env: ghEnv(conn) });
+      if (r.code !== 0) throw new GitHubError(`GitHub could not answer: ${(r.stderr || '').trim().slice(0, 160) || 'is gh signed in?'}`, 409);
+      return JSON.parse(r.stdout || 'null');
+    };
+    const [info, branches, pulls, commits] = await Promise.all([get(`/repos/${repo}`), get(`/repos/${repo}/branches?per_page=100`), get(`/repos/${repo}/pulls?state=open&per_page=30`), get(`/repos/${repo}/commits?per_page=15`)]);
+    return {
+      name: info.full_name || repo, private: !!info.private, description: info.description || '', defaultBranch: info.default_branch, url: info.html_url, pushedAt: info.pushed_at,
+      branches: (branches || []).map((b) => ({ name: b.name, sha: String(b.commit?.sha || '').slice(0, 7), protected: !!b.protected })),
+      pulls: (pulls || []).map((x) => ({ number: x.number, title: x.title, from: x.head?.ref, into: x.base?.ref, author: x.user?.login, draft: !!x.draft, url: x.html_url, updatedAt: x.updated_at })),
+      commits: (commits || []).map((c) => ({ hash: String(c.sha || '').slice(0, 7), subject: String(c.commit?.message || '').split('\n')[0], author: c.commit?.author?.name || '', date: c.commit?.author?.date })),
+    };
+  },
+
   async clone(conn, spec, dest) {
     const { kind, spec: s } = validateSource(spec);
     if (kind === 'github' && conn.method !== 'token') {

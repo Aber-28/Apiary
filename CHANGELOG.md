@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.62.0
+
+- New: Repository map (Knowledge menu). Pick a repository on this computer or on your GitHub account and see where you are: the branch, unsaved changes, every branch with how far it is from main, which branches are agent work, each agent's checkout, recent activity and open pull requests. Read-only.
+
 ## 0.61.0
 
 - New: handover notes. Agents keep one short note per multi-step task. If Claude hits its limit, Codex reads the note and carries on (and the other way round). On by default; switch off under Settings.

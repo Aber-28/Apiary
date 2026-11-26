@@ -2852,5 +2852,25 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.equal(engine.handoverOn, true, 'on by default'); engine.setSettings({ handover: false }); assert.equal(engine.handoverOn, false); engine.setSettings({ handover: true });
 }
 
+// ---- repository map: where you are, branches, who works where; read-only ----
+{
+  const { inspect } = await import('../src/repomap.js');
+  const { mkdtempSync: mk, writeFileSync } = await import('node:fs');
+  const d = mk(path.join(os.tmpdir(), 'apiary-rm-'));
+  const g = (...a) => execFileSync('git', ['-c', 'user.email=a@example.com', '-c', 'user.name=T', ...a], { cwd: d, stdio: 'pipe' });
+  g('init', '-q', '-b', 'main'); g('commit', '-q', '--allow-empty', '-m', 'first'); g('checkout', '-q', '-b', 'release/1.2'); g('commit', '-q', '--allow-empty', '-m', 'work'); writeFileSync(path.join(d, 'f.txt'), 'x');
+  const info = await inspect(engine, d);
+  assert.equal(info.current, 'release/1.2', 'a branch name with dots and slashes is read whole'); assert.equal(info.defaultBranch, 'main'); assert.equal(info.changes, 1); assert.equal(info.clean, false);
+  const b = info.branches.find((x) => x.name === 'release/1.2'); assert.equal(b.aheadDefault, 1); assert.equal(b.behindDefault, 0); assert.equal(b.current, true);
+  assert.ok(info.commits.length >= 2 && info.worktrees.length === 1);
+  assert.equal((await inspect(engine, path.join(d, 'nope'))).error.includes('no longer'), true, 'a missing folder is explained');
+  await engine.repos.add({ source: d, name: 'Map example' });
+  const list = (await call('/api/repomap')).body; assert.ok(list.local.some((r) => r.name === 'Map example') && Array.isArray(list.remote));
+  const one = (await call('/api/repomap/local?id=' + list.local.find((r) => r.name === 'Map example').id)).body; assert.equal(one.current, 'release/1.2'); assert.equal(one.name, 'Map example');
+  assert.equal((await call('/api/repomap/local?id=../../etc')).status, 404, 'only repositories Apiary knows can be looked at');
+  assert.notEqual((await call('/api/repomap/github?repo=bad name')).status, 200, 'a bad GitHub name is refused');
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

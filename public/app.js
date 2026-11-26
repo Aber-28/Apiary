@@ -140,7 +140,7 @@ const NAV = [
     { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
     { id: 'library', label: 'Templates', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
-    { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories']] }] },
+    { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories'], ['#/repomap', 'Repository map']] }] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/library', 'Library'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], { id: 'ai', label: 'AI tools', items: [['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex']] }, ['#/connections/github', 'GitHub']] },
   { id: 'security', label: 'Security', icon: ICON.shield || ICON.sliders, items: [['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/policy', 'Approval rules'], ['#/access', 'Access and safety'], ['#/audit', 'Audit log']] },
@@ -213,6 +213,7 @@ const ROUTES = [
   [/^#\/tasks$/, () => pageTasks()],
   [/^#\/tickets$/, () => pageTickets()],
   [/^#\/repositories$/, () => pageRepos()],
+  [/^#\/repomap$/, () => pageRepoMap()],
   [/^#\/usage$/, () => pageUsage()],
   [/^#\/secrets$/, () => pageSecrets()],
   [/^#\/infrastructure$/, () => pageInfra('devices')],
@@ -1792,6 +1793,78 @@ function pageRepos() {
   draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
 }
 
+// ---------- repository map ----------
+function pageRepoMap() {
+  crumbs('Knowledge', 'Repository map');
+  let choice = sessionStorageGet('repomap') || '', list = { local: [], remote: [], remoteError: '' };
+  const body = h('div', {});
+  const when = (d) => (d ? ago(new Date(d).getTime()) : '');
+  const sel = h('select', { 'aria-label': 'Choose a repository', onchange: (e) => { choice = e.target.value; sessionStorageSet('repomap', choice); show(); } });
+  const bar = (b) => {
+    const a = b.aheadDefault || 0, d = b.behindDefault || 0, max = Math.max(a, d, 1);
+    return h('div', { class: 'rm-bar', title: `${a} ahead and ${d} behind the main branch` },
+      h('span', { class: 'rm-behind' }, h('i', { style: `width:${Math.round((d / max) * 100)}%` })), h('span', { class: 'rm-ahead' }, h('i', { style: `width:${Math.round((a / max) * 100)}%` })));
+  };
+  const commitRow = (c) => h('div', { class: 'rm-commit' }, h('span', { class: 'mono hint' }, c.hash), h('span', {}, c.subject), (c.refs || []).slice(0, 3).map((r) => h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, r)), h('small', { class: 'hint' }, `${c.author || ''} · ${when(c.date)}`));
+  const here = (d) => h('div', { class: 'card rm-here' },
+    h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' },
+      h('div', {}, h('small', { class: 'hint' }, 'You are here'), h('h2', { style: 'margin:2px 0' }, d.detached ? 'No branch (detached)' : d.current || 'No commits yet'), h('small', { class: 'hint' }, `Main branch: ${d.defaultBranch || 'unknown'}`)),
+      h('div', { class: 'kv' }, h('span', { class: 'pill ' + (d.clean ? 'ok' : 'work') }, d.clean ? 'Nothing waiting to be saved' : `${d.changes} unsaved change${d.changes > 1 ? 's' : ''}`),
+        d.hasUpstream ? h('span', { class: 'pill' }, `${d.ahead} to send, ${d.behind} to fetch`) : h('span', { class: 'pill' }, 'Not on GitHub yet'))),
+    d.head?.hash ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Latest save: ${d.head.subject} (${d.head.hash}) by ${d.head.author}, ${when(d.head.date)}`) : null,
+    h('p', { class: 'hint mono', style: 'margin:4px 0 0;word-break:break-all' }, d.path + (d.remote ? '  ←  ' + d.remote : '')));
+  const local = (d) => {
+    if (d.error) return h('div', { class: 'card empty' }, d.error);
+    const bs = d.branches || [];
+    return h('div', {},
+      here(d),
+      d.projects?.length || d.uses?.length ? h('p', { class: 'hint' }, [...(d.projects?.length ? ['Used by: ' + d.projects.join(', ')] : []), ...(d.uses || [])].join('. ')) : null,
+      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${bs.length})`), h('small', { class: 'hint' }, 'The bar shows how far each branch has moved from the main branch: grey = behind, coloured = ahead.'),
+        h('div', { class: 'rm-branches' }, bs.map((b) => h('div', { class: 'rm-row' + (b.current ? ' cur' : '') },
+          h('div', {}, h('b', {}, b.name), ' ', b.current ? h('span', { class: 'pill ok', style: 'height:18px;font-size:10px' }, 'you are here') : null, b.isDefault ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px' }, 'main') : null,
+            b.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, 'agent work: ' + b.agentProject) : null, !b.local ? h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, 'only on GitHub') : null,
+            h('small', { class: 'hint', style: 'display:block' }, `${b.subject || ''} · ${when(b.date)}`)),
+          b.isDefault ? h('small', { class: 'hint' }, 'the base') : bar(b),
+          h('small', { class: 'hint mono' }, b.isDefault ? '' : `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'}`))))),
+      (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
+        (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
+      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Recent activity'), (d.commits || []).length ? d.commits.map(commitRow) : h('p', { class: 'hint' }, 'No saves yet.')));
+  };
+  const remote = (d) => h('div', {},
+    h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
+      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Open pull requests (${d.pulls.length})`),
+      d.pulls.length ? d.pulls.map((p) => h('div', { class: 'rm-commit' }, h('b', {}, `#${p.number}`), h('span', {}, p.title), p.draft ? h('span', { class: 'pill' }, 'draft') : null, h('small', { class: 'hint' }, `${p.from} → ${p.into} · ${p.author} · ${when(p.updatedAt)}`), h('a', { href: p.url, target: '_blank', rel: 'noopener' }, 'Open'))) : h('p', { class: 'hint' }, 'None open.')),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${d.branches.length})`), d.branches.map((b) => h('div', { class: 'rm-commit' }, h('b', {}, b.name), b.name === d.defaultBranch ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px' }, 'main') : null, b.protected ? h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, 'protected') : null, h('small', { class: 'hint mono' }, b.sha)))),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Recent activity'), d.commits.map(commitRow)),
+    h('p', { class: 'hint' }, 'To let agents work on it, add it under Repositories or start a project from it.'));
+  const show = async () => {
+    if (!choice) { body.replaceChildren(h('div', { class: 'card empty' }, 'Choose a repository above.')); return; }
+    body.replaceChildren(h('div', { class: 'card empty' }, 'Looking…'));
+    try {
+      const d = choice.startsWith('l') ? await api('/api/repomap/local?id=' + encodeURIComponent(choice)) : await api('/api/repomap/github?repo=' + encodeURIComponent(choice.slice(2)));
+      body.replaceChildren(choice.startsWith('l') ? local(d) : remote(d));
+    } catch (e) { body.replaceChildren(h('div', { class: 'card empty' }, e.message)); }
+  };
+  const draw = async () => {
+    list = await api('/api/repomap');
+    const ids = new Set([...list.local.map((r) => r.id), ...list.remote.map((r) => 'g:' + r.name)]);
+    if (!ids.has(choice)) choice = list.local[0]?.id || (list.remote[0] ? 'g:' + list.remote[0].name : '');
+    sel.replaceChildren(
+      list.local.length ? h('optgroup', { label: 'On this computer' }, list.local.map((r) => h('option', { value: r.id, selected: r.id === choice }, r.name))) : null,
+      list.remote.length ? h('optgroup', { label: 'On your GitHub account' }, list.remote.map((r) => h('option', { value: 'g:' + r.name, selected: 'g:' + r.name === choice }, r.name + (r.private ? ' (private)' : '')))) : null);
+    sel.value = choice;
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Repository map'), h('p', { class: 'sub-title' }, 'Pick a repository to see where you are: the branch, what is waiting to be saved, who is working on which branch, and what is open on GitHub. Nothing here changes anything.')),
+      h('div', { class: 'kv' }, sel, h('button', { class: 'btn', onclick: guard(async () => { await draw(); }) }, 'Refresh'))),
+      list.remoteError ? h('p', { class: 'hint' }, 'GitHub repositories are not shown: ' + list.remoteError) : null,
+      !list.local.length && !list.remote.length ? h('div', { class: 'card empty' }, 'No repositories yet. Add one under Repositories, or connect GitHub under Connections.') : null, body);
+    await show();
+  };
+  draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
+}
+function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
+function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } }
+
 // ---------- support tickets ----------
 const TICKET_LABEL = { open: ['info', 'Open'], working: ['work', 'An agent is working'], resolved: ['ok', 'Fixed. Please check'], closed: ['', 'Closed'] };
 function pageTickets() {
@@ -2758,7 +2831,7 @@ function pageStartup() {
 
 // ---------- what's new after an update ----------
 // Words in the notes that become links to the matching page. They always open in a new tab, so the notes stay on screen.
-const NEWS_LINKS = [[/\bLibrary\b/, '#/library'], [/\bDashboard\b/, '#/home'], [/\bHealth\b/, '#/health'], [/\bApprovals?\b/, '#/approvals'], [/\bTroubleshoot\b/, '#/infrastructure'], [/\bDevices\b/, '#/infrastructure'], [/\bUpdates page\b|\bUpdate now!/, '#/updates'], [/\bAgents list\b|\bAll agents\b/, '#/agents'], [/\bProjects\b/, '#/projects'], [/\bTasks\b/, '#/tasks'], [/\bLive activity\b/, '#/activity'], [/\baudit log\b/i, '#/audit'], [/\bSecrets vault\b|\bvault\b/, '#/secrets'], [/\bTelegram\b/, '#/telegram'], [/\bBackups\b/, '#/backups'], [/\bMemory\b/, '#/memory'], [/\bOrganisation\b/, '#/organisation'], [/\bRunbooks\b/, '#/runbooks'], [/\bWeekly report\b/, '#/reports'], [/\bTeam meetings\b/, '#/meetings'], [/\bTeams\b/, '#/teams'], [/\bUsage\b/, '#/usage'], [/\bRepositories\b/, '#/repositories'], [/\bTerminal sessions\b/, '#/terminal'], [/\bChat\b/, '#/chat'], [/\bAppearance\b/, '#/appearance'], [/\bSetup guide\b/, '#/setup']];
+const NEWS_LINKS = [[/\bLibrary\b/, '#/library'], [/\bDashboard\b/, '#/home'], [/\bHealth\b/, '#/health'], [/\bApprovals?\b/, '#/approvals'], [/\bTroubleshoot\b/, '#/infrastructure'], [/\bDevices\b/, '#/infrastructure'], [/\bUpdates page\b|\bUpdate now!/, '#/updates'], [/\bAgents list\b|\bAll agents\b/, '#/agents'], [/\bProjects\b/, '#/projects'], [/\bTasks\b/, '#/tasks'], [/\bLive activity\b/, '#/activity'], [/\baudit log\b/i, '#/audit'], [/\bSecrets vault\b|\bvault\b/, '#/secrets'], [/\bTelegram\b/, '#/telegram'], [/\bBackups\b/, '#/backups'], [/\bMemory\b/, '#/memory'], [/\bOrganisation\b/, '#/organisation'], [/\bRunbooks\b/, '#/runbooks'], [/\bWeekly report\b/, '#/reports'], [/\bTeam meetings\b/, '#/meetings'], [/\bTeams\b/, '#/teams'], [/\bUsage\b/, '#/usage'], [/\bRepository map\b/, '#/repomap'], [/\bRepositories\b/, '#/repositories'], [/\bTerminal sessions\b/, '#/terminal'], [/\bChat\b/, '#/chat'], [/\bAppearance\b/, '#/appearance'], [/\bSetup guide\b/, '#/setup']];
 // A changelog line that starts with "Fixed:" is a fix. Older lines without it are sorted by wording.
 const isFix = (t) => /^fix(ed)?:/i.test(t) || /\b(fixed|no longer|stopped|wrongly|bug|crash|twice|stuck|stale|could not|couldn't|used to)\b/i.test(t);
 const noFixTag = (t) => { const r = t.replace(/^fix(ed)?:\s*/i, ''); return r.charAt(0).toUpperCase() + r.slice(1); };

@@ -424,3 +424,13 @@ dialog.news{max-width:min(640px,94vw);width:100%}.news-body{max-height:56vh;over
 .tcard .tresp{display:block;margin-top:6px}.tcard .tctl{margin-top:6px;gap:6px;flex-wrap:wrap}
 .tcard select{width:100%;height:30px;min-height:30px;padding:0 24px 0 8px;font-size:12.5px;border-radius:8px}.tcard .tctl select{width:auto;flex:1 1 90px;min-width:0}
 .tcard .btn{min-height:30px;padding:0 10px;font-size:12.5px;border-radius:8px}
+
+/* Repository map */
+.rm-here{border-left:4px solid var(--accent)}
+.rm-row{display:grid;grid-template-columns:minmax(0,1fr) 140px 70px;gap:12px;align-items:center;padding:8px 6px;border-bottom:1px solid var(--line)}
+.rm-row.cur{background:var(--accent-soft);border-radius:8px}
+.rm-bar{display:grid;grid-template-columns:1fr 1fr;gap:2px;height:8px}
+.rm-bar span{background:var(--line);border-radius:4px;overflow:hidden;display:flex}
+.rm-behind{justify-content:flex-end}.rm-bar i{display:block;height:100%;background:var(--muted)}.rm-ahead i{background:var(--accent)}
+.rm-commit{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--line)}
+@media (max-width:640px){.rm-row{grid-template-columns:1fr;gap:4px}}

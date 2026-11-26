@@ -34,6 +34,7 @@ Then open <http://127.0.0.1:7777>. A short setup wizard finds your AI logins and
 | **Reviewer agents** | A second agent reviews finished work and sends it back until it passes. |
 | **Parallel work** | Several agents work at once; merges are queued and conflicts fix themselves. |
 | **Recovery** | Failed jobs retry, switch between Claude and Codex with a handover note so work continues, and explain themselves in plain words. |
+| **Repository map** | See which repository and branch you are on, who is working where, and what is open on GitHub. |
 | **Infrastructure map** | Connect your servers, test the links and see how everything fits together. |
 | **Secrets vault** | Logins live in an encrypted vault and are redacted from chat, logs and exports. |
 | **Memory** | Agents remember last night, last week and last year. |

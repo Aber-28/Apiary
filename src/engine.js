@@ -25,7 +25,7 @@ import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
 import { UP_MS, gatherFacts, basicAdvice, parseFix, stripFix, isSafeFix, SYSTEM as TROUBLE_SYSTEM } from './troubleshoot.js';
-import { verifyCloudflare, verifyGoogle, parseGoogleKey } from './cloud.js';
+import { verifyCloudflare, verifyGoogle, verifyUnifi, parseGoogleKey } from './cloud.js';
 import { Audit } from './audit.js';
 import { Health, LOGIN_RE } from './health.js';
 import { Telegram } from './telegram.js';
@@ -484,6 +484,11 @@ export class Engine extends EventEmitter {
           const r = await (it.lib === 'cloudflare' ? verifyCloudflare : verifyGoogle)(value, this.cloudFetch || fetch);
           it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save();
         }
+      } catch { /* leave the plain result */ }
+    } else if (it.status?.ok && it.secret && this.vault.unlocked && it.lib === 'unifi' && this.vault.list().find((x) => x.name === it.secret)?.type === 'token') {
+      try {
+        const sec = this.vault.byName(it.secret), value = sec && this.vault.value(sec.id);
+        if (value) { const r = await verifyUnifi(it.address, it.port, value, this.unifiGet); it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save(); }
       } catch { /* leave the plain result */ }
     } else if (it.status?.ok && it.secret && this.vault.unlocked) {
       try {

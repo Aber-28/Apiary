@@ -1797,6 +1797,26 @@ let orgIds;
         const gt = (await call(`/api/infra/${g.body.id}/test`, 'POST', {})).body; assert.ok(gt.status.ok && /bot@demo-project/.test(gt.status.detail), gt.status.detail);
         assert.ok(!JSON.stringify(gt).includes('BEGIN PRIVATE KEY'), 'the key never appears in the result');
         assert.ok(calls.some((c) => c.includes('oauth2.googleapis.com')), 'signed in for real');
+        {
+  // UniFi: the official Network API with an API key
+  const { verifyUnifi } = await import('../src/cloud.js');
+  const seen = []; const stub = (st, json) => async (h, p, path, hd) => { seen.push({ h, p, path, hd }); return { status: st, json }; };
+  assert.deepEqual(await verifyUnifi('10.0.0.1', 443, 'k', stub(200, { applicationVersion: '9.1.2' })), { ok: true, detail: 'The console accepted the API key (Network 9.1.2)' });
+  assert.equal(seen[0].path, '/proxy/network/integration/v1/info'); assert.equal(seen[0].hd['x-api-key'], 'k');
+  assert.match((await verifyUnifi('10.0.0.1', 443, 'bad', stub(401, {}))).detail, /refused the API key/);
+  assert.match((await verifyUnifi('10.0.0.1', 443, 'k', stub(404, null))).detail, /9\.0 or newer/);
+  assert.equal((await verifyUnifi('10.0.0.1', 443, 'k', async () => { throw new Error('ECONNREFUSED'); })).ok, false);
+  const { byId: libraryEntry } = await import('../src/library.js');
+  assert.deepEqual(libraryEntry('unifi').methods.map((m) => m.id), ['token', 'login'], 'API key first, login as the alternative');
+  const port = new URL(base).port;
+  const u = await call('/api/library/unifi/add', 'POST', { name: 'Lab UniFi', method: 'token', address: '127.0.0.1', port, secret: 'unifi-key-abc-123' });
+  assert.equal(u.status, 201); assert.equal(engine.vault.list().find((x) => x.name === u.body.secret).type, 'token');
+  engine.unifiGet = async (h, p, path, hd) => ({ status: hd['x-api-key'] === 'unifi-key-abc-123' ? 200 : 401, json: { applicationVersion: '9.0.1' } });
+  const ut = (await call(`/api/infra/${u.body.id}/test`, 'POST', {})).body; assert.ok(ut.status.ok && /accepted the API key/.test(ut.status.detail), ut.status.detail);
+  assert.ok(!JSON.stringify(ut).includes('unifi-key-abc-123'), 'the key never appears in the answer');
+  assert.match(engine.infra.summary(), /integration\/v1 with the header X-API-KEY/); assert.ok(!engine.infra.summary().includes('unifi-key-abc-123'));
+  delete engine.unifiGet;
+}
       } finally { globalThis.fetch = realFetch; }
     }
     assert.match(fsRead(path.join(import.meta.dirname, '..', 'public', 'app.js'), 'utf8'), /forceBottom = true;[\s\S]*?\/messages`, 'POST'/, 'sending a chat message scrolls to it');

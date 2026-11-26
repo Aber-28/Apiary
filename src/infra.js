@@ -131,7 +131,8 @@ export class Infra {
   summary() {
     if (!this.items.length) return '';
     const nm = (id) => this.get(id)?.name;
+    const unifi = (i) => (i.lib === 'unifi' && i.secret && i.address ? ` [Official UniFi Network API, read it first and change nothing without asking: https://${i.address}${i.port && i.port !== 443 ? ':' + i.port : ''}/proxy/network/integration/v1 with the header X-API-KEY set to the key in its login "${i.secret}" (ask to use it); start with GET /v1/sites; the console certificate is usually self-signed]` : '');
     const mcp = (i) => { const e = i.lib && libraryEntry(i.lib); return e?.mcp && i.secret ? ` [MCP connector "${e.mcp.name}": ask to use its login "${i.secret}" and its tools appear on your next turn]` : ''; };
-    return this.items.filter((i) => i.state !== 'proposed').map((i) => `- ${i.name} (${TYPES[i.type] || i.type})${i.address ? ' ' + i.address : ''}${mcp(i)}${i.parentId ? ` runs on ${nm(i.parentId)}` : ''}${(i.links || []).length ? ` connects to ${i.links.map((l) => nm(l.to)).join(', ')}` : ''}${i.secret ? ` [vault: ${i.secret}]` : ''}`).join('\n');
+    return this.items.filter((i) => i.state !== 'proposed').map((i) => `- ${i.name} (${TYPES[i.type] || i.type})${i.address ? ' ' + i.address : ''}${mcp(i)}${unifi(i)}${i.parentId ? ` runs on ${nm(i.parentId)}` : ''}${(i.links || []).length ? ` connects to ${i.links.map((l) => nm(l.to)).join(', ')}` : ''}${i.secret ? ` [vault: ${i.secret}]` : ''}`).join('\n');
   }
 }

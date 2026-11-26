@@ -1,5 +1,6 @@
 // Real checks for the cloud connectors in the Library. Each returns { ok, detail } and never includes a secret in its text.
 import { createSign } from 'node:crypto';
+import https from 'node:https';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -40,4 +41,25 @@ export async function verifyGoogle(text, fetchFn = fetch) {
     const why = j?.error_description || j?.error || `HTTP ${r.status}`;
     return { ok: false, detail: /invalid_grant|account not found|deleted/i.test(why) ? `Google refused the key (${String(why).slice(0, 80)}). It may be deleted or disabled.` : `Google refused the key: ${String(why).slice(0, 100)}` };
   } catch (e) { return { ok: false, detail: `Could not check the key: ${String(e.message).replace(/-----[\s\S]*/, '').slice(0, 100)}` }; }
+}
+
+// UniFi: the official Network Integration API on the person's own console. Consoles use a self-signed certificate by default,
+// so this one check (and only this one, to the address the person typed) does not insist on a trusted certificate.
+function lanGet(host, port, path, headers) {
+  return new Promise((resolve, reject) => {
+    const r = https.request({ host, port, path, method: 'GET', headers, rejectUnauthorized: false, timeout: 10000 }, (res) => {
+      let body = ''; res.on('data', (d) => { if (body.length < 1e5) body += d; }); res.on('end', () => { let json = null; try { json = JSON.parse(body); } catch { /* not JSON */ } resolve({ status: res.statusCode, json }); });
+    });
+    r.on('timeout', () => r.destroy(new Error('timed out'))); r.on('error', reject); r.end();
+  });
+}
+export async function verifyUnifi(host, port, key, get = lanGet) {
+  if (!host) return { ok: false, detail: 'No console address to check' };
+  try {
+    const r = await get(String(host), Number(port) || 443, '/proxy/network/integration/v1/info', { 'x-api-key': key, accept: 'application/json' });
+    if (r.status === 200 && r.json) return { ok: true, detail: `The console accepted the API key${r.json.applicationVersion ? ` (Network ${String(r.json.applicationVersion).slice(0, 20)})` : ''}` };
+    if (r.status === 401 || r.status === 403) return { ok: false, detail: 'The console refused the API key. Create a new one under Settings, Control Plane, Integrations.' };
+    if (r.status === 404) return { ok: false, detail: 'This console has no official API. It needs UniFi Network 9.0 or newer.' };
+    return { ok: false, detail: `The console answered with HTTP ${r.status}` };
+  } catch (e) { return { ok: false, detail: `Could not reach the console: ${String(e.message).slice(0, 100)}` }; }
 }

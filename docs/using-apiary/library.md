@@ -36,6 +36,16 @@ Pick **Cloudflare**, give it a name and paste an **API token**. Create it at das
 
 Cloudflare's own **MCP server** (`https://mcp.cloudflare.com/mcp`, the official way for AI agents to use the whole Cloudflare API) is built in. When an agent needs Cloudflare it asks to use the login; once you approve, that turn has Cloudflare's tools available. The token goes to the agent's process through its environment for that turn only. It is never written into a file, the chat or the logs. For now this works for **Claude** agents; Codex agents can still use the token for direct calls.
 
+## UniFi
+
+Pick **UniFi controller**, give it the console's address (for example `192.0.2.10`) and paste an **API key**. Create the key in UniFi Network under *Settings, Control Plane, Integrations, Create API Key*. It needs UniFi Network 9.0 or newer, and it is shown only once. Give it only the access you want your agents to have.
+
+**Add and test** asks your console whether it accepts the key. Consoles use a self-signed certificate by default, so this one check does not insist on a trusted certificate, and it only talks to the address you typed.
+
+Ubiquiti does not offer an official MCP server for UniFi. What it does offer is the official UniFi Network API, and that is what Apiary uses. Agents are told where it is (`/proxy/network/integration/v1` on your console), that the key goes in the `X-API-KEY` header, and to ask before using it. They start by reading, and change nothing without asking you. The key reaches the agent for that turn only and is never written into a file, the chat or the logs.
+
+If you need something the API key cannot do, the older **username and password** method (a local admin account) is still there.
+
 ## Google (Drive, Gmail, Calendar)
 
 Pick **Google** and paste a **service-account key**: in the Google Cloud console create a service account, add a JSON key, and paste the whole file. Apiary checks the key by signing in with it and shows the service account's email. To let agents use a Drive folder, a calendar or a sheet, **share it with that email address**, like sharing with a person. Gmail only works if a Google Workspace admin allows it for the service account. The key is stored in the Secrets vault and only reaches an agent you approve.

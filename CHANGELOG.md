@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.54.1
+
+- UniFi connector using the official UniFi Network API: paste an API key (Settings, Control Plane, Integrations in UniFi Network), Apiary checks it against your console, and agents are told how to use the official API with it, read-only first. The username and password method is still available. (Ubiquiti has no official MCP server, so this uses the official API directly.)
+
 ## 0.54.0
 
 - New Dashboard, and it is now the home page: tasks finished (with a per-day chart and a 7/14/28 day range), agents working now, approvals waiting for you, devices that are offline (with a Troubleshoot button), what your agents did most recently, AI usage against your limits, and progress per project. Updates live as work happens. Chat is one click away.

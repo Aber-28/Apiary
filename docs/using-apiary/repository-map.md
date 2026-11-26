@@ -14,7 +14,7 @@ The drop-down at the top has two groups:
 * **You are here:** the branch you are on, the main branch, whether anything is waiting to be saved, how many saves are waiting to be sent to GitHub or fetched from it, the latest save, and where the folder is.
 * **Branches:** every branch with its latest save and a small bar showing how far it has moved from the main branch (grey is behind, coloured is ahead). Branches made by Apiary projects are labelled with the project's name, so you can tell agent work from your own.
 * **Checkouts on this computer:** each agent works in its own copy, so your own files are never touched. They are listed here with the agent they belong to.
-* **Recent activity:** the latest saves across all branches, with the branch names beside them.
+* **Branch map:** a drawing of the latest saves, newest at the top, in coloured lanes. A line leaving a save sideways is a **branch splitting off** (an arrow shows where it goes). A line joining a **ringed** save is a **merge**, marked with a "merge" tag. Branch and tag names sit beside the save they point to. Up to 60 saves and 10 lanes are drawn.
 
 ## For a repository on GitHub
 

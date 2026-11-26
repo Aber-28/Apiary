@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.63.0
+
+- New: the Repository map now draws a real branch graph: coloured lanes, arrows where a branch splits off, ringed saves for merges, and branch and tag names beside each save.
+
 ## 0.62.1
 
 - Fixed: the What's-new window had no space around its text. It now has proper padding and spacing between items.

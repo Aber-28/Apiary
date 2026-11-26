@@ -34,7 +34,7 @@ export async function inspect(engine, dir) {
     G(dir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']),
     G(dir, ['for-each-ref', `--format=%(refname)${US}%(objectname:short)${US}%(committerdate:iso-strict)${US}%(subject)${US}%(authorname)`, 'refs/heads', 'refs/remotes/origin']),
     G(dir, ['worktree', 'list', '--porcelain']),
-    G(dir, ['log', '--all', '--max-count=20', `--format=%h${US}%s${US}%an${US}%cI${US}%D`]),
+    G(dir, ['log', '--all', '--topo-order', '--max-count=60', `--format=%h${US}%s${US}%an${US}%cI${US}%D${US}%p`]),
   ]);
   const st0 = lines(st.stdout), first = st0[0] || '';
   const body = first.replace(/^## /, '').replace(/^(No commits yet on|Initial commit on) /, '');
@@ -76,10 +76,36 @@ export async function inspect(engine, dir) {
     else if (l === 'detached' && cur) cur.branch = '(detached)';
   }
   for (const w of worktrees) w.agentProject = projectOf(w.branch);
-  const commits = lines(log.stdout).map((l) => { const [h, s, a, d, refsText] = l.split(US); return { hash: h, subject: s, author: a, date: d, refs: String(refsText || '').split(',').map((x) => x.trim().replace(/^HEAD -> /, '')).filter((x) => x && x !== 'HEAD' && !x.startsWith('origin/HEAD')) }; });
+  const commits = lines(log.stdout).map((l) => { const [h, s, a, d, refsText, par] = l.split(US); return { hash: h, subject: s, author: a, date: d, parents: String(par || '').split(' ').filter(Boolean), refs: String(refsText || '').split(',').map((x) => x.trim().replace(/^HEAD -> /, '')).filter((x) => x && x !== 'HEAD' && !x.startsWith('origin/HEAD')) }; });
+  const graph = layoutGraph(commits);
   return {
     path: dir, remote: clean(remote.stdout), defaultBranch, current, detached: current === 'HEAD',
     head: { hash, subject, author, date: when }, ahead, behind, changes, clean: changes === 0, hasUpstream: !!bm[2],
-    branches, worktrees, commits,
+    branches, worktrees, commits: commits.slice(0, 20), graph,
   };
+}
+
+// Puts commits into lanes (columns) so a drawing can show branches splitting off and merging back.
+// Each row says which lane its commit sits in, and which commit each lane is waiting for before and after it.
+export function layoutGraph(commits) {
+  const rows = []; let active = [], maxLane = 0;
+  for (const c of commits) {
+    const before = active.slice();
+    let lane = before.indexOf(c.hash);
+    if (lane < 0) { lane = before.indexOf(null); if (lane < 0) lane = before.length; }
+    const next = before.slice(); while (next.length <= lane) next.push(null);
+    for (let j = 0; j < next.length; j++) if (next[j] === c.hash) next[j] = null;   // lanes that ended here merge into this commit
+    const targets = [];
+    c.parents.forEach((p, i) => {
+      let k = next.indexOf(p);
+      if (k < 0) { k = i === 0 && next[lane] === null ? lane : next.indexOf(null); if (k < 0) k = next.length; next[k] = p; }
+      targets.push(k);
+    });
+    while (next.length && next[next.length - 1] === null) next.pop();
+    maxLane = Math.max(maxLane, lane, ...targets, next.length - 1);
+    while (before.length && before[before.length - 1] === null) before.pop();
+    rows.push({ hash: c.hash, subject: c.subject, author: c.author, date: c.date, refs: c.refs, lane, before, after: next, to: targets, merge: c.parents.length > 1, root: c.parents.length === 0 });
+    active = next;
+  }
+  return { rows, lanes: Math.min(maxLane + 1, 10) };
 }

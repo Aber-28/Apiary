@@ -2814,10 +2814,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/e\.attachHandled/.test(js), 'a dropped picture is attached once'); }
 { const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/Compact chat header on desktop/.test(css), 'the chat header is compact'); }
 { // what's new after an update
-  engine.store.data.settings.onboardingDone = true; engine.store.data.whatsNew = { seen: '0.57.0' };
+  engine.store.data.settings.onboardingDone = true; engine.store.data.whatsNew = { seen: '0.60.0' };
   const wn = (await call('/api/whatsnew')).body;
   assert.ok(wn.entries.length >= 2 && wn.entries.every((e) => e.items.length), 'lists every version since the last one seen');
-  assert.ok(wn.entries[0].version === wn.version && wn.entries.some((e) => e.version === '0.58.0'), 'newest first, includes skipped versions');
+  assert.ok(wn.entries[0].version === wn.version && wn.entries.some((e) => e.version === '0.61.0'), 'newest first, includes skipped versions');
   assert.equal((await call('/api/whatsnew/seen', 'POST', {})).status, 200);
   assert.equal((await call('/api/whatsnew')).body.entries.length, 0, 'gone once OK is pressed');
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
@@ -2869,6 +2869,11 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const one = (await call('/api/repomap/local?id=' + list.local.find((r) => r.name === 'Map example').id)).body; assert.equal(one.current, 'release/1.2'); assert.equal(one.name, 'Map example');
   assert.equal((await call('/api/repomap/local?id=../../etc')).status, 404, 'only repositories Apiary knows can be looked at');
   assert.notEqual((await call('/api/repomap/github?repo=bad name')).status, 200, 'a bad GitHub name is refused');
+  const { layoutGraph } = await import('../src/repomap.js');
+  const cm = (h, ...p) => ({ hash: h, parents: p, refs: [] });
+  const lg = layoutGraph([cm('m', 'a', 'f'), cm('f', 'b'), cm('a', 'b'), cm('b')]);
+  assert.deepEqual(lg.rows.map((r) => r.lane), [0, 1, 0, 1], 'a side branch gets its own lane'); assert.equal(lg.rows[0].merge, true, 'two parents means a merge'); assert.deepEqual(lg.rows[0].to, [0, 1], 'the merge reaches both branches');
+  assert.equal(lg.rows[3].after.length, 0, 'the lanes close at the first save');
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
 }
 

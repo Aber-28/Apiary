@@ -1793,6 +1793,35 @@ function pageRepos() {
   draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
 }
 
+// The branch map: a drawing of commits in lanes, with branches splitting off and merging back.
+const LANE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
+function branchGraph(g, when) {
+  const LW = 22, RH = 36, lanes = Math.max(g.lanes, 1), W = lanes * LW + 8, ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => { const n = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+  const X = (l) => Math.min(l, lanes - 1) * LW + LW / 2 + 4, col = (l) => LANE_COLORS[l % LANE_COLORS.length];
+  const svg = el('svg', { width: W, height: g.rows.length * RH, class: 'rm-svg', 'aria-hidden': 'true' });
+  const line = (x1, y1, x2, y2, c) => {
+    if (x1 === x2) return el('line', { x1, y1, x2, y2, stroke: c, 'stroke-width': 2, 'stroke-linecap': 'round' });
+    const m = (y1 + y2) / 2; return el('path', { d: `M${x1} ${y1} C${x1} ${m} ${x2} ${m} ${x2} ${y2}`, stroke: c, 'stroke-width': 2, fill: 'none', 'stroke-linecap': 'round' });
+  };
+  const arrow = (x, y, c, up) => el('path', { d: up ? `M${x - 4} ${y + 5} L${x} ${y} L${x + 4} ${y + 5}` : `M${x - 4} ${y - 5} L${x} ${y} L${x + 4} ${y - 5}`, stroke: c, 'stroke-width': 2, fill: 'none', 'stroke-linecap': 'round', 'stroke-linejoin': 'round' });
+  g.rows.forEach((r, i) => {
+    const y0 = i * RH, yc = y0 + RH / 2, y1 = y0 + RH, xc = X(r.lane);
+    r.before.forEach((h, j) => {
+      if (!h) return;
+      if (h === r.hash) { svg.append(line(X(j), y0, xc, yc, col(j))); if (j !== r.lane) svg.append(arrow(xc - (xc > X(j) ? 7 : -7), yc - 1, col(j), false)); }
+      else svg.append(line(X(j), y0, X(j), y1, col(j)));
+    });
+    r.to.forEach((k, n) => { svg.append(line(xc, yc, X(k), y1, col(k === r.lane ? r.lane : k))); if (k !== r.lane && n > 0) svg.append(arrow(X(k), y1 - 3, col(k), false)); });
+    svg.append(r.merge ? el('circle', { cx: xc, cy: yc, r: 6, fill: 'var(--surface)', stroke: col(r.lane), 'stroke-width': 3 }) : el('circle', { cx: xc, cy: yc, r: 5, fill: col(r.lane) }));
+  });
+  const rows = h('div', { class: 'rm-grows', style: `padding-left:${W + 10}px` }, g.rows.map((r) => h('div', { class: 'rm-grow', style: `height:${RH}px` },
+    (r.refs || []).slice(0, 3).map((x) => h('span', { class: 'pill ' + (/^origin\//.test(x) ? '' : x.startsWith('tag:') ? 'info' : 'work'), style: 'height:18px;font-size:10px;flex:none' }, x.replace(/^tag: /, '🏷 '))),
+    r.merge ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px;flex:none' }, 'merge') : null,
+    h('span', { class: 'rm-gs' }, r.subject), h('small', { class: 'hint', style: 'flex:none' }, `${r.hash} · ${r.author || ''} · ${when(r.date)}`))));
+  return h('div', { class: 'rm-graph' }, h('div', { class: 'rm-svgwrap' }, svg), rows);
+}
+
 // ---------- repository map ----------
 function pageRepoMap() {
   crumbs('Knowledge', 'Repository map');
@@ -1828,7 +1857,8 @@ function pageRepoMap() {
           h('small', { class: 'hint mono' }, b.isDefault ? '' : `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'}`))))),
       (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
         (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
-      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Recent activity'), (d.commits || []).length ? d.commits.map(commitRow) : h('p', { class: 'hint' }, 'No saves yet.')));
+      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Branch map'), h('small', { class: 'hint' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
+        (d.graph?.rows || []).length ? h('div', { class: 'rm-scroll' }, branchGraph(d.graph, when)) : h('p', { class: 'hint' }, 'No saves yet.')));
   };
   const remote = (d) => h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,

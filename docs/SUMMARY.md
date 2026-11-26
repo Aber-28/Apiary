@@ -78,6 +78,7 @@
 * [HTTP API](reference/api.md)
 * [Security](reference/security.md)
 * [Security checklist and self-check](reference/security-checklist.md)
+* [Security audit report](reference/security-audit.md)
 * [Troubleshooting](reference/troubleshooting.md)
 
 ## Development

@@ -833,7 +833,8 @@ let orgIds;
   const busyAgent = Object.values(engine.agents)[0]; const was = busyAgent.status; busyAgent.status = 'working';
   const blocked = await c2('/api/update/install', 'POST', {}); assert.equal(blocked.status, 202); assert.equal(blocked.body.queued, true, 'waits for working agents instead of interrupting them'); assert.ok(blocked.body.busy >= 1);
   assert.equal(restarts, 0);
-  busyAgent.status = was; engine.emit('event', { type: 'activity', agentId: busyAgent.id, text: '' });   // the queued install starts by itself
+  busyAgent.status = was; engine.emit('event', { type: 'activity', agentId: busyAgent.id, text: '' });   // the work is done: the person presses Update now!
+  assert.equal(restarts, 0, 'it does not install by itself'); assert.equal((await c2('/api/update')).body.busy, 0, 'the count has dropped to zero');
   const done2 = await c2('/api/update/install', 'POST', {}); assert.equal(done2.status, 202); assert.equal(done2.body.started, true);
   await until(async () => (await c2('/api/update')).body.progress?.steps[4].state === 'run', 5000);
   const prog = (await c2('/api/update')).body.progress; assert.equal(prog.failed, false); assert.ok(prog.log.some((l) => /Restarting/.test(l)) && prog.pct >= 80, 'the page can show what is happening');
@@ -1703,8 +1704,9 @@ let orgIds;
     assert.throws(() => engine.send(someAgent, 'example message'), /update is waiting/);
     engine.ctls.delete('example-run'); engine.emit('event', { type: 'activity', agentId: someAgent, text: '' });
     await tickUp();
-    assert.equal(installs, 1, 'installs by itself once the work has finished');
-    assert.equal(engine.updateHold, false, 'new messages are accepted again');
+    assert.equal(installs, 0, 'waits for the person to press Update now!'); assert.equal(engine.updateHold, true, 'new work stays on hold until then');
+    assert.equal((await post('/api/update/install'))[0], 202); await tickUp();
+    assert.equal(installs, 1, 'installs when Update now! is pressed'); assert.equal(engine.updateHold, false, 'new messages are accepted again');
     // cancel while waiting
     fake.s.state = 'ready';
     engine.ctls.set('example-run-2', new AbortController());
@@ -2802,7 +2804,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (/\['#\/activity', 'Live activity'\]/.test(js) || !/href: '#\/activity' }, 'See live activity'/.test(js)) throw new Error('Live activity lives in the Working now box, not the menu'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
-  if (!/now\.busyNow/.test(js) || !/do not update now/.test(js)) throw new Error('install must ask before waiting on running work'); }
+  if (!/Update now!/.test(js) || !/Waiting for \$\{nWait\}/.test(js) || /do not update now/.test(js)) throw new Error('the install button counts down jobs and then says Update now!'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (!/function unwall\(/.test(js) || !/h\('div', \{ class: 'task' \}, rich\(it\.task\)\)/.test(js) || !/inlineCode\(unwall\(/.test(js)) throw new Error('long text must be broken into paragraphs everywhere'); }
 { const leads = Object.values(engine.agents).filter((a) => !a.parentId && a.role !== 'Chief executive'); assert.ok(leads.every((a) => a.role !== 'Lead agent'), 'project leads say which project they lead'); }

@@ -108,8 +108,8 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
   };
   const runQueuedUpdate = () => {
     if (!updater || !updater.s.queued || updater.s.state === 'installing') return;
+    // Nothing is running any more: say so, and wait for the person to press Update now! (new work stays on hold until then).
     const b = engine.busy(); updater.s.busy = b.total;
-    if (!b.total) startUpdate();
   };
   if (updater) {
     engine.on('event', runQueuedUpdate);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.59.0
+
+- Install while jobs are running: no pop-up question any more. The button becomes "Waiting for N jobs to finish…", and N counts down live as jobs finish (the top bar chip too). New work is held so the update is not delayed.
+- When the count reaches zero the button changes to **Update now!**. Press it to install. Held work resumes after the update is installed and Apiary has restarted. (Before, the update installed by itself at zero.) Cancel waiting still lifts the hold.
+
 ## 0.58.1
 
 - New project: with a CEO set up there is no "Just a lead / team" choice any more. The CEO leads every project and brings in specialists as needed, and the form says so. (Before a CEO exists the old choice is still there.) The Agents list no longer shows a separate lead row for every project; a project's helpers are listed with "Project: <name>" after their role.

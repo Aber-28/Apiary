@@ -841,7 +841,7 @@ function renderUpdateChip() {
   else if (!u?.queued && updPoll) { clearInterval(updPoll); updPoll = null; }
   if (!u || u.state !== 'ready') { c?.remove(); return; }
   if (!c) { c = h('a', { id: 'upd', class: 'btn primary', href: '#/updates', style: 'padding:4px 12px;font-size:12px' }); $('#theme').before(c); }
-  c.textContent = u.queued ? `Update waiting for ${u.busy || 'running'} to finish` : `Update ready: ${u.latest}`;
+  c.textContent = u.queued ? (u.busy ? `Update waiting for ${u.busy} ${u.busy === 1 ? 'job' : 'jobs'} to finish` : 'Update now!') : `Update ready: ${u.latest}`;
 }
 async function refreshUpdate() {
   try { S.update = await api('/api/update'); renderUpdateChip(); if (location.hash === '#/updates' && typeof page?.redraw === 'function') page.redraw(); } catch { /* ignore */ }
@@ -972,16 +972,16 @@ function pageUpdates() {
     const msg = { uptodate: `You are up to date (version ${S.version}).`, ready: `Version ${u.latest} is downloaded and ready to install.`, error: u.error || 'The last check failed.', unsupported: u.error || 'Updates are not available for this install (it is not a git checkout).', checking: 'Checking…' }[u.state] || 'Not checked yet. Press Check for updates.';
     const busy = h('p', { class: 'hint', role: 'status' });
     const check = h('button', { class: 'btn', onclick: guard(async () => { busy.textContent = 'Checking GitHub…'; S.update = await api('/api/update/check', 'POST', {}); renderUpdateChip(); draw(); }) }, 'Check for updates');
-    const queuedMsg = u.queued ? `Waiting for ${u.busy || 0} ${u.busy === 1 ? 'thing' : 'things'} to finish (agents still working or approvals waiting for you). Apiary installs the update by itself when they are done. New messages to agents are held until then.` : null;
-    const install = u.state === 'ready' && !u.queued ? h('button', { class: 'btn primary big', onclick: guard(async () => {
-      // Ask first when something is running, so nobody is surprised by held messages.
-      const now = await api('/api/update'); const n = now.busyNow || 0;
-      if (n && !confirm(`${n === 1 ? 'One thing is' : `${n} things are`} still running (agents working or approvals waiting for you).\n\nOK = wait for ${n === 1 ? 'it' : 'them'} to finish, then install the update by itself. New messages to agents are held until then.\nCancel = do not update now.`)) return;
-      const r = await api('/api/update/install', 'POST', {});
-      if (r.queued) { toast('The update will install when the current work has finished.'); S.update = await api('/api/update'); renderUpdateChip(); draw(); return; }
-      updateOverlay(S.version);
-    }) }, `Install ${u.latest}`) : null;
-    const forceNow = u.queued ? h('button', { class: 'btn danger big', onclick: guard(async () => {
+    const nWait = u.busy || 0, readyNow = u.queued && nWait === 0;
+    const queuedMsg = u.queued ? (readyNow ? 'All jobs have finished. Press Update now! to install. New work stays on hold until the update is done and Apiary has restarted; then everything resumes.' : `New work is on hold so the update is not delayed. It resumes after the update is installed and Apiary has restarted.`) : null;
+    const install = u.state === 'ready' ? (u.queued
+      ? h('button', { class: 'btn primary big', disabled: !readyNow, 'aria-live': 'polite', onclick: guard(async () => { await api('/api/update/install', 'POST', {}); updateOverlay(S.version); }) }, readyNow ? 'Update now!' : `Waiting for ${nWait} ${nWait === 1 ? 'job' : 'jobs'} to finish…`)
+      : h('button', { class: 'btn primary big', onclick: guard(async () => {
+        const r = await api('/api/update/install', 'POST', {});
+        if (r.queued) { S.update = await api('/api/update'); renderUpdateChip(); draw(); return; }
+        updateOverlay(S.version);
+      }) }, `Install ${u.latest}`)) : null;
+    const forceNow = u.queued && !readyNow ? h('button', { class: 'btn danger big', onclick: guard(async () => {
       if (!confirm('Install now? Agents still working will be stopped, and anything they are doing on other machines may be cut off part way.')) return;
       await api('/api/update/install', 'POST', { force: true }); updateOverlay(S.version);
     }) }, 'Install now anyway') : null;

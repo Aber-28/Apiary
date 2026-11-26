@@ -2785,5 +2785,9 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 }
 { const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (!/function rich\(/.test(appjs) || !/rich\(t\.notes\)/.test(appjs) || !/rich\(c\.text\)/.test(appjs)) throw new Error('details should be formatted with rich()'); }
+{ const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8');
+  if (!/\.grid>\.card,\.grid>\.card\+\.card\{margin-top:0\}/.test(css)) throw new Error('cards in a grid must stay aligned'); }
+{ const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  if (!/status !== 'pending' && !a\.auto/.test(appjs)) throw new Error('automatic decisions should be hidden on the Approvals page'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

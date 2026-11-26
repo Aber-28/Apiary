@@ -372,7 +372,7 @@ function approvalCard(ap) {
 function pageApprovals() {
   crumbs('Workspace', 'Approvals');
   const draw = () => {
-    const p = pending(), done = S.approvals.filter((a) => a.status !== 'pending' && !a.archived), old = S.approvals.filter((a) => a.status !== 'pending' && a.archived);
+    const p = pending(), manual = S.approvals.filter((a) => a.status !== 'pending' && !a.auto), done = manual.filter((a) => !a.archived), old = manual.filter((a) => a.archived); // decisions your rules made on their own are not listed here (the audit log has them)
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Approvals'), h('p', { class: 'sub-title' }, 'Agents ask you before they create sub-agents or merge their work. Nothing is pushed to GitHub until you open a pull request.'))),
       p.length ? p.map(approvalCard) : h('div', { class: 'card empty' }, 'Nothing is waiting for you.'),
       done.length ? h('h2', { style: 'margin-top:28px' }, 'Earlier decisions') : null, ...done.slice(0, 30).map(approvalCard),

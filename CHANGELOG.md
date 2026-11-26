@@ -2,6 +2,8 @@
 
 ## 0.55.1
 
+- Decisions your rules made automatically are no longer listed on the Approvals page (they stay in the audit log).
+- Boxes in a grid (such as projects) are now always aligned and the same height; the second box used to sit lower.
 - Decided approvals move to the collapsed "Archived decisions" list after 1 hour instead of 3, so the Approvals page stays short. Pending ones always stay on top.
 
 ## 0.55.0

@@ -52,7 +52,7 @@ export class Health {
     try {
       if (probe) await Promise.all(this.engine.infra.items.filter((i) => i.address || i.url).map((i) => this.engine.infra.test(i.id).catch(() => {})));
       if (probe) await this.engine.connections.view('github').catch(() => {});
-      const items = this.evaluate();
+      const items = this.evaluate().filter((i) => !(i.level === 'info' && this.isSnoozed(i.id)));
       const level = items.reduce((m, i) => (LEVEL[i.level] > LEVEL[m] ? i.level : m), 'ok');
       const prev = new Set(this.state.items.map((i) => i.id + ':' + i.level));
       const fresh = items.filter((i) => !prev.has(i.id + ':' + i.level));
@@ -63,6 +63,16 @@ export class Health {
       return this.state;
     } finally { this.running = false; }
   }
+  // Suggestions (never warnings) can be hidden for a while.
+  get _snz() { return (this.engine.store.data.healthSnooze ||= {}); }
+  isSnoozed(id) { const t = this._snz[id]; return !!t && t > Date.now(); }
+  snooze(id, days) {
+    const d = Math.min(Math.max(Number(days) || 30, 1), 365);
+    this._snz[String(id).slice(0, 80)] = Date.now() + d * 86400000;
+    for (const [k, v] of Object.entries(this._snz)) if (v < Date.now()) delete this._snz[k];
+    this.engine.store.save();
+  }
+  get snoozedCount() { return Object.values(this._snz).filter((t) => t > Date.now()).length; }
   get count() { return this.state.items.filter((i) => i.level === 'warn' || i.level === 'err').length; }
   get summary() { return { at: this.state.at, level: this.state.level, count: this.count }; }
   noteLoginFailure(provider, message) { if (LOGIN_RE.test(String(message))) this.authFail[provider] = { at: Date.now(), msg: String(message).slice(0, 200) }; }

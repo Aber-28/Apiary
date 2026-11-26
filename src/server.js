@@ -458,7 +458,8 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (url.pathname === '/api/telegram/test' && req.method === 'POST') { await readBody(req); return json(res, 200, await engine.telegram.test()); }
       if (url.pathname === '/api/telegram/link' && req.method === 'POST') { await readBody(req); return json(res, 200, engine.telegram.startLink()); }
       if (url.pathname === '/api/telegram/unlink' && req.method === 'POST') { await readBody(req); return json(res, 200, engine.telegram.unlink()); }
-      if (url.pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ...engine.health.state, count: engine.health.count });
+      if (url.pathname === '/api/health' && req.method === 'GET') return json(res, 200, { ...engine.health.state, count: engine.health.count, snoozed: engine.health.snoozedCount });
+      if (url.pathname === '/api/health/snooze' && req.method === 'POST') { const b = await readBody(req); if (!b.id) return json(res, 400, { error: 'Say which suggestion to hide.' }); engine.health.snooze(b.id, b.days); engine.health.state = { ...engine.health.state, items: engine.health.state.items.filter((i) => i.id !== b.id) }; return json(res, 200, { ...engine.health.state, count: engine.health.count, snoozed: engine.health.snoozedCount }); }
       if (url.pathname === '/api/health/check' && req.method === 'POST') { await readBody(req); const st = await engine.health.run(); return json(res, 200, { ...st, count: engine.health.count }); }
       if (url.pathname === '/api/audit' && req.method === 'GET') { const q = Object.fromEntries(url.searchParams); return json(res, 200, engine.audit.search({ ...q, from: +q.from || 0, to: +q.to || 0 })); }
       if (url.pathname === '/api/backups' && req.method === 'GET') return json(res, 200, { config: engine.backups.config, status: engine.backups.status, files: engine.backups.list(), vaultExists: engine.vault.exists });

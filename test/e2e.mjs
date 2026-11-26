@@ -2792,5 +2792,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 { const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (!/i\.secret && i\.via !== 'token' && i\.secretKind !== 'token' \? h\('button'/.test(appjs)) throw new Error('Discover must be hidden for token-only devices'); }
 { const r = await call('/api/infra'); if (!Array.isArray(r.body.items)) throw new Error('infra list should still load'); }
+{ const st0 = (await call('/api/health/check', 'POST', {})).body, sug = st0.items.find((x) => x.level === 'info');
+  if (sug) { const r = (await call('/api/health/snooze', 'POST', { id: sug.id, days: 30 })).body; assert.ok(!r.items.some((x) => x.id === sug.id) && r.snoozed >= 1, 'a suggestion can be hidden');
+    assert.ok(!(await call('/api/health/check', 'POST', {})).body.items.some((x) => x.id === sug.id), 'it stays hidden after the next check'); }
+  assert.equal((await call('/api/health/snooze', 'POST', {})).status, 400);
+  const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/HEALTH_GROUPS/.test(js) && /Hide for 30 days/.test(js), 'health page is grouped'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

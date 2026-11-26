@@ -2022,18 +2022,38 @@ async function pagePolicy() {
   };
   await draw(); page = { shows: () => false, update: () => {} };
 }
+const HEALTH_GROUPS = [['devices', 'Devices', (i) => /^device-/.test(i.id)], ['storage', 'Storage and backups', (i) => i.id === 'disk' || /^backup-/.test(i.id)], ['logins', 'Logins', (i) => /^login-/.test(i.id)], ['security', 'Security and vault', (i) => /^vault/.test(i.id)]];
 async function pageHealth() {
   crumbs('Infrastructure', 'Health');
+  const openKeys = new Set(), seen = new Set();
   const draw = async (st) => {
     if (!st) { try { st = await api('/api/health'); } catch (e) { view.replaceChildren(h('div', { class: 'card empty' }, e.message)); return; } }
-    const bad = st.items.filter((i) => i.level === 'warn' || i.level === 'err'), info = st.items.filter((i) => i.level === 'info');
+    const real = st.items.filter((i) => i.level === 'warn' || i.level === 'err'), info = st.items.filter((i) => i.level === 'info');
     const run = guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Checking…'; try { draw(await api('/api/health/check', 'POST', {})); } finally { e.target.disabled = false; } });
-    const card = (i) => h('div', { class: 'card', style: 'max-width:760px;margin-bottom:10px;border-left:4px solid ' + (i.level === 'err' ? 'var(--err)' : i.level === 'warn' ? 'var(--accent)' : 'var(--line)') },
-      h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px' }, h('b', {}, i.title), h('span', { class: 'pill ' + (i.level === 'err' ? 'err' : i.level === 'warn' ? 'work' : '') }, i.level === 'err' ? 'Needs attention' : i.level === 'warn' ? 'Warning' : 'Suggestion')),
-      h('p', {}, i.problem), h('p', {}, h('b', {}, 'What to do: '), i.fix), i.link ? h('a', { class: 'btn', href: i.link }, 'Go there') : null);
-    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Health'), h('p', { class: 'sub-title' }, 'Warnings before things break: a full disk, a device that stopped answering, an expired login, a locked vault, failed backups. Checked every 5 minutes.')), h('button', { class: 'btn', onclick: run }, 'Check now')),
-      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('span', { class: 'pill ' + (st.level === 'err' ? 'err' : st.level === 'warn' ? 'work' : 'ok') }, st.level === 'err' ? 'Something needs attention' : st.level === 'warn' ? 'Some warnings' : 'All good'), ' ', st.at ? `Last checked ${ago(st.at)}.` : 'Not checked yet. Press Check now.'),
-      ...bad.map(card), bad.length || !st.at ? null : h('p', { class: 'hint' }, 'Nothing is wrong right now.'), info.length ? h('h2', {}, 'Suggestions') : null, ...info.map(card));
+    const sev = (i) => (i.level === 'err' ? 'err' : i.level === 'warn' ? 'warn' : 'info');
+    const worst = real.find((i) => i.level === 'err') || real[0];
+    const row = (i) => {
+      const key = 'i:' + i.id, first = worst && i.id === worst.id;
+      if (!seen.has(key)) { seen.add(key); if (first) openKeys.add(key); }
+      const snooze = i.level === 'info' ? h('button', { class: 'btn', title: 'Hide this suggestion for 30 days', onclick: guard(async () => { draw(await api('/api/health/snooze', 'POST', { id: i.id, days: 30 })); toast('Hidden for 30 days.'); }) }, 'Hide for 30 days') : null;
+      return h('details', { class: 'hrow ' + sev(i), open: openKeys.has(key), ontoggle: (e) => { e.currentTarget.open ? openKeys.add(key) : openKeys.delete(key); } },
+        h('summary', {}, h('span', { class: 'hdot ' + sev(i) }), h('b', {}, i.title), h('span', { class: 'pill ' + (i.level === 'err' ? 'err' : i.level === 'warn' ? 'work' : '') }, i.level === 'err' ? 'Needs attention' : i.level === 'warn' ? 'Warning' : 'Suggestion')),
+        h('div', { class: 'hbody' }, h('p', {}, i.problem), h('p', {}, h('b', {}, 'What to do: '), i.fix), h('div', { class: 'kv', style: 'gap:8px' }, i.link ? h('a', { class: 'btn', href: i.link }, 'Go there') : null, snooze)));
+    };
+    const section = (key, title, list, hint) => {
+      const worstLvl = list.some((i) => i.level === 'err') ? 'err' : list.some((i) => i.level === 'warn') ? 'warn' : 'ok';
+      if (!seen.has('g:' + key)) { seen.add('g:' + key); if (list.length && worstLvl !== 'ok' && key !== 'suggestions') openKeys.add('g:' + key); }
+      return h('details', { class: 'hgroup', open: openKeys.has('g:' + key), ontoggle: (e) => { e.currentTarget.open ? openKeys.add('g:' + key) : openKeys.delete('g:' + key); } },
+        h('summary', {}, h('span', { class: 'hdot ' + (key === 'suggestions' ? 'info' : list.length ? worstLvl : 'ok') }), h('b', {}, title), h('span', { class: 'pill' }, list.length ? String(list.length) : 'OK'), hint ? h('span', { class: 'hint' }, hint) : null),
+        list.length ? h('div', { class: 'hlist' }, list.map(row)) : h('p', { class: 'hint', style: 'margin:8px 12px' }, 'Nothing to report.'));
+    };
+    const groups = HEALTH_GROUPS.map(([k, t, f]) => [k, t, real.filter(f)]), other = real.filter((i) => !HEALTH_GROUPS.some((g) => g[2](i)));
+    if (other.length) groups.push(['other', 'Other', other]);
+    const nErr = real.filter((i) => i.level === 'err').length, nWarn = real.length - nErr;
+    const summary = !st.at ? 'Not checked yet. Press Check now.' : !real.length ? 'All good.' : [nErr ? `${nErr} need${nErr === 1 ? 's' : ''} attention` : null, nWarn ? `${nWarn} warning${nWarn === 1 ? '' : 's'}` : null].filter(Boolean).join(', ');
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Health'), h('p', { class: 'sub-title' }, 'Warnings before things break. Checked every 5 minutes.')), h('button', { class: 'btn', onclick: run }, 'Check now')),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('span', { class: 'pill ' + (st.level === 'err' ? 'err' : st.level === 'warn' ? 'work' : 'ok') }, summary), ' ', st.at ? h('span', { class: 'hint' }, `Last checked ${ago(st.at)}.` + (info.length ? ` ${info.length} suggestion${info.length === 1 ? '' : 's'}.` : '') + (st.snoozed ? ` ${st.snoozed} hidden.` : '')) : null),
+      h('div', { style: 'max-width:760px' }, groups.map(([k, t, l]) => section(k, t, l)), info.length ? section('suggestions', 'Suggestions', info, 'Not problems') : null));
   };
   await draw();
   page = { shows: () => true, update: (ev) => ev.type === 'health' && draw() };

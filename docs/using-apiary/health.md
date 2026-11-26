@@ -4,6 +4,10 @@
 
 Apiary checks every 5 minutes and when you press **Check now**. The check also tests every device on your [map](infrastructure.md), so a device that stops answering turns red on its own.
 
+## How the page is laid out
+
+The top line says how many things need attention. Below it, items are grouped: **Devices**, **Storage and backups**, **Logins**, **Security and vault** and **Suggestions**. A group with a problem starts open; healthy groups stay closed. Each item is one row; click it to see the problem, what to do and a **Go there** button. Suggestions (things that are not problems, such as backups being off) have **Hide for 30 days**. Warnings and errors cannot be hidden.
+
 ## What is checked
 
 | Check | Warns when | What it tells you to do |

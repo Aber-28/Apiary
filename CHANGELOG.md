@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.56.0
+
+- Health page is calmer: one summary line on top, then collapsible groups (Devices, Storage and backups, Logins, Security and vault, Suggestions). Groups with problems start open, healthy ones stay closed, and each item is a one-line row that opens to show the problem, what to do and a Go there button. Only the most serious item starts expanded.
+- Suggestions can be hidden for 30 days with Hide for 30 days (warnings can never be hidden).
+
 ## 0.55.2
 
 - Discover is also hidden when the linked login is an API token, even on devices added another way (the UniFi case). Pop-up messages now have a blurred backdrop so long ones stay readable over the page.

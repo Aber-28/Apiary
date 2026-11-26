@@ -1521,7 +1521,7 @@ function attacher(initial = []) {
   const dropOn = (node) => {
     node.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); node.classList.add('dropping'); } });
     node.addEventListener('dragleave', () => node.classList.remove('dropping'));
-    node.addEventListener('drop', (e) => { node.classList.remove('dropping'); if (e.dataTransfer?.files?.length) { e.preventDefault(); add(e.dataTransfer.files); } });
+    node.addEventListener('drop', (e) => { node.classList.remove('dropping'); if (e.dataTransfer?.files?.length) { e.preventDefault(); if (e.attachHandled) return; e.attachHandled = true; add(e.dataTransfer.files); } }); // the chat body and the composer inside it both listen: take the drop once
   };
   draw();
   return { btn, file, strip, onPaste, dropOn, add, items: () => items.map((i) => ({ id: i.id, name: i.name })), clear: () => { items = []; draw(); } };

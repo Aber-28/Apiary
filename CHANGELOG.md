@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.59.1
+
+- Dragging a picture onto the chat attached it twice. It is now attached once.
+
 ## 0.59.0
 
 - Install while jobs are running: no pop-up question any more. The button becomes "Waiting for N jobs to finish…", and N counts down live as jobs finish (the top bar chip too). New work is held so the update is not delayed.

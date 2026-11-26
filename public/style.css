@@ -121,7 +121,7 @@ dialog form{padding:24px;display:flex;flex-direction:column}
 .approval .items{display:flex;flex-direction:column;gap:8px;margin:6px 0}
 .approval .item{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;background:var(--bg);border-radius:10px;font-weight:400}
 .approval .item input{margin-top:4px;width:18px;height:18px;accent-color:var(--accent)}
-.approval .task{display:block;color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}
+.approval .task .rich p{margin:6px 0}.approval .task{display:block;color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}
 .approval input[type=text]{flex:1;min-width:180px}
 .check{display:flex;gap:12px;align-items:flex-start;margin-bottom:14px;font-weight:400}.check input{width:20px;height:20px;margin-top:2px;accent-color:var(--accent);flex:none}
 .diffstat,.diff{background:#0a0d12;color:#d6dbe4;border-radius:10px;padding:12px;font-size:11px;line-height:1.5;overflow:auto;max-height:340px;margin:8px 0;white-space:pre}

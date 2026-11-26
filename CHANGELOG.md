@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.57.1
+
+- No more walls of text. Long text is now cut into short paragraphs everywhere it is shown (approval briefs, task details, chat replies, reports): "Label:" sections start a new paragraph, "(1) ... (2) ..." runs become numbered lists, and long runs of sentences are grouped.
+- Agents are told to write this way in the first place: short paragraphs, one step per line, a label per section, also in instructions they give to other agents.
+
 ## 0.57.0
 
 - Pressing Install while something is running now asks first (OK / Cancel): wait for the running work and install by itself, or don't update now. Nothing is queued or held unless you say yes.

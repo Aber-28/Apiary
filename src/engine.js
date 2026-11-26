@@ -1179,6 +1179,7 @@ export class Engine extends EventEmitter {
     if (agent.method === 'api') s += 'You are connected through a web API: you cannot read files or run commands. Answer in text only.\n';
     if (agent.git) s += `You are working on git branch ${agent.git.branch} in your own checkout. Your changes are committed for you after each turn; do not switch branches or push.\n`;
     if (!agent.parentId) s += 'FORMATTING: Whenever you give the human something to copy and run or paste (a terminal or SSH command, a config line, a file path to type, a script, a key), put it in a fenced code block (three backticks, then the language such as bash) and nothing else inside it, one command per line, with no $ prompt in front. Short names, commands or file names inside a sentence go in single backticks.\n';
+    s += 'LAYOUT: Never write one big block of text. Use short paragraphs (two or three sentences), one idea each. Put steps in a numbered list with one step per line, options in bullet lists, and start each section with a short label such as Goal:, Rules:, Steps:, Report:. This applies to everything you write, including instructions you give to other agents.\n';
     s += agent.parentId
       ? 'Your reply goes back to the agent that gave you this task, not to a human. Be concrete and concise: say what you did, what you found, and where any files are.\n'
       : 'Your replies go to the human you are working for. Be clear and concise.\n';

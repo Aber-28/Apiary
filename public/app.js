@@ -355,7 +355,7 @@ function approvalCard(ap) {
     ap.detail ? rich(ap.detail, 'hint') : null,
     ap.kind === 'plan' ? (isPending ? h('div', {}, planBox, h('p', { class: 'hint' }, 'Edit anything you like, then approve. Every step becomes a task with its own ID, given to the person you choose.')) : h('ol', { class: 'plan-list' }, (ap.phases || []).map((p) => h('li', {}, h('b', {}, p.title), p.goal ? ` — ${p.goal}` : '', p.steps?.length ? h('ul', {}, p.steps.map((t, i) => h('li', {}, t, (p.owners || [])[i] ? ` (${p.owners[i]})` : ''))) : null)))) :
     ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
-    ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
+    ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('div', { class: 'task' }, rich(it.task)))))) : null,
     ap.diff ? diffView(ap.diff) : null,
     isPending && ap.kind === 'newsecret' ? newSecretForm(ap, decide)
     : isPending && ap.kind === 'command' ? h('div', { class: 'kv', style: 'margin-top:12px;flex-wrap:wrap' }, note,
@@ -1365,16 +1365,51 @@ function linkify(text) {
   let last = 0;
   // an unfinished block (the AI is still typing) is already shown as code
   for (const m of str.matchAll(/```[ \t]*([\w+#.-]*)[ \t]*\n([\s\S]*?)(?:\n?```|$)/g)) {
-    out.push(...inlineCode(str.slice(last, m.index)));
+    out.push(...inlineCode(unwall(str.slice(last, m.index))));
     out.push(codeBlock(m[2], m[1]));
     last = m.index + m[0].length;
   }
-  out.push(...inlineCode(str.slice(last).replace(/^\n/, '')));
+  out.push(...inlineCode(unwall(str.slice(last).replace(/^\n/, ''))));
   return out;
 }
 
 // Long plain text (task details, approval details, reports) shown properly: paragraphs, lists, code, bold labels.
 // Works on text people or agents wrote without any markup: "Steps: (1) do this (2) do that" becomes a numbered list.
+// Break a wall of text into readable paragraphs: numbered "(1) ... (2) ..." runs become a list, "Label:" sentences start a new
+// paragraph, and long runs of sentences are cut into short groups. Text that is already laid out (it has line breaks) is kept.
+const ABBR = /(?:e\.g|i\.e|vs|etc|approx|no|cf|incl|esp)$/i;
+function unwall(text) {
+  const src = String(text ?? '');
+  return src.split('\n').map((line) => {
+    if (line.length < 260) return line;
+    let t = line;
+    const marks = [...t.matchAll(/\((\d{1,2})\)\s+/g)];
+    if (marks.length >= 2 && marks[0][1] === '1') {
+      const pre = t.slice(0, marks[0].index).trim();
+      const items = marks.map((mk, k) => t.slice(mk.index + mk[0].length, k + 1 < marks.length ? marks[k + 1].index : undefined).trim().replace(/[;,]$/, ''));
+      const tail = items[items.length - 1].match(/^(.*?[.!?])\s+((?:[A-Z][\w ]{0,30}:\s).*)$/);
+      let after = ''; if (tail) { items[items.length - 1] = tail[1]; after = tail[2]; }
+      else { const last = items[items.length - 1], sp = last.match(/^(.*?[.!?])\s+([A-Z].{30,})$/); if (sp && last.length > 90) { items[items.length - 1] = sp[1]; after = sp[2]; } }
+      const lab = pre.match(/^(.*[.!?])\s+([A-Z][\w ]{0,30}:)$/);
+      return [lab ? unwall(lab[1]) : pre ? unwall(pre) : '', lab ? lab[2] : '', items.map((x, k) => `${k + 1}. ${x}`).join('\n'), after ? unwall(after) : ''].filter(Boolean).join('\n\n');
+    }
+    const parts = []; let from = 0;
+    for (const m of t.matchAll(/([.!?])\s+(?=[A-Z(`])/g)) {
+      const before = t.slice(from, m.index + 1);
+      if (ABBR.test(t.slice(Math.max(0, m.index - 6), m.index))) continue;
+      parts.push(before.trim()); from = m.index + m[0].length;
+    }
+    parts.push(t.slice(from).trim());
+    const paras = []; let cur = '';
+    for (const sent of parts.filter(Boolean)) {
+      const label = /^[A-Z][\w ]{0,24}:\s/.test(sent);
+      if (cur && (label || cur.length >= 220)) { paras.push(cur); cur = ''; }
+      cur = cur ? cur + ' ' + sent : sent;
+    }
+    if (cur) paras.push(cur);
+    return paras.join('\n\n');
+  }).join('\n');
+}
 function richInline(str) {
   const out = []; let last = 0;
   const re = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|(?<![\w/])((?:~\/|\/)[\w.@+\-]+(?:\/[\w.@+\-]*)+|\/(?:srv|etc|var|usr|opt|mnt|tmp|home|root)\b)(?![\w])|\b((?:\d{1,3}\.){3}\d{1,3})\b|(?:^|(?<=[.!?]\s))([A-Z][A-Za-z ]{2,26}):(?=\s)/g;
@@ -1393,7 +1428,7 @@ function rich(text, cls = '') {
   const src = String(text ?? '').replace(/\r\n/g, '\n').trim();
   if (!src) return null;
   const root = h('div', { class: ('rich ' + cls).trim() });
-  const para = (t) => { t = t.trim(); if (t) root.append(h('p', {}, ...richInline(t))); };
+  const para = (t) => { for (const x of unwall(t.trim()).split(/\n{2,}/)) if (x.trim()) root.append(h('p', {}, ...richInline(x.trim()))); };
   const list = (tag, items) => root.append(h(tag, {}, items.map((x) => h('li', {}, ...richInline(x.trim())))));
   const blockOf = (blk) => {
     const lines = blk.split('\n').filter((l) => l.trim());
@@ -1405,14 +1440,8 @@ function rich(text, cls = '') {
       if (/^#{1,4}\s+/.test(ln)) { root.append(h('h4', {}, ...richInline(ln.replace(/^#{1,4}\s+/, '')))); i++; continue; }
       const buf = []; while (i < lines.length && !/^\s*([-*•]|\d+[.)]|#{1,4})\s+/.test(lines[i])) buf.push(lines[i++]);
       const t = buf.join(' ');
-      const marks = [...t.matchAll(/\((\d{1,2})\)\s+/g)];
-      if (marks.length >= 2 && marks[0][1] === '1') {
-        const pre = t.slice(0, marks[0].index).trim(), m = pre.match(/^(.*?[.!?])\s+([A-Z][\w ]{0,30}:)$/);
-        if (m) { para(m[1]); para(m[2]); } else para(pre);
-        const items = marks.map((mk, k) => t.slice(mk.index + mk[0].length, k + 1 < marks.length ? marks[k + 1].index : undefined).trim().replace(/[;,]$/, ''));
-        const tail = items[items.length - 1].match(/^(.*?[.!?])\s+((?:[A-Z][\w ]{0,30}:\s).*)$/);
-        if (tail) { items[items.length - 1] = tail[1]; list('ol', items); para(tail[2]); } else list('ol', items);
-      } else para(t);
+      const u = unwall(t);
+      if (u !== t) u.split(/\n{2,}/).forEach((x) => blockOf(x)); else para(t);
     }
   };
   let last = 0;

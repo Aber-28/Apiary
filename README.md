@@ -4,6 +4,10 @@ Claude Code and Codex, a lead agent that hires specialists, and you approving th
 
 <p align="center"><img src="docs/images/demo.gif" alt="A short tour of Apiary" width="800"></p>
 
+## Keeps going when an AI runs out
+
+Claude and Codex each have a usage limit, and neither can read the other's conversation. Apiary bridges that gap: agents keep one short **handover note** per task, and if one AI hits its limit the other reads the note and **continues the same job** instead of starting over. It works both ways, costs a few lines per turn, and can be switched off. [How it works and its limits](docs/using-apiary/continuity.md)
+
 ## What it is
 
 Apiary is a web app that runs on your own Linux computer or server. You describe what you want in a chat. A lead agent (the "CEO") makes a plan, brings in specialists (a network engineer, a security reviewer, a researcher…), and they do the work in separate branches while you stay in charge: nothing important happens until you approve it.
@@ -29,7 +33,7 @@ Then open <http://127.0.0.1:7777>. A short setup wizard finds your AI logins and
 | **Agents that cooperate** | They message each other, hand work over, and check with the right specialist first. |
 | **Reviewer agents** | A second agent reviews finished work and sends it back until it passes. |
 | **Parallel work** | Several agents work at once; merges are queued and conflicts fix themselves. |
-| **Recovery** | Failed jobs retry, switch between Claude and Codex, and explain themselves in plain words. |
+| **Recovery** | Failed jobs retry, switch between Claude and Codex with a handover note so work continues, and explain themselves in plain words. |
 | **Infrastructure map** | Connect your servers, test the links and see how everything fits together. |
 | **Secrets vault** | Logins live in an encrypted vault and are redacted from chat, logs and exports. |
 | **Memory** | Agents remember last night, last week and last year. |

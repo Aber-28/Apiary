@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.61.0
+
+- New: handover notes. Agents keep one short note per multi-step task. If Claude hits its limit, Codex reads the note and carries on (and the other way round). On by default; switch off under Settings.
+- Fixed: a new teammate could still be given a codename already used in the same team. Names are now unique within a team.
+- New: a "Limits and what to expect" page and a "Keep going when an AI runs out" page in the documentation.
+
 ## 0.60.3
 
 - Fixed: two teammates hired at the same moment could be given the same codename. Names being handed out are now reserved straight away.

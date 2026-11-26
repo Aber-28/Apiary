@@ -21,6 +21,7 @@
 * [Review of finished work](using-apiary/review.md)
 * [Parallel work](using-apiary/parallel-work.md)
 * [Retries and recovery](using-apiary/recovery.md)
+* [Keep going when an AI runs out](using-apiary/continuity.md)
 * [Themes](using-apiary/themes.md)
 * [Project stages](using-apiary/project-stages.md)
 * [Call an agent with @](using-apiary/mentions.md)
@@ -79,6 +80,7 @@
 * [Security](reference/security.md)
 * [Security checklist and self-check](reference/security-checklist.md)
 * [Security audit report](reference/security-audit.md)
+* [Limits and what to expect](reference/limits.md)
 * [Troubleshooting](reference/troubleshooting.md)
 
 ## Development

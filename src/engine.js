@@ -16,6 +16,7 @@ import path from 'node:path';
 import { providers, which } from './providers.js';
 import { HOME } from './store.js';
 import { Images, KEEP_CHOICES, DEFAULT_DAYS } from './images.js';
+import { Handover } from './handover.js';
 import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
@@ -90,6 +91,7 @@ export class Engine extends EventEmitter {
     super();
     this.store = store;
     this.connections = new Connections(store);
+    this.handover = new Handover(path.join(HOME, 'handover')); this.handover.prune(); setInterval(() => this.handover.prune(), 6 * 3600e3).unref?.();
     this.images = new Images(path.join(HOME, 'images')); this.pruneImages(); setInterval(() => this.pruneImages(), 6 * 3600e3).unref?.();
     this.ctls = new Map();     // agentId -> AbortController of the running provider call
     this.chains = new Map();   // agentId -> promise chain (one turn at a time per agent)
@@ -264,8 +266,10 @@ export class Engine extends EventEmitter {
     this.store.data.settings.meeting = m; this.store.save();
     return this.meeting;
   }
+  get handoverOn() { return this.store.data.settings.handover !== false; }
   get plainEnglish() { return this.store.data.settings.plainEnglish !== false; }
-  setSettings({ defaultProvider, onboardingDone, autoUpdate, updateCheck, meeting, plainEnglish, usageLimits }) {
+  setSettings({ defaultProvider, onboardingDone, autoUpdate, updateCheck, meeting, plainEnglish, usageLimits, handover }) {
+    if (handover !== undefined) { this.store.data.settings.handover = !!handover; this.store.save(); }
     if (autoUpdate !== undefined) { this.store.data.settings.autoUpdate = !!autoUpdate; if (updateCheck === undefined) this.store.data.settings.updateCheck = autoUpdate ? 'daily' : 'manual'; }
     if (updateCheck !== undefined) { if (!['daily', 'weekly', 'monthly', 'manual'].includes(updateCheck)) throw httpErr(400, 'updateCheck must be daily, weekly, monthly or manual'); this.store.data.settings.updateCheck = updateCheck; this.store.data.settings.autoUpdate = updateCheck !== 'manual'; }
     if (plainEnglish !== undefined) this.store.data.settings.plainEnglish = !!plainEnglish;
@@ -429,7 +433,7 @@ export class Engine extends EventEmitter {
     // Names being handed out right now count as taken too: two hires at the same moment must not pick the same codename.
     const claimed = (this._claimedNames ||= new Map()); if (!claimed.has(root.id)) claimed.set(root.id, new Set());
     const mine = claimed.get(root.id);
-    const taken = new Set([root.name, ...roster.map((m) => m.name), ...mine].map((n) => n.toLowerCase()));
+    const taken = new Set([root.name, ...roster.map((m) => m.name), ...this.tree(root.id).map((id) => this.agents[id]?.name), ...mine].filter(Boolean).map((n) => n.toLowerCase()));   // everyone in this team: a name must point to one person
     const title = String(spec.title || spec.name || 'Specialist').trim().slice(0, 60);
     const dept = DEPARTMENTS[spec.department] ? spec.department : inferDepartment(title, spec.role);
     let name = String(spec.name || '').trim().slice(0, 40) || pickName(dept, taken);
@@ -645,7 +649,7 @@ export class Engine extends EventEmitter {
     const root = this._teamRoot(proposer);
     const roster = this._roster(root);
     const titles = new Set(roster.map((m) => (m.title || m.name).toLowerCase()));
-    const taken = new Set([root.name, ...roster.map((m) => m.name)].map((n) => n.toLowerCase()));
+    const taken = new Set([root.name, ...roster.map((m) => m.name), ...this.tree(root.id).map((id) => this.agents[id]?.name)].filter(Boolean).map((n) => n.toLowerCase()));
     const ok = [];
     // Every hire that is not made says why, in the chat and the activity log, so nothing is dropped silently.
     const drop = (text) => { notes.push(text); this._log(proposer, `! ${text}`); this._msg(proposer, { role: 'system', text }); };
@@ -1184,6 +1188,7 @@ export class Engine extends EventEmitter {
       'PLAIN REPORTS: When you report back to the human, say what changed for them in a few short sentences, as you would to someone who does not write code: what now works, what does not, and what they need to decide or do. Leave out technical detail such as file names, function or variable names, header or protocol names, test internals and numbered lists of code changes, unless the human asks how it was done or asks for details. End with one short line offering the technical details if they want them. The only exception is something the human must copy and run; that stays exact, in a code block. This does not apply to instructions you give other agents, which stay complete.\n';
     const standing = this._standing(agent);
     if (standing) s += `\nStanding instructions for you:\n${standing}\n`;
+    if (agent.method !== 'api' && agent.provider !== 'mock' && this.handoverOn) s += this.handover.instruction(agent.id);
     if (agent.method === 'api') s += 'You are connected through a web API: you cannot read files or run commands. Answer in text only.\n';
     if (agent.git) s += `You are working on git branch ${agent.git.branch} in your own checkout. Your changes are committed for you after each turn; do not switch branches or push.\n`;
     if (!agent.parentId) s += 'FORMATTING: Whenever you give the human something to copy and run or paste (a terminal or SSH command, a config line, a file path to type, a script, a key), put it in a fenced code block (three backticks, then the language such as bash) and nothing else inside it, one command per line, with no $ prompt in front. Short names, commands or file names inside a sentence go in single backticks.\n';
@@ -1420,7 +1425,7 @@ export class Engine extends EventEmitter {
       try {
         const run = cur.provider === agent.provider ? runner : providers.pick(cur);
         const res = await run.run({
-          agent: cur, prompt, system, images, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent), ...(images.length ? [this.images.dir] : [])], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
+          agent: cur, prompt, system: cur.switchedFrom && this.handoverOn ? system + this.handover.switchNote(agent.id, label(cur.switchedFrom)) : system, images, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent), ...(this.handoverOn ? [this.handover.dir] : []), ...(images.length ? [this.images.dir] : [])], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
           history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
           onText: (text) => { ping(); this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }); },
           onActivity: (text) => { ping(); this.emit('event', { type: 'activity', agentId: agent.id, text }); },

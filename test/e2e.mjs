@@ -1616,13 +1616,13 @@ let orgIds;
     assert.equal(engine._peerAllowed(room), true, 'E1: the limit clears after an hour');
     engine.store.data.settings.limits = { ...engine.store.data.settings.limits, maxPeerMessages: 30 };
     const mem = Object.values(engine.agents).find((a) => a.parentId === lead2.id && a.member);
-    const other = Object.values(engine.agents).find((a) => a.parentId === lead2.id && a.member && a.id !== mem?.id);
+    const other = Object.values(engine.agents).find((a) => a.parentId === lead2.id && a.member && a.id !== mem?.id && Object.values(engine.agents).filter((x) => x.name.toLowerCase() === a.name.toLowerCase()).length === 1);   // a name that points to one person
     if (mem && other) {
       engine.replyTurns.add(mem.id);
       const notes = [];
       const job = await engine._peerJob(mem, { to: other.name, text: 'example question', wait: true }, notes);
       assert.equal(job, null, 'E2: no reply job is started');
-      assert.ok(notes.some((n) => /without waiting: a reply from a teammate cannot start another reply/.test(n)), `E2: the sender is told why: ${JSON.stringify(notes)} mem=${mem.name} other=${other.name}`);
+      assert.ok(notes.some((n) => /without waiting: a reply from a teammate cannot start another reply/.test(n)), `E2: the sender is told why: ${JSON.stringify(notes)} mem=${mem.name} other=${other.name} same=${JSON.stringify(Object.values(engine.agents).filter((a) => a.name === other.name || a.title === other.name).map((a) => [a.id, a.parentId, a.member, a.name, a.title, a.kind]))} lead2=${lead2.id}`);
       engine.replyTurns.delete(mem.id);
     }
     // F1 trust input
@@ -2835,5 +2835,22 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.ok(out.filter((s) => s === 429).length >= 20, `guesses sent in parallel are locked out (${out.join(',')})`);
   assert.ok(!out.includes('ok'));
   await assert.rejects(a.login('tester2', 'a long enough passphrase', '8.8.8.8'), (e) => e.status === 429, 'while the account is locked even the right password waits'); }
+// ---- handover notes: one small overwritten file per task, read by the other AI after a switch, deleted when old ----
+{
+  const { Handover } = await import('../src/handover.js');
+  const { mkdtempSync: mk, utimesSync, writeFileSync, existsSync } = await import('node:fs');
+  const d = mk(path.join(os.tmpdir(), 'apiary-ho-')); const ho = new Handover(d);
+  const f = ho.fileFor('ab12'); assert.ok(f.startsWith(d) && f.endsWith('ab12.md'), 'the note lives in Apiary\'s own folder');
+  assert.ok(!ho.fileFor('../../etc/x').includes('..'), 'an odd id cannot point outside the folder');
+  assert.match(ho.instruction('ab12'), /Overwrite it.*never append/s); assert.match(ho.instruction('ab12'), /Never put passwords/);
+  assert.match(ho.switchNote('ab12', 'Claude'), /no handover note yet/);
+  writeFileSync(f, '# Goal\nx'); assert.match(ho.switchNote('ab12', 'Claude'), /Read .*ab12\.md first/);
+  const old = ho.fileFor('old1'); writeFileSync(old, 'x'); const t = (Date.now() - 8 * 86400e3) / 1000; utimesSync(old, t, t);
+  assert.equal(ho.prune(), 1, 'a note untouched for 7 days is deleted'); assert.ok(!existsSync(old) && existsSync(f));
+  const src = fsRead(new URL('../src/engine.js', import.meta.url), 'utf8');
+  assert.ok(/cur\.switchedFrom && this\.handoverOn \? system \+ this\.handover\.switchNote/.test(src), 'a switch tells the new AI to read the note');
+  assert.equal(engine.handoverOn, true, 'on by default'); engine.setSettings({ handover: false }); assert.equal(engine.handoverOn, false); engine.setSettings({ handover: true });
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

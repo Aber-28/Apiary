@@ -2700,5 +2700,31 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 
 { const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /navLeaves/); assert.match(a, /label: 'Security'/); assert.match(a, /id: 'reuse'/); }
 { const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /Create your sign-in/); assert.match(a, /signin-nag/); assert.ok(a.indexOf('// 8 Sign-in') < a.indexOf('// 9 Startup'), 'sign-in comes before startup'); }
+
+// ----- pictures and screenshots -----
+{
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const up = await call('/api/images', 'POST', { name: 'shot.png', data: 'data:image/png;base64,' + png.toString('base64') });
+  assert.equal(up.status, 201); assert.match(up.body.id, /^img-[a-f0-9]{16}$/); assert.equal(up.body.mime, 'image/png');
+  assert.equal((await call('/api/images', 'POST', { name: 'x.svg', data: Buffer.from('<svg onload="alert(1)"/>').toString('base64') })).status, 400, 'SVG and other non-pictures are refused');
+  assert.equal((await call('/api/images', 'POST', { name: 'x.png', data: Buffer.from('not a picture at all').toString('base64') })).status, 400, 'the file contents decide, not the name');
+  const got = await fetch(`${base}/api/images/${up.body.id}`);
+  assert.equal(got.headers.get('content-type'), 'image/png'); assert.equal(got.headers.get('x-content-type-options'), 'nosniff'); assert.deepEqual(Buffer.from(await got.arrayBuffer()), png);
+  assert.equal((await call('/api/images/img-0000000000000000')).status, 404);
+  assert.equal((await call('/api/images/..%2F..%2Fetc%2Fpasswd')).status, 404, 'no path tricks');
+  const chat = (await call('/api/chat')).body;
+  assert.equal((await call(`/api/agents/${chat.id}/messages`, 'POST', { text: 'look', images: [{ id: 'img-ffffffffffffffff' }] })).status, 400, 'an unknown picture is refused');
+  assert.equal((await call(`/api/agents/${chat.id}/messages`, 'POST', { text: 'what is wrong here?', images: [{ id: up.body.id, name: 'shot.png' }] })).status, 202);
+  await until(() => engine.messages(chat.id).some((m) => m.role === 'agent' && /saw 1 picture/.test(m.text)));
+  assert.equal(engine.messages(chat.id).find((m) => m.role === 'user' && m.images)?.images[0].id, up.body.id, 'the message keeps its picture');
+  assert.equal((await call(`/api/agents/${chat.id}/messages`, 'POST', { text: '', images: [] })).status, 400);
+  // a task keeps its pictures and hands them over when it starts
+  const t = await call('/api/tasks', 'POST', { title: 'Fix the layout in the picture', status: 'todo', images: [{ id: up.body.id, name: 'shot.png' }] });
+  assert.equal(t.status, 201); assert.equal(t.body.images.length, 1);
+  assert.equal((await call('/api/tasks', 'POST', { title: 'x', images: [{ id: 'nope' }] })).status, 400);
+  assert.equal((await call('/api/tasks/' + t.body.id + '/start', 'POST', {})).status, 202);
+  await until(() => engine.messages(chat.id).some((m) => m.role === 'user' && /Fix the layout/.test(m.text) && m.images?.length === 1));
+  const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function attacher/); assert.match(a, /onpaste: att\.onPaste/);
+}
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

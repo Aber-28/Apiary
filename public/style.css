@@ -336,3 +336,18 @@ html{-webkit-text-size-adjust:100%}
 
 /* always a way out of a chat on a phone */
 @media (max-width:900px){.top{position:sticky;top:0;z-index:30}#menu{min-width:44px;min-height:44px}.chat-back{flex:0 0 auto}button,a,.btn,select,input,textarea{touch-action:manipulation}}
+
+/* pictures and screenshots */
+.pics{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.pics.pending{flex:0 0 100%;margin:0 0 4px}
+.pics[hidden]{display:none}
+.pic{display:block;max-width:220px;max-height:160px;border-radius:10px;border:1px solid var(--line);object-fit:cover;background:var(--bg)}
+.pics.pending .pic{width:72px;height:72px;max-width:72px}
+.pic-wrap{position:relative;display:inline-block}
+.pic-x{position:absolute;top:-6px;right:-6px;width:22px;height:22px;border-radius:50%;border:1px solid var(--line);background:var(--card,#fff);color:inherit;cursor:pointer;line-height:1;padding:0}
+.btn.attach{min-width:44px;min-height:44px;padding:0 10px;font-size:18px}
+.composer{flex-wrap:wrap}
+.composer textarea{flex:1 1 200px}
+.composer.dropping,.card.dropping{outline:2px dashed var(--accent,#f5b83d);outline-offset:-4px}
+@media (max-width:900px){.pic{max-width:100%}.pics.pending .pic{max-width:72px}}
+div.f{display:flex;flex-direction:column;gap:6px;font-weight:600;margin-bottom:14px}

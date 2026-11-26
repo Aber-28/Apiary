@@ -27,3 +27,17 @@ Files up to 2 MB can be saved from the browser. The `.git` folder is managed by 
 Every project shows a **Responsible** agent, in the project's header and on its card in the Projects list. It starts as your CEO, and the CEO leads every project: he does the work himself or hands it to the specialists he created. Existing projects keep whoever was responsible. Change it from the drop-down to any teammate or another project's lead.
 
 The project's own lead agent still does the work. The responsible agent is the one who answers for it: it can give the lead work or ask how it is going, and the lead can report back to it. Tasks work the same way, with **Responsible** on every card (see [Tasks](tasks.md)).
+
+## Attaching pictures and screenshots
+
+You can show your agents what you mean instead of describing it.
+
+- **In a chat:** click the paperclip next to the message box, or paste a screenshot straight into the box (Ctrl+V / Cmd+V), or drag a picture onto the chat. Small previews appear above the box; click the × on one to remove it. Then press Send.
+- **On a task:** the New task form and the Edit task dialog both have a paperclip. The pictures stay with the task, show on its card and page, and go to the agent when the task starts.
+
+What happens next: the agent looks at the picture and acts on it, for example "the button overlaps the total, fix it". With Claude Code and Codex the AI opens the picture itself; with a web (API key) connection the picture is sent along with your message.
+
+Good to know:
+- PNG, JPEG, GIF and WebP only, up to 6 pictures per message and 8 MB each. Big screenshots are shrunk in your browser first.
+- Pictures are stored privately in Apiary's own folder (not inside your projects) and tidied away after about 60 days.
+- Anything visible in a picture goes to the AI you chose, so avoid screenshots that show passwords or keys.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.0
+
+- Pictures and screenshots: attach them to a chat message (paperclip, paste or drag and drop) and to tasks (new and edit). The agent looks at them and acts on what it sees. Works with Claude Code, Codex and web (API key) connections. Only real PNG/JPEG/GIF/WebP files are accepted (checked by content), stored privately and tidied after 60 days.
+
 ## 0.52.1
 
 - Phone: there is now always a way out of a chat. A "‹ All chats" button sits at the top of every chat, the top bar stays pinned, the menu button is bigger, and double-tap zoom no longer swallows taps.

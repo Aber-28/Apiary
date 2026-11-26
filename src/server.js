@@ -56,9 +56,9 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
     res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
     res.end(JSON.stringify(body));
   };
-  const readBody = (req) => new Promise((resolve, reject) => {
+  const readBody = (req, max = 1e6) => new Promise((resolve, reject) => {
     let s = '';
-    req.on('data', (d) => { s += d; if (s.length > 1e6) reject(Object.assign(new Error('Body too large'), { status: 413 })); });
+    req.on('data', (d) => { s += d; if (s.length > max) reject(Object.assign(new Error('Body too large'), { status: 413 })); });
     req.on('end', () => { try { resolve(s ? JSON.parse(s) : {}); } catch { reject(Object.assign(new Error('Bad JSON'), { status: 400 })); } });
   });
 
@@ -213,6 +213,12 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         }
       }
       { const la = /^\/api\/library\/([a-z0-9]+)\/add$/.exec(url.pathname); if (la && req.method === 'POST') return json(res, 201, engine.addFromLibrary(la[1], await readBody(req))); }
+      if (url.pathname === '/api/images' && req.method === 'POST') return json(res, 201, engine.images.save(await readBody(req, 12e6)));
+      if (req.method === 'GET' && (r = m(/^\/api\/images\/(img-[a-f0-9]{16})$/))) {
+        const im = engine.images.read(r[1]); if (!im) throw Object.assign(new Error('No such picture'), { status: 404 });
+        res.writeHead(200, { 'content-type': im.mime, 'content-length': im.buf.length, 'x-content-type-options': 'nosniff', 'content-security-policy': "default-src 'none'", 'cache-control': 'private, max-age=86400' });
+        return res.end(im.buf);
+      }
       if (url.pathname === '/api/refs' && req.method === 'GET') return json(res, 200, { refs: engine.refs() });
       if (url.pathname === '/api/tasks' && req.method === 'GET') return json(res, 200, { tasks: engine.tasksView(), counts: engine.tasks.counts() });
       if (url.pathname === '/api/tasks' && req.method === 'POST') return json(res, 201, engine.createTask(await readBody(req)));
@@ -538,8 +544,9 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         if (req.method === 'GET') return json(res, 200, engine.messages(id));
         if (req.method === 'POST') {
           const b = await readBody(req);
-          if (!b.text?.trim()) throw Object.assign(new Error('Empty message'), { status: 400 });
-          return json(res, 202, { ok: true, ...engine.tag(id, b.text) });
+          if (!b.text?.trim() && !b.images?.length) throw Object.assign(new Error('Empty message'), { status: 400 });
+          if (!b.text?.trim()) b.text = 'Please look at the attached picture.';
+          return json(res, 202, { ok: true, ...engine.tag(id, b.text, engine.images.resolve(b.images)) });
         }
       }
       if ((r = m(/^\/api\/agents\/([\w-]+)\/(logs|resume|takeover|pr|diff)$/))) {

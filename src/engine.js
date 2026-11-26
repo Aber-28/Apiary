@@ -15,6 +15,7 @@ import { readFileSync, mkdirSync, realpathSync, existsSync, statSync, readdirSyn
 import path from 'node:path';
 import { providers, which } from './providers.js';
 import { HOME } from './store.js';
+import { Images } from './images.js';
 import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
@@ -89,6 +90,7 @@ export class Engine extends EventEmitter {
     super();
     this.store = store;
     this.connections = new Connections(store);
+    this.images = new Images(path.join(HOME, 'images')); try { this.images.prune(); } catch { /* best effort */ }
     this.ctls = new Map();     // agentId -> AbortController of the running provider call
     this.chains = new Map();   // agentId -> promise chain (one turn at a time per agent)
     this.stopped = new Set();  // agents asked to stop mid-delegation
@@ -1317,7 +1319,7 @@ export class Engine extends EventEmitter {
       this._log(agent, `! could not save that rule: ${e.message}`);   // e.g. a duplicate: the answer still applies to this request
     }
   }
-  async _exec(agent, prompt) {
+  async _exec(agent, prompt, images = []) {
     const ctl = new AbortController();
     this.ctls.set(agent.id, ctl);
     this._setStatus(agent, 'working');
@@ -1326,7 +1328,7 @@ export class Engine extends EventEmitter {
     try {
       const runner = providers.pick(agent);
       const system = this._system(agent) + this._projectNote(agent) + this.repos.contextFor(agent) + (this.memoryEnabled ? this.memory.context(this._mkey(agent), this._pkey(agent), prompt) : '');
-      const res = await this._runRecovering(agent, ctl, { prompt, system, approval, runner });
+      const res = await this._runRecovering(agent, ctl, { prompt, system, approval, runner, images: this.images.files(images) });
       this._usage(agent, res, system, prompt);
       if (res.sessionId && !res.switchedProvider) agent.sessionId = res.sessionId;
       if (agent.method === 'api') {
@@ -1359,7 +1361,7 @@ export class Engine extends EventEmitter {
   _failWords(kind, who) {
     return { limit: `${who} has reached its usage limit`, auth: `${who} is not signed in any more`, stuck: `${who} stopped responding`, transient: `${who} could not be reached`, other: `${who} stopped with an error` }[kind] || `${who} failed`;
   }
-  async _runRecovering(agent, ctl, { prompt, system, approval, runner }) {
+  async _runRecovering(agent, ctl, { prompt, system, approval, runner, images = [] }) {
     const retryMs = Number(process.env.APIARY_RETRY_MS || 3000), stuckMs = Number(process.env.APIARY_STUCK_MS || 20 * 60 * 1000);
     const maxRetries = this.limits.maxRetries ?? 2;
     const label = (id) => PROVIDER_LABEL[id] || id;
@@ -1374,7 +1376,7 @@ export class Engine extends EventEmitter {
       try {
         const run = cur.provider === agent.provider ? runner : providers.pick(cur);
         const res = await run.run({
-          agent: cur, prompt, system, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent)], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
+          agent: cur, prompt, system, images, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent), ...(images.length ? [this.images.dir] : [])], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
           history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
           onText: (text) => { ping(); this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }); },
           onActivity: (text) => { ping(); this.emit('event', { type: 'activity', agentId: agent.id, text }); },
@@ -1629,10 +1631,11 @@ export class Engine extends EventEmitter {
     return a ? { id: a.id, name: a.name } : null;
   }
   createTask(b = {}) {
-    return this.tasks.add({ title: b.title, notes: b.notes, status: ['todo', 'backburner'].includes(b.status) ? b.status : 'todo', labels: b.labels, project: b.project || null, assignee: this._assignee(b.assignee) });
+    return this.tasks.add({ title: b.title, notes: b.notes, status: ['todo', 'backburner'].includes(b.status) ? b.status : 'todo', labels: b.labels, project: b.project || null, assignee: this._assignee(b.assignee), images: this.images.resolve(b.images) });
   }
   updateTask(id, b = {}) {
     const patch = { ...b };
+    if (patch.images !== undefined) patch.images = this.images.resolve(patch.images);
     if (patch.assignee !== undefined) patch.assignee = this._assignee(patch.assignee);
     return this.tasks.update(id, patch);
   }
@@ -1642,8 +1645,8 @@ export class Engine extends EventEmitter {
     if (!who) throw httpErr(409, 'There is no agent to do this yet. Set up your CEO first.');
     if (t.status === 'done') throw httpErr(409, 'This task is already done. Move it back to To do first.');
     if (t.status !== 'inprogress') this.tasks.update(id, { status: 'inprogress', assignee: { id: who.id, name: who.name } }, 'you');
-    const prompt = `Task from the board: ${t.title}\n\n${t.notes || '(no more detail given)'}\n\nDo it, or hand it to the right teammate. Keep the task's status up to date with an apiary-task block.`;
-    this.send(who.id, prompt).catch(() => {});
+    const prompt = `Task from the board: ${t.title}\n\n${t.notes || '(no more detail given)'}\n\nDo it, or hand it to the right teammate. Keep the task's status up to date with an apiary-task block.${t.images?.length ? `\n\n(${t.images.length === 1 ? 'A picture is' : `${t.images.length} pictures are`} attached to this task.)` : ''}`;
+    this.send(who.id, prompt, null, t.images?.length ? { images: t.images } : {}).catch(() => {});
     return { started: true, agent: who.name };
   }
   // Everything that has a short ID, so the page can show each one as a small status chip. Secrets give their name only, never a value.
@@ -1731,18 +1734,18 @@ export class Engine extends EventEmitter {
   async _converse(agent, userText, from, opts = {}) {
     const w = this._openWork(agent, userText, from, opts);
     if (opts.replyTo) this.replyTurns.add(agent.id);
-    try { const r = await this._converseRun(agent, userText, from); this._closeWork(w, agent, true); return r; }
+    try { const r = await this._converseRun(agent, userText, from, opts.images); this._closeWork(w, agent, true); return r; }
     catch (e) { this._closeWork(w, agent, false, e); throw e; }
     finally { this.replyTurns.delete(agent.id); }
   }
-  async _converseRun(agent, userText, from) {
+  async _converseRun(agent, userText, from, images = []) {
     this.stopped.delete(agent.id);
-    this._msg(agent, { role: 'user', text: userText, from: from ? { id: from.id, name: from.name } : null });
+    this._msg(agent, { role: 'user', text: userText, from: from ? { id: from.id, name: from.name } : null, ...(images?.length ? { images } : {}) });
     // A message from a teammate (not the parent handing over a task) is labelled so the agent knows who is asking.
     let prompt = from && from.id !== agent.parentId && from.id !== 'meeting' ? `Message from teammate ${from.name}:\n\n${userText}` : userText, final = '';
     try {
       for (let round = 0; round <= this.limits.maxRounds; round++) {
-        const raw = await this._exec(agent, prompt);
+        const raw = await this._exec(agent, prompt, round === 0 ? images : []);
         const mem = parseRemember(raw);
         if (this.memoryEnabled) for (const n of mem.notes) this.memory.add({ kind: 'note', text: this._redact(n.text), who: agent.name, agent: n.scope === 'agent' ? this._mkey(agent) : null, project: n.scope === 'project' ? this._pkey(agent) : null });
         const { clean, spawns, sends, assigns, hires, secrets, newSecrets, tasks, plans, progress, infra, runbooks, errors } = parseSpawns(mem.clean);
@@ -1862,22 +1865,22 @@ export class Engine extends EventEmitter {
 
   // The person's message in a chat. With no @tag it goes to this chat's agent as usual.
   // With tags, the tagged agents get it (in their own chats) and each answer is also shown here.
-  tag(agentId, text) {
+  tag(agentId, text, images = []) {
     const me = this.agents[agentId];
     if (!me) throw httpErr(404, 'No such agent');
     const { found, problems, clean, rest } = this.findMentions(String(text), this.mentionables(agentId));
     if (problems.length) throw httpErr(400, problems[0]);
-    if (!found.length) { this.send(agentId, text).catch(() => {}); return { tagged: [] }; }
+    if (!found.length) { this.send(agentId, text, null, images.length ? { images } : {}).catch(() => {}); return { tagged: [] }; }
     if (!rest.replace(/[\s,;:.!?-]/g, '')) throw httpErr(400, `Say what ${found.map((f) => f.name).join(' and ')} should do, for example "@${found[0].name} please look at this".`);
     for (const t of found) {
       const peer = this.agents[t.id], rt = this.rootOf(peer);
       if (rt.kind !== 'general' && this.stageOf(rt) === 'closed') throw httpErr(409, `${peer.name}'s project is closed. Reopen it (Projects page) first.`);
     }
-    this._msg(me, { role: 'user', text: String(text) });
+    this._msg(me, { role: 'user', text: String(text), ...(images.length ? { images } : {}) });
     const also = found.length > 1 ? `\n\n(The same message was sent to: ${found.map((f) => f.name).join(', ')}.)` : '';
     for (const t of found) {
       this._msg(me, { role: 'system', text: `Sent to ${t.name}`, agentId: t.id });
-      this.send(t.id, clean + also).then(
+      this.send(t.id, clean + also, null, images.length ? { images } : {}).then(
         (reply) => this._msg(me, { role: 'agent', text: reply || '(no reply)', by: { id: t.id, name: t.name } }),
         (e) => this._msg(me, { role: 'system', text: `${t.name} could not finish: ${e.message}`, error: true }),
       );

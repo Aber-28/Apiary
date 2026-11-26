@@ -32,12 +32,12 @@ export class Tasks {
     return `Closed by ${by}.${refer ? ` Refer to ${refer}.` : ''}`;
   }
 
-  add({ title, notes = '', status = 'todo', labels = [], assignee = null, project = null, source = 'human', ref = null, parent = null }) {
+  add({ title, notes = '', status = 'todo', labels = [], assignee = null, project = null, source = 'human', ref = null, parent = null, images = [] }) {
     title = clean(title, 140); if (!title) throw err(400, 'Give the task a title');
     if (!STATUSES.includes(status)) throw err(400, 'Unknown status');
     const now = Date.now();
     const par = parent ? this.all[parent] : null;
-    const t = { id: randomUUID().slice(0, 8), ...this._nextCode(), parent: par ? par.id : null, title, notes: clean(notes, 4000), status, labels: this._labels(labels), assignee, project, source, ref, createdAt: now, updatedAt: now, log: [{ at: now, text: `Created as ${STATUS_LABELS[status]}` }] };
+    const t = { id: randomUUID().slice(0, 8), ...this._nextCode(), parent: par ? par.id : null, title, notes: clean(notes, 4000), images, status, labels: this._labels(labels), assignee, project, source, ref, createdAt: now, updatedAt: now, log: [{ at: now, text: `Created as ${STATUS_LABELS[status]}` }] };
     while (Object.values(this.all).some((x) => x.id === t.id)) t.id = randomUUID().slice(0, 8);
     this.all[t.id] = t;
     if (par) { par.log.push({ at: now, text: `Opened ${t.code} for ${assignee?.name || 'a teammate'}: ${clean(title, 80)}` }); par.updatedAt = now; }
@@ -50,6 +50,7 @@ export class Tasks {
     const t = this.get(id), now = Date.now();
     if (patch.title !== undefined) { const v = clean(patch.title, 140); if (!v) throw err(400, 'Give the task a title'); t.title = v; }
     if (patch.notes !== undefined) t.notes = clean(patch.notes, 4000);
+    if (patch.images !== undefined) t.images = patch.images;
     if (patch.labels !== undefined) t.labels = this._labels(patch.labels);
     if (patch.assignee !== undefined) t.assignee = patch.assignee;
     if (patch.status !== undefined && patch.status !== t.status) {

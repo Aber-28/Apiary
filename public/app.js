@@ -515,8 +515,8 @@ function pageProject(leadId, general = false) {
         if (d && m.agentId) return bubble('them', a.name, colourOf(a.id), t, [h('span', { class: 'cb-mention', style: `color:${colourOf(m.agentId)}` }, `@${d[2]}: `), ...linkify(d[3]), h('small', { class: 'cb-note' }, ` (${d[1].toLowerCase()})`)]);
         return h('div', { class: 'cb-line' + (m.error ? ' error' : '') }, ...linkify(m.text || ''));
       }
-      if (m.role === 'user' && !m.from) return bubble('me', null, null, t, linkify(m.text || ''));
-      if (m.role === 'user' && m.from) return bubble('them', m.from.name, colourOf(m.from.id), t, linkify(m.text || ''));
+      if (m.role === 'user' && !m.from) return bubble('me', null, null, t, [...linkify(m.text || ''), picStrip(m.images)].filter(Boolean));
+      if (m.role === 'user' && m.from) return bubble('them', m.from.name, colourOf(m.from.id), t, [...linkify(m.text || ''), picStrip(m.images)].filter(Boolean));
       if (m.role === 'report') return reportBubbles(m.text, t);
       const who = m.by ? m.by.name : (!a.parentId && !a.kind && !a.member ? ownerOf(a)?.name : null) || a.name;
       return bubble('them', who, colourOf(m.by?.id || a.id), t, linkify(m.text || ''));
@@ -640,7 +640,8 @@ function pageProject(leadId, general = false) {
       if (!hits.length) return closePop();
       shown = hits; hi = 0; atStart = before.length - m[2].length - 1; pop.hidden = false; drawPop();
     };
-    input = h('textarea', { rows: '2', placeholder: (a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : `Tell ${ownerOf(a)?.name || 'your CEO'} what you need…`) + ' Type @ to call a teammate.', 'aria-label': 'Message', oninput: onType, onblur: () => setTimeout(closePop, 120), onkeydown: (e) => {
+    const att = attacher();
+    input = h('textarea', { rows: '2', onpaste: att.onPaste, placeholder: (a.parentId ? `Message ${a.name} directly…` : general ? 'Ask anything…' : `Tell ${ownerOf(a)?.name || 'your CEO'} what you need…`) + ' Type @ to call a teammate.', 'aria-label': 'Message', oninput: onType, onblur: () => setTimeout(closePop, 120), onkeydown: (e) => {
       if (!pop.hidden && shown.length) {
         if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); hi = (hi + (e.key === 'ArrowDown' ? 1 : shown.length - 1)) % shown.length; drawPop(); return; }
         if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); choose(shown[hi]); return; }
@@ -649,13 +650,15 @@ function pageProject(leadId, general = false) {
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
     } });
     const send = guard(async () => {
-      const text = input.value.trim(); if (!text) return;
+      const text = input.value.trim(), images = att.items(); if (!text && !images.length) return;
       forceBottom = true; setTimeout(() => { forceBottom = false; }, 4000);
-      const r = await api(`/api/agents/${sel().id}/messages`, 'POST', { text });
-      input.value = ''; closePop(); drawMsgs();
+      const r = await api(`/api/agents/${sel().id}/messages`, 'POST', { text, images });
+      input.value = ''; att.clear(); closePop(); drawMsgs();
       if (r.tagged?.length) toast(`Sent to ${r.tagged.join(' and ')}. The answer will appear here.`);
     });
-    el.body.replaceChildren(msgsEl, liveEl, h('div', { class: 'composer' }, pop, input, h('button', { class: 'btn primary big', onclick: send }, 'Send')));
+    const composer = h('div', { class: 'composer' }, att.strip, pop, att.btn, att.file, input, h('button', { class: 'btn primary big', onclick: send }, 'Send'));
+    att.dropOn(composer);
+    el.body.replaceChildren(msgsEl, liveEl, composer);
     drawMsgs();
   };
   const drawAll = () => { drawHead(); drawTabs(); drawTeam(); drawBody(); };
@@ -1357,6 +1360,48 @@ function reportBubbles(text, time) {
   if (rest) out.push(h('div', { class: 'cb-line' }, ...linkify(rest)));
   return out.length ? out : [bubble('them', 'Report', '#64748b', time, linkify(str))];
 }
+
+// ---------- pictures and screenshots ----------
+// Big pictures (phone screenshots especially) are shrunk in the browser first: smaller to send and cheaper for the AI to read.
+async function shrinkImage(file) {
+  if (!/^image\/(png|jpeg|gif|webp)$/.test(file.type)) throw new Error('Only PNG, JPEG, GIF and WebP pictures can be attached.');
+  const readAs = (blob) => new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(new Error('Could not read that picture')); r.readAsDataURL(blob); });
+  if (file.type === 'image/gif' || file.size < 1.2 * 1024 * 1024) { if (file.size > 8 * 1024 * 1024) throw new Error('That picture is too large (limit 8 MB).'); return readAs(file); }
+  try {
+    const bmp = await createImageBitmap(file), k = Math.min(1, 1800 / Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas'); c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.86));
+    return readAs(blob || file);
+  } catch { if (file.size > 8 * 1024 * 1024) throw new Error('That picture is too large (limit 8 MB).'); return readAs(file); }
+}
+const MAX_PICS = 6;
+const picUrl = (id) => `/api/images/${encodeURIComponent(id)}`;
+// A row of small pictures that are in a message or task. Click to open full size.
+const picStrip = (list) => list?.length ? h('div', { class: 'pics' }, list.map((im) => h('a', { href: picUrl(im.id), target: '_blank', rel: 'noopener', title: im.name }, h('img', { class: 'pic', src: picUrl(im.id), alt: im.name || 'Attached picture', loading: 'lazy' })))) : null;
+// The attach control: a button, paste, and drag-and-drop. items() are the pictures ready to send.
+function attacher(initial = []) {
+  let items = [...initial]; const strip = h('div', { class: 'pics pending', hidden: !items.length });
+  const draw = () => { strip.hidden = !items.length; strip.replaceChildren(...items.map((im, i) => h('span', { class: 'pic-wrap' }, h('img', { class: 'pic', src: picUrl(im.id), alt: im.name }), h('button', { type: 'button', class: 'pic-x', 'aria-label': `Remove ${im.name}`, onclick: () => { items.splice(i, 1); draw(); } }, '×')))); };
+  const add = async (files) => {
+    const imgs = [...files].filter((f) => f.type.startsWith('image/'));
+    for (const f of imgs) {
+      if (items.length >= MAX_PICS) { toast(`You can attach up to ${MAX_PICS} pictures.`, true); break; }
+      try { const data = await shrinkImage(f); const r = await api('/api/images', 'POST', { name: f.name || 'screenshot.png', data }); items.push(r); draw(); } catch (e) { toast(e.message, true); }
+    }
+  };
+  const file = h('input', { type: 'file', accept: 'image/png,image/jpeg,image/gif,image/webp', multiple: true, hidden: true, onchange: async (e) => { await add(e.target.files); e.target.value = ''; } });
+  const btn = h('button', { type: 'button', class: 'btn attach', title: 'Attach a picture or screenshot (you can also paste or drop one)', 'aria-label': 'Attach a picture', onclick: () => file.click() }, '📎');
+  const onPaste = (e) => { const fs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/')); if (fs.length) { e.preventDefault(); add(fs); } };
+  const dropOn = (node) => {
+    node.addEventListener('dragover', (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); node.classList.add('dropping'); } });
+    node.addEventListener('dragleave', () => node.classList.remove('dropping'));
+    node.addEventListener('drop', (e) => { node.classList.remove('dropping'); if (e.dataTransfer?.files?.length) { e.preventDefault(); add(e.dataTransfer.files); } });
+  };
+  draw();
+  return { btn, file, strip, onPaste, dropOn, add, items: () => items.map((i) => ({ id: i.id, name: i.name })), clear: () => { items = []; draw(); } };
+}
+
 function bubble(side, who, colour, time, body) {
   const bub = h('div', { class: 'cb-bub', style: side === 'them' ? `--c:${colour}` : '' },
     who ? h('div', { class: 'cb-who', style: `color:${colour}` }, who) : null,
@@ -1453,15 +1498,16 @@ function pageTasks() {
   const edit = (t) => {
     const title = h('input', { type: 'text', value: t.title, 'aria-label': 'Title' }), notes = h('textarea', { rows: '5', 'aria-label': 'Details' }); notes.value = t.notes || '';
     const labels = h('input', { type: 'text', value: t.labels.join(', '), 'aria-label': 'Labels' }), st = h('select', { 'aria-label': 'Status' }, TASK_COLS.map(([k, n]) => h('option', { value: k, selected: t.status === k }, n))), who = agentSel(t.assignee?.id, 'Who does it');
-    const d = dlgOpen('Edit task', h('label', { class: 'f' }, 'Title', title), h('label', { class: 'f' }, 'Details', notes), h('label', { class: 'f' }, 'Labels (comma separated)', labels), h('label', { class: 'f' }, 'Status', st), h('label', { class: 'f' }, 'Who does it', who),
+    const att = attacher(t.images || []); notes.onpaste = att.onPaste;
+    const d = dlgOpen('Edit task', h('label', { class: 'f' }, 'Title', title), h('label', { class: 'f' }, 'Details', notes), h('div', { class: 'f' }, h('span', {}, 'Pictures'), h('div', { class: 'kv' }, att.btn, att.file, h('small', { class: 'hint' }, 'Screenshots help the AI see what you mean.')), att.strip), h('label', { class: 'f' }, 'Labels (comma separated)', labels), h('label', { class: 'f' }, 'Status', st), h('label', { class: 'f' }, 'Who does it', who),
       t.log?.length ? h('details', {}, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null,
       h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
-        h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); d.close(); load(); })(); } }, 'Save')));
+        h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value, images: att.items() }); d.close(); load(); })(); } }, 'Save')));
   };
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), h('a', { href: `#/task/${t.id}`, title: 'Open this task' }, t.title)),
     t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
     t.subtasks?.length ? h('small', { class: 'hint', style: 'display:block' }, (t.waitingFor.length ? `Waiting for ${t.waitingFor.join(', ')}. ` : 'All subtasks closed. '), t.subtasks.map((k) => `${k.code} ${k.assignee} (${k.status === 'done' ? 'closed' : k.status})`).join(' · ')) : null,
-    t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null,
+    t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null, picStrip(t.images),
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, (TASK_COLS.find((c) => c[0] === t.status) || [0, t.status || 'Unknown'])[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
     (() => {
@@ -1476,9 +1522,10 @@ function pageTasks() {
     const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });
     const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'backburner' }, 'Back burner (unfinished idea)'), h('option', { value: 'todo' }, 'To do (ready to start)'));
     const who = agentSel(agents.find((a) => a.ceo)?.id, 'Who does it');
-    const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value }); load(); }) }, 'Add');
+    const att = attacher(); notes.onpaste = att.onPaste; title.onpaste = att.onPaste;
+    const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value, images: att.items() }); load(); }) }, 'Add');
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "Back burner" is an unfinished idea you will fill in later; "To do" is ready, so work on it can start.'))),
-      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, who, add)),
+      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, who, att.btn, add), att.file, att.strip),
       h('div', { class: 'board' }, TASK_COLS.map(([k, name, sub]) => {
         let list = tasks.filter((t) => t.status === k); const more = k === 'done' && !showAllDone && list.length > 12; if (more) list = list.slice(0, 12);
         return h('section', { class: 'col', 'aria-label': name }, h('h3', {}, name, h('span', { class: 'count' }, String(tasks.filter((t) => t.status === k).length))), h('small', { class: 'hint' }, sub), list.length ? list.map(card) : h('p', { class: 'hint empty-col' }, 'Nothing here'), more ? h('button', { class: 'btn', onclick: () => { showAllDone = true; draw(); } }, 'Show all') : null);
@@ -1520,7 +1567,7 @@ async function pageTask(id) {
       h('h1', {}, h('span', { class: 'chip mono', style: 'margin-right:8px' }, t.code || ''), t.title),
       h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, statusLabel), (t.labels || []).map((l) => h('span', { class: 'chip' }, l))),
       h('small', { class: 'hint', style: 'display:block;margin:6px 0 14px' }, [who ? `With ${who.name}` : 'Not assigned', t.projectName ? `Project ${t.projectName}` : '', t.source === 'human' ? '' : `Added by ${t.source}`, ago(t.updatedAt)].filter(Boolean).join(' · ')),
-      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? h('p', { style: 'white-space:pre-wrap' }, t.notes) : h('p', { class: 'hint' }, 'No details yet.'),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? h('p', { style: 'white-space:pre-wrap' }, t.notes) : h('p', { class: 'hint' }, 'No details yet.'), picStrip(t.images),
         t.closure ? h('p', { style: 'color:var(--ok-text);font-weight:600' }, t.closure) : null,
         h('label', { class: 'f', style: 'margin-top:8px' }, 'Status', statusSel)),
       t.subtasks?.length ? h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Subtasks'), h('ul', {}, t.subtasks.map((k) => h('li', {}, h('a', { href: `#/task/${k.id}` }, `${k.code} ${k.title}`), ` · ${k.assignee || 'unassigned'} · ${k.status === 'done' ? 'closed' : k.status}`)))) : null,

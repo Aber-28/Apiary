@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { imageNote } from './images.js';
 // Providers turn "run this prompt for this agent" into either a CLI subprocess (terminal)
 // or a direct API call (web). Each returns { text, sessionId } and streams through callbacks:
 //   onText(chunk)      live reply text for the chat
@@ -109,7 +111,8 @@ export function claudeCliArgs({ access, model, system, dirs = [], sessionId, app
 }
 
 const claudeCli = {
-  async run({ agent, prompt, system, env, dirs = [], signal, approval, connectors, onText, onActivity, onLog }) {
+  async run({ agent, prompt, system, env, dirs = [], signal, approval, connectors, images = [], onText, onActivity, onLog }) {
+    prompt += imageNote(images);
     const useBridge = approval && agent.access !== 'full', has = connectors && Object.keys(connectors).length;
     const cfg = useBridge || has ? writeApprovalConfig(useBridge ? approval : null, connectors || {}) : null;
     const args = claudeCliArgs({ access: agent.access, model: agent.model, system, dirs, sessionId: agent.sessionId, approval: useBridge ? { configFile: cfg.configFile } : undefined, mcpConfig: !useBridge && cfg ? cfg.configFile : undefined });
@@ -154,12 +157,13 @@ function describeTool(b) {
 }
 
 const codexCli = {
-  async run({ agent, prompt, system, env, signal, onText, onActivity, onLog }) {
+  async run({ agent, prompt, system, env, signal, images = [], onText, onActivity, onLog }) {
     const full = agent.access === 'full';
     // Codex has no system-prompt flag, so the instructions ride along on the first turn.
     const input = agent.sessionId ? prompt : `${system}\n\n---\n\n${prompt}`;
     const flags = ['--json', '--skip-git-repo-check', '--sandbox', full ? 'danger-full-access' : 'workspace-write'];
     if (agent.model) flags.push('-m', agent.model);
+    for (const f of images) flags.push('-i', f.path);
     const args = [...codexSecretFlags(env), ...(agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'])];
     let sessionId = agent.sessionId, last = '', err = null, usage = null;
     const { code, stderr } = await runProc('codex', args, {
@@ -202,13 +206,13 @@ async function* sseData(res) {
 }
 
 const claudeApi = {
-  async run({ agent, prompt, system, history = [], conn, signal, onText, onLog }) {
+  async run({ agent, prompt, system, history = [], conn, signal, images = [], onText, onLog }) {
     if (!conn?.apiKey) throw new Error('No Anthropic API key saved. Add one under Connections.');
     const base = process.env.APIARY_ANTHROPIC_URL || 'https://api.anthropic.com';
     const res = await fetch(`${base}/v1/messages`, {
       method: 'POST', signal,
       headers: { 'content-type': 'application/json', 'x-api-key': conn.apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: agent.model || conn.model || 'claude-sonnet-5-5', max_tokens: 8192, stream: true, system, messages: [...history, { role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model: agent.model || conn.model || 'claude-sonnet-5-5', max_tokens: 8192, stream: true, system, messages: [...history, { role: 'user', content: images.length ? [...images.map((f) => ({ type: 'image', source: { type: 'base64', media_type: f.mime, data: readFileSync(f.path).toString('base64') } })), { type: 'text', text: prompt }] : prompt }] }),
     });
     if (!res.ok) throw new Error(`Anthropic API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const log = lineLogger(onLog);
@@ -226,7 +230,7 @@ const claudeApi = {
 };
 
 const codexApi = {
-  async run({ agent, prompt, system, history = [], conn, signal, onText, onLog }) {
+  async run({ agent, prompt, system, history = [], conn, signal, images = [], onText, onLog }) {
     if (!conn?.apiKey) throw new Error('No OpenAI API key saved. Add one under Connections.');
     const model = agent.model || conn.model;
     if (!model) throw new Error('Set a model name for Codex (web) under Connections.');
@@ -234,7 +238,7 @@ const codexApi = {
     const res = await fetch(`${base}/v1/chat/completions`, {
       method: 'POST', signal,
       headers: { 'content-type': 'application/json', authorization: `Bearer ${conn.apiKey}` },
-      body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: prompt }] }),
+      body: JSON.stringify({ model, stream: true, stream_options: { include_usage: true }, messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: images.length ? [{ type: 'text', text: prompt }, ...images.map((f) => ({ type: 'image_url', image_url: { url: `data:${f.mime};base64,${readFileSync(f.path).toString('base64')}` } }))] : prompt }] }),
     });
     if (!res.ok) throw new Error(`OpenAI API ${res.status}: ${(await res.text()).slice(0, 300)}`);
     const log = lineLogger(onLog);
@@ -254,7 +258,8 @@ const codexApi = {
 // ---------- mock: deterministic fake agent for tests and demos ----------
 const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'agent';
 const mock = {
-  async run({ agent, prompt, system, env, signal, onText, onActivity, onLog }) {
+  async run({ agent, prompt, system, env, signal, images = [], onText, onActivity, onLog }) {
+    if (images.length) prompt += `\n[saw ${images.length} picture(s)]`;
     const sleep = (ms) => new Promise((r, j) => {
       const t = setTimeout(r, ms);
       signal?.addEventListener('abort', () => { clearTimeout(t); j(abortErr()); }, { once: true });

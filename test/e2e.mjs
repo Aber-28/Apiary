@@ -1807,15 +1807,27 @@ let orgIds;
   assert.match((await verifyUnifi('10.0.0.1', 443, 'k', stub(404, null))).detail, /9\.0 or newer/);
   assert.equal((await verifyUnifi('10.0.0.1', 443, 'k', async () => { throw new Error('ECONNREFUSED'); })).ok, false);
   const { byId: libraryEntry } = await import('../src/library.js');
-  assert.deepEqual(libraryEntry('unifi').methods.map((m) => m.id), ['token', 'login'], 'API key first, login as the alternative');
+  assert.deepEqual(libraryEntry('unifi').methods.map((m) => m.id), ['token'], 'UniFi uses the official API key only');
+  for (const id of ['proxmox', 'homeassistant', 'n8n', 'coolify', 'portainer', 'grafana', 'gitea', 'truenas', 'kubernetes', 'opnsense', 'uptimekuma', 'pihole']) assert.equal(libraryEntry(id).methods[0].id, 'token', `${id} leads with its official API key`);
+  { const { verifyApi } = await import('../src/cloud.js'); const seen2 = []; const ok = (j) => async (sch, h, p, path, hd, m) => { seen2.push({ sch, p, path, hd, m }); return { status: 200, json: j }; };
+    assert.match((await verifyApi('proxmox', { host: 'pve', port: 8006 }, 'root@pam!t=abc', ok({ data: { version: '8.2' } }))).detail, /Proxmox accepted the key \(Proxmox 8\.2\)/);
+    assert.equal(seen2[0].hd.authorization, 'PVEAPIToken=root@pam!t=abc'); assert.equal(seen2[0].path, '/api2/json/version');
+    assert.equal((await verifyApi('homeassistant', { host: 'ha', port: 8123, scheme: 'http' }, 'tok', ok({ message: 'API running.' }))).ok, true); assert.equal(seen2[1].sch, 'http'); assert.equal(seen2[1].hd.authorization, 'Bearer tok');
+    assert.equal(seen2[1].path, '/api/');
+    await verifyApi('n8n', { host: 'n', port: 5678, scheme: 'http' }, 'k', ok({})); assert.equal(seen2[2].hd['x-n8n-api-key'], 'k');
+    await verifyApi('opnsense', { host: 'fw', port: 443 }, 'key:sec', ok({})); assert.equal(seen2[3].hd.authorization, 'Basic ' + Buffer.from('key:sec').toString('base64'));
+    await verifyApi('pihole', { host: 'p', port: 80, scheme: 'http' }, 'pw', ok({ session: { valid: true } })); assert.equal(seen2[4].m, 'POST');
+    assert.equal((await verifyApi('pihole', { host: 'p', port: 80, scheme: 'http' }, 'pw', ok({ session: { valid: false } }))).ok, false, 'a wrong app password is caught');
+    assert.match((await verifyApi('gitea', { host: 'g', port: 3000, scheme: 'http' }, 'bad', async () => ({ status: 401, json: {} }))).detail, /refused the key/);
+    assert.equal(await verifyApi('website', { host: 'x' }, 'k'), null); }
   const port = new URL(base).port;
   const u = await call('/api/library/unifi/add', 'POST', { name: 'Lab UniFi', method: 'token', address: '127.0.0.1', port, secret: 'unifi-key-abc-123' });
   assert.equal(u.status, 201); assert.equal(engine.vault.list().find((x) => x.name === u.body.secret).type, 'token');
-  engine.unifiGet = async (h, p, path, hd) => ({ status: hd['x-api-key'] === 'unifi-key-abc-123' ? 200 : 401, json: { applicationVersion: '9.0.1' } });
-  const ut = (await call(`/api/infra/${u.body.id}/test`, 'POST', {})).body; assert.ok(ut.status.ok && /accepted the API key/.test(ut.status.detail), ut.status.detail);
+  engine.apiGet = async (sch, h, p, path, hd) => ({ status: hd['x-api-key'] === 'unifi-key-abc-123' ? 200 : 401, json: { applicationVersion: '9.0.1' } });
+  const ut = (await call(`/api/infra/${u.body.id}/test`, 'POST', {})).body; assert.ok(ut.status.ok && /accepted the key/.test(ut.status.detail), ut.status.detail);
   assert.ok(!JSON.stringify(ut).includes('unifi-key-abc-123'), 'the key never appears in the answer');
   assert.match(engine.infra.summary(), /integration\/v1 with the header X-API-KEY/); assert.ok(!engine.infra.summary().includes('unifi-key-abc-123'));
-  delete engine.unifiGet;
+  delete engine.apiGet;
 }
       } finally { globalThis.fetch = realFetch; }
     }
@@ -2768,8 +2780,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.ok(Array.isArray(d.finished) && d.recent.every((r) => r.code && r.title), 'recent work lists tasks');
   assert.equal(typeof d.agents.working, 'number');
   const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
-  assert.match(a, /async function pageHome/); assert.match(a, /\|\| '#\/home'/, 'the dashboard is the home page'); assert.match(a, /\['#\/home', 'Dashboard'\]/);
+  assert.match(a, /async function pageHome/); assert.match(a, /\|\| '#\/home'/, 'the dashboard is the home page'); assert.match(a, /nav-top/); assert.doesNotMatch(a, /items: \[\['#\/home', 'Dashboard'\]/, 'Dashboard sits at the very top, outside Workspace'); assert.match(a, /async function pageLibrary/); assert.match(a, /\['#\/library', 'Library'\]/); assert.doesNotMatch(a, /openLibrary\(draw\)/, 'no Library button on the Devices page');
   assert.doesNotMatch(JSON.stringify(d), /sk-|password|secret/i, 'no secrets on the dashboard');
 }
+{ const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  if (!/function rich\(/.test(appjs) || !/rich\(t\.notes\)/.test(appjs) || !/rich\(c\.text\)/.test(appjs)) throw new Error('details should be formatted with rich()'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

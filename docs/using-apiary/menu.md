@@ -15,3 +15,4 @@ The page you are on is always opened for you, and the path above the page (for e
 
 Apiary works in a phone browser. Tap the menu button (top left) to open the menu; tap outside it to close it. The search is the magnifier at the top. In a project, tap **Details** to show the stage, owner and action buttons. Wide things such as tables, the task columns and the map swipe sideways. To open Apiary from your phone, see [Using it beyond your own computer](../reference/security.md) (use a VPN or SSH tunnel, not the open internet).
 
+**Dashboard** is the first item, above the groups. **Library** sits under Infrastructure.

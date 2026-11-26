@@ -8,6 +8,7 @@ let page = null; // { update?() } for the current route
 let ACTIVE_ATTACH = null; // the picture attacher of the page on screen: a paste anywhere on the page goes to it
 
 const ICON = {
+  home: 'M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z',
   shield: 'M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z M9 12l2 2 4-4',
   infra: 'M2 4h20v6H2z M2 14h20v6H2z M6 7h.01 M6 17h.01',
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
@@ -134,12 +135,12 @@ applyTheme(window.apiaryTheme.get());
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 // A menu entry is [href, label] or { id, label, items: [...] } (a folder; folders can hold folders).
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/home', 'Dashboard'], ['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
     { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
-    { id: 'library', label: 'Library', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
+    { id: 'library', label: 'Templates', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
     { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories']] }] },
-  { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
+  { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/library', 'Library'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
   { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], { id: 'ai', label: 'AI tools', items: [['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex']] }, ['#/connections/github', 'GitHub']] },
   { id: 'security', label: 'Security', icon: ICON.shield || ICON.sliders, items: [['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/policy', 'Approval rules'], ['#/access', 'Access and safety'], ['#/audit', 'Audit log']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/telegram', 'Telegram alerts'],
@@ -182,7 +183,7 @@ function renderSide() {
   });
   side.replaceChildren(
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
-    newBtn, S.onboardingDone && S.account && !S.account.exists ? h('a', { href: '#/signin', class: 'signin-nag', role: 'alert' }, 'No sign-in yet. Anyone who can reach this page can use it. Create one now') : null, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
+    newBtn, S.onboardingDone && S.account && !S.account.exists ? h('a', { href: '#/signin', class: 'signin-nag', role: 'alert' }, 'No sign-in yet. Anyone who can reach this page can use it. Create one now') : null, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, h('a', { class: 'nav-item nav-top', href: '#/home', 'aria-current': isActive('#/home') ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, svg(ICON.home), h('span', { style: 'flex:1' }, 'Dashboard')), groups),
     h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
     workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')),
     h('div', { class: 'side-foot' }, h('a', { class: 'coffee', href: 'https://www.buymeacoffee.com/aber28', target: '_blank', rel: 'noopener noreferrer', title: 'Apiary is free. If it saves you time, a coffee helps keep it going.' }, h('span', { 'aria-hidden': 'true' }, '☕'), ' Buy me a coffee')));
@@ -204,6 +205,7 @@ function crumbs(...parts) {
 const ROUTES = [
   [/^#\/(home)?$/, () => pageHome()],
   [/^#\/chat$/, () => pageChat()],
+  [/^#\/library$/, () => pageLibrary()],
   [/^#\/task\/([\w-]+)$/, (m) => pageTask(m[1])],
   [/^#\/organisation$/, () => { S.nextTab = 'org'; pageChat(); }],
   [/^#\/meetings$/, () => pageMeetings()],
@@ -350,7 +352,7 @@ function approvalCard(ap) {
   const label = { approved: ['ok', 'Approved'], denied: ['err', 'Denied'], cancelled: ['', 'Cancelled'], expired: ['', 'Expired'], pending: ['work', 'Waiting for you'] }[ap.status];
   return h('section', { class: 'approval' + (isPending ? ' pending' : ''), 'aria-label': ap.title },
     h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start' }, h('b', {}, ap.num ? h('span', { class: 'mono', style: 'font-weight:600;opacity:.7;margin-right:8px' }, `AP-${String(ap.num).padStart(4, '0')}`) : null, ap.title), h('span', { class: 'pill ' + label[0] }, label[1])),
-    ap.detail ? h('p', { class: 'hint', style: 'margin:4px 0 8px' }, ap.detail) : null,
+    ap.detail ? rich(ap.detail, 'hint') : null,
     ap.kind === 'plan' ? (isPending ? h('div', {}, planBox, h('p', { class: 'hint' }, 'Edit anything you like, then approve. Every step becomes a task with its own ID, given to the person you choose.')) : h('ol', { class: 'plan-list' }, (ap.phases || []).map((p) => h('li', {}, h('b', {}, p.title), p.goal ? ` — ${p.goal}` : '', p.steps?.length ? h('ul', {}, p.steps.map((t, i) => h('li', {}, t, (p.owners || [])[i] ? ` (${p.owners[i]})` : ''))) : null)))) :
     ap.kind === 'hire' ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', { style: 'flex:1' }, isPending ? nameIn[i] : h('b', {}, it.name), ` · ${it.title ? it.title + ' · ' : ''}${it.departmentLabel}${it.role ? ' · ' + it.role : ''}`, h('span', { class: 'task' }, `Why: ${it.reason || 'not given'}`), it.modelWhy ? h('span', { class: 'task' }, `Model: ${it.modelWhy}`) : null, isPending && modelIn[i] ? modelIn[i] : null, h('small', { class: 'hint', style: 'display:block' }, `Reports to ${it.reportsTo} · ${PNAME[it.provider] || it.provider}`), h('details', {}, h('summary', {}, 'Profile and guardrails (written for you)'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, it.instructions)))))) :
     ap.items ? h('div', { class: 'items' }, ap.items.map((it, i) => h('label', { class: 'item' }, isPending ? checks[i] : null, h('span', {}, h('b', {}, it.name), ` · ${PNAME[it.provider] || it.provider}`, it.role ? ` · ${it.role}` : '', h('span', { class: 'task' }, it.task))))) : null,
@@ -1361,6 +1363,58 @@ function linkify(text) {
   out.push(...inlineCode(str.slice(last).replace(/^\n/, '')));
   return out;
 }
+
+// Long plain text (task details, approval details, reports) shown properly: paragraphs, lists, code, bold labels.
+// Works on text people or agents wrote without any markup: "Steps: (1) do this (2) do that" becomes a numbered list.
+function richInline(str) {
+  const out = []; let last = 0;
+  const re = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|(?<![\w/])((?:~\/|\/)[\w.@+\-]+(?:\/[\w.@+\-]*)+|\/(?:srv|etc|var|usr|opt|mnt|tmp|home|root)\b)(?![\w])|\b((?:\d{1,3}\.){3}\d{1,3})\b|(?:^|(?<=[.!?]\s))([A-Z][A-Za-z ]{2,26}):(?=\s)/g;
+  for (const m of str.matchAll(re)) {
+    out.push(...chipsIn(str.slice(last, m.index)));
+    if (m[1] !== undefined) out.push(h('code', { class: 'ic' }, m[1]));
+    else if (m[2] !== undefined) out.push(h('b', {}, m[2]));
+    else if (m[3] !== undefined || m[4] !== undefined) out.push(h('code', { class: 'ic' }, (m[3] ?? m[4]).replace(/[.,;:]+$/, '')), (m[3] ?? m[4]).match(/[.,;:]+$/)?.[0] || '');
+    else out.push(h('b', {}, m[5] + ':'));
+    last = m.index + m[0].length;
+  }
+  out.push(...chipsIn(str.slice(last)));
+  return out;
+}
+function rich(text, cls = '') {
+  const src = String(text ?? '').replace(/\r\n/g, '\n').trim();
+  if (!src) return null;
+  const root = h('div', { class: ('rich ' + cls).trim() });
+  const para = (t) => { t = t.trim(); if (t) root.append(h('p', {}, ...richInline(t))); };
+  const list = (tag, items) => root.append(h(tag, {}, items.map((x) => h('li', {}, ...richInline(x.trim())))));
+  const blockOf = (blk) => {
+    const lines = blk.split('\n').filter((l) => l.trim());
+    let i = 0;
+    while (i < lines.length) {
+      const ln = lines[i];
+      if (/^\s*[-*•]\s+/.test(ln)) { const it = []; while (i < lines.length && /^\s*[-*•]\s+/.test(lines[i])) it.push(lines[i++].replace(/^\s*[-*•]\s+/, '')); list('ul', it); continue; }
+      if (/^\s*\d+[.)]\s+/.test(ln)) { const it = []; while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) it.push(lines[i++].replace(/^\s*\d+[.)]\s+/, '')); list('ol', it); continue; }
+      if (/^#{1,4}\s+/.test(ln)) { root.append(h('h4', {}, ...richInline(ln.replace(/^#{1,4}\s+/, '')))); i++; continue; }
+      const buf = []; while (i < lines.length && !/^\s*([-*•]|\d+[.)]|#{1,4})\s+/.test(lines[i])) buf.push(lines[i++]);
+      const t = buf.join(' ');
+      const marks = [...t.matchAll(/\((\d{1,2})\)\s+/g)];
+      if (marks.length >= 2 && marks[0][1] === '1') {
+        const pre = t.slice(0, marks[0].index).trim(), m = pre.match(/^(.*?[.!?])\s+([A-Z][\w ]{0,30}:)$/);
+        if (m) { para(m[1]); para(m[2]); } else para(pre);
+        const items = marks.map((mk, k) => t.slice(mk.index + mk[0].length, k + 1 < marks.length ? marks[k + 1].index : undefined).trim().replace(/[;,]$/, ''));
+        const tail = items[items.length - 1].match(/^(.*?[.!?])\s+((?:[A-Z][\w ]{0,30}:\s).*)$/);
+        if (tail) { items[items.length - 1] = tail[1]; list('ol', items); para(tail[2]); } else list('ol', items);
+      } else para(t);
+    }
+  };
+  let last = 0;
+  for (const m of src.matchAll(/```[ \t]*([\w+#.-]*)[ \t]*\n([\s\S]*?)(?:\n?```|$)/g)) {
+    for (const blk of src.slice(last, m.index).split(/\n{2,}/)) blockOf(blk);
+    root.append(codeBlock(m[2], m[1])); last = m.index + m[0].length;
+  }
+  for (const blk of src.slice(last).split(/\n{2,}/)) blockOf(blk);
+  return root;
+}
+
 function inlineCode(str) {
   const out = []; let last = 0;
   for (const m of str.matchAll(/`([^`\n]+)`/g)) { out.push(...chipsIn(str.slice(last, m.index))); out.push(h('code', { class: 'ic' }, m[1])); last = m.index + m[0].length; }
@@ -1524,7 +1578,7 @@ const TASK_COLS = [['backburner', 'Back burner', 'Unfinished ideas. Add detail l
 
 // ---------- dashboard (the home page) ----------
 async function pageHome() {
-  crumbs('Workspace', 'Dashboard');
+  crumbs('Dashboard');
   let D = null, range = Number(S.dashRange) || 14;
   const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
   const dayStart = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -1598,7 +1652,7 @@ function pageTasks() {
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), h('a', { href: `#/task/${t.id}`, title: 'Open this task' }, t.title)),
     t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
     t.subtasks?.length ? h('small', { class: 'hint', style: 'display:block' }, (t.waitingFor.length ? `Waiting for ${t.waitingFor.join(', ')}. ` : 'All subtasks closed. '), t.subtasks.map((k) => `${k.code} ${k.assignee} (${k.status === 'done' ? 'closed' : k.status})`).join(' · ')) : null,
-    t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? h('p', { class: 'hint tnote' }, t.notes) : null, picStrip(t.images),
+    t.closure ? h('small', { style: 'display:block;color:var(--ok-text);font-weight:600' }, t.closure) : null, t.notes ? rich(t.notes, 'hint tnote') : null, picStrip(t.images),
     h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, (TASK_COLS.find((c) => c[0] === t.status) || [0, t.status || 'Unknown'])[1]), t.labels.map((l) => h('span', { class: 'chip' }, l))),
     h('small', { class: 'hint' }, [t.source === 'human' ? '' : t.source === 'system' ? 'Added by Apiary' : t.source === 'ticket' ? 'From a ticket' : `Added by ${t.source}`, t.projectName ? `Project ${t.projectName}` : '', ago(t.updatedAt)].filter(Boolean).join(' · ')),
     (() => {
@@ -1658,7 +1712,7 @@ async function pageTask(id) {
       h('h1', {}, h('span', { class: 'chip mono', style: 'margin-right:8px' }, t.code || ''), t.title),
       h('div', { class: 'chips' }, h('span', { class: `chip s-${t.status}` }, statusLabel), (t.labels || []).map((l) => h('span', { class: 'chip' }, l))),
       h('small', { class: 'hint', style: 'display:block;margin:6px 0 14px' }, [who ? `With ${who.name}` : 'Not assigned', t.projectName ? `Project ${t.projectName}` : '', t.source === 'human' ? '' : `Added by ${t.source}`, ago(t.updatedAt)].filter(Boolean).join(' · ')),
-      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? h('p', { style: 'white-space:pre-wrap' }, t.notes) : h('p', { class: 'hint' }, 'No details yet.'), picStrip(t.images),
+      h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Details'), t.notes ? rich(t.notes) : h('p', { class: 'hint' }, 'No details yet.'), picStrip(t.images),
         t.closure ? h('p', { style: 'color:var(--ok-text);font-weight:600' }, t.closure) : null,
         h('label', { class: 'f', style: 'margin-top:8px' }, 'Status', statusSel)),
       t.subtasks?.length ? h('div', { class: 'card', style: 'max-width:760px;margin-bottom:12px' }, h('h2', { style: 'margin-top:0' }, 'Subtasks'), h('ul', {}, t.subtasks.map((k) => h('li', {}, h('a', { href: `#/task/${k.id}` }, `${k.code} ${k.title}`), ` · ${k.assignee || 'unassigned'} · ${k.status === 'done' ? 'closed' : k.status}`)))) : null,
@@ -1666,7 +1720,7 @@ async function pageTask(id) {
     const msgs = who ? ((await api(`/api/agents/${who.id}/messages`).catch(() => [])) || []) : [];
     const latest = msgs.filter((m) => m.role !== 'system' || !/^Stopped|^Created sub-agent/.test(m.text || '')).slice(-14);
     const shown = order.newest ? latest.slice().reverse() : latest;
-    convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:8px 0;white-space:pre-wrap' }, h('small', { class: 'hint', style: 'display:block' }, m.ts ? new Date(m.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''), h('b', {}, m.role === 'user' ? 'You: ' : `${who?.name || 'Agent'}: `), (m.text || '').slice(0, 600)))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
+    convo.replaceChildren(shown.length ? h('ol', { class: 'hint', style: 'list-style:none;padding:0;margin:0' }, shown.map((m) => h('li', { style: 'margin:8px 0' }, h('small', { class: 'hint', style: 'display:block' }, m.ts ? new Date(m.ts).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : ''), h('b', {}, m.role === 'user' ? 'You' : (who?.name || 'Agent')), rich((m.text || '').slice(0, 4000))))) : h('p', { class: 'hint' }, who ? 'No conversation with this agent yet.' : 'Assign someone to this task to see their conversation here.'));
   };
   await load();
   page = { shows: () => true, update: debounce((ev) => { if (['message', 'agent', 'activity'].includes(ev.type)) load().catch(() => {}); }) };
@@ -1684,7 +1738,7 @@ function pageRepos() {
       const save = guard(async (p) => { await api('/api/repos/' + r.id, 'PUT', p); });
       return h('div', { class: 'card', style: 'margin-bottom:12px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, h('div', {}, h('b', {}, r.name), h('small', { class: 'hint mono', style: 'display:block' }, `${r.kind === 'local' ? 'Folder' : 'Copy'}: ${r.path}${r.branch ? ' · ' + r.branch : ''}`)),
         h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/repos/${r.id}/sync`, 'POST', {}); toast('Up to date'); draw(); }) }, r.kind === 'clone' ? 'Update from GitHub' : 'Refresh'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${r.name}"? ${r.kind === 'local' ? 'Your folder is not touched.' : 'The downloaded copy is deleted.'}`)) return; await api('/api/repos/' + r.id, 'DELETE'); draw(); }) }, 'Remove'))),
-        r.notes ? h('p', { style: 'margin:6px 0' }, r.notes) : null, r.overview ? h('details', {}, h('summary', {}, 'What is in it'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, r.overview)) : null,
+        r.notes ? rich(r.notes) : null, r.overview ? h('details', {}, h('summary', {}, 'What is in it'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, r.overview)) : null,
         h('fieldset', { class: 'who' }, h('legend', {}, 'Who may read from it'),
           h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: r.everyone, onchange: async (e) => { await save({ everyone: e.target.checked }); draw(); } }), ' Everyone'),
           r.everyone ? null : who.map((a) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: r.agents.includes(a.id), onchange: async (e) => { const next = new Set(r.agents); e.target.checked ? next.add(a.id) : next.delete(a.id); r.agents = [...next]; await save({ agents: r.agents }); } }), ` ${a.label}`))),
@@ -1713,8 +1767,8 @@ function pageTickets() {
       const [tone, label] = TICKET_LABEL[t.status], isOpen = openId === t.id;
       const reply = h('textarea', { rows: '2', placeholder: t.status === 'resolved' ? 'Still broken? Tell the agent what you see.' : 'Reply to the agent', 'aria-label': 'Your reply' });
       return h('div', { class: 'card', style: 'margin-bottom:10px' }, h('button', { class: 'tk-head', 'aria-expanded': String(isOpen), onclick: () => { openId = isOpen ? null : t.id; draw(); } }, h('b', {}, h('span', { class: 'mono', style: 'font-weight:600;opacity:.7;margin-right:8px' }, `TK-${String(t.num).padStart(4, '0')}`), t.title), h('span', { class: 'pill ' + tone }, label), t.priority === 'high' ? h('span', { class: 'pill err' }, 'Urgent') : null, h('small', { class: 'hint', style: 'margin-left:auto' }, ago(t.updatedAt))),
-        isOpen ? h('div', { style: 'margin-top:10px' }, t.description ? h('p', { class: 'tk-msg you' }, h('small', {}, 'You wrote'), t.description) : null,
-          t.comments.map((c) => h('p', { class: 'tk-msg ' + (c.kind === 'human' ? 'you' : c.kind === 'error' ? 'bad' : '') }, h('small', {}, `${c.who} · ${ago(c.at)}${c.kind === 'resolution' ? ' · fixed' : c.kind === 'question' ? ' · needs you' : ''}`), c.text)),
+        isOpen ? h('div', { style: 'margin-top:10px' }, t.description ? h('div', { class: 'tk-msg you' }, h('small', {}, 'You wrote'), rich(t.description)) : null,
+          t.comments.map((c) => h('div', { class: 'tk-msg ' + (c.kind === 'human' ? 'you' : c.kind === 'error' ? 'bad' : '') }, h('small', {}, `${c.who} · ${ago(c.at)}${c.kind === 'resolution' ? ' · fixed' : c.kind === 'question' ? ' · needs you' : ''}`), rich(c.text))),
           t.status === 'working' ? h('p', { class: 'hint', role: 'status' }, 'An agent is working on this…') : null,
           t.status !== 'closed' ? h('div', {}, reply, h('div', { class: 'kv', style: 'margin-top:8px' }, h('button', { class: 'btn primary', onclick: guard(async () => { await api(`/api/tickets/${t.id}/comment`, 'POST', { text: reply.value }); load(); }) }, 'Send reply'), t.status !== 'working' ? h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/tickets/${t.id}/status`, 'POST', { status: 'closed' }); load(); }) }, 'Close ticket') : null, h('button', { class: 'btn danger', onclick: guard(async () => { if (confirm('Delete this ticket?')) { await api('/api/tickets/' + t.id, 'DELETE'); load(); } }) }, 'Delete')))
             : h('div', { class: 'kv' }, h('button', { class: 'btn', onclick: guard(async () => { await api(`/api/tickets/${t.id}/status`, 'POST', { status: 'open' }); load(); }) }, 'Reopen'), h('button', { class: 'btn danger', onclick: guard(async () => { if (confirm('Delete this ticket?')) { await api('/api/tickets/' + t.id, 'DELETE'); load(); } }) }, 'Delete'))) : null);
@@ -2004,7 +2058,7 @@ async function pageAudit() {
     list.replaceChildren(d.items.length ? h('table', { class: 'tbl', style: 'width:100%' }, h('thead', {}, h('tr', {}, ['When', 'Who', 'What', 'Details'].map((t) => h('th', {}, t)))),
       h('tbody', {}, d.items.map((e) => h('tr', {}, h('td', { style: 'white-space:nowrap', title: new Date(e.t).toLocaleString() }, new Date(e.t).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })),
         h('td', {}, e.actor, e.project ? h('div', { class: 'hint' }, e.project) : null), h('td', {}, h('span', { class: 'pill' }, AUDIT_KINDS[e.kind] || e.kind)),
-        h('td', { style: 'word-break:break-word' }, h('code', {}, e.action), e.detail ? h('div', { class: 'hint' }, e.detail) : null))))) : h('div', { class: 'empty' }, 'Nothing matches.'),
+        h('td', { style: 'word-break:break-word' }, h('code', {}, e.action), e.detail ? rich(e.detail, 'hint') : null))))) : h('div', { class: 'empty' }, 'Nothing matches.'),
       d.total > d.items.length ? h('div', { style: 'padding:10px' }, h('button', { class: 'btn', onclick: () => { limit += 200; load(); } }, 'Show more')) : null);
   };
   const go = debounce(load, 250);
@@ -2062,12 +2116,19 @@ function libIcon(id, px = 28, label = '') {
   img.addEventListener('error', () => img.replaceWith(letter()));
   return img;
 }
-async function openLibrary(done) {
+async function pageLibrary() {
+  crumbs('Library');
   const lib = await api('/api/library');
-  const dlg = h('dialog', { class: 'libdlg' }, h('h2', {}, 'Library'), h('p', { class: 'hint' }, 'Pick what you want to connect. Apiary asks only for what it needs and puts the login in the Secrets vault.'),
-    h('div', { class: 'libgrid' }, lib.entries.map((e) => h('button', { class: 'libcard', type: 'button', onclick: () => { dlg.close(); openLibraryForm(e, lib.vault, done); } }, e.hasIcon ? libIcon(e.id, 36, e.name) : h('span', { class: 'libicon fb', style: 'width:36px;height:36px;font-size:18px', 'aria-hidden': 'true' }, e.name[0]), h('b', {}, e.name), h('small', {}, e.blurb)))),
-    h('div', { class: 'dlg-actions' }, h('button', { class: 'btn', onclick: () => dlg.close() }, 'Close')));
-  document.body.append(dlg); dlg.addEventListener('close', () => dlg.remove()); dlg.showModal();
+  const q = h('input', { type: 'search', placeholder: 'Search, for example Proxmox or Home Assistant', 'aria-label': 'Search the Library', style: 'max-width:380px' });
+  const grid = h('div', { class: 'libgrid' });
+  const draw = () => {
+    const t = q.value.trim().toLowerCase();
+    const list = lib.entries.filter((e) => !t || `${e.name} ${e.blurb}`.toLowerCase().includes(t));
+    grid.replaceChildren(...(list.length ? list.map((e) => h('button', { class: 'libcard', type: 'button', onclick: () => openLibraryForm(e, lib.vault, () => { location.hash = '#/infrastructure'; }) }, e.hasIcon ? libIcon(e.id, 36, e.name) : h('span', { class: 'libicon fb', style: 'width:36px;height:36px;font-size:18px', 'aria-hidden': 'true' }, e.name[0].toUpperCase()), h('span', { class: 'libname' }, e.name), h('small', {}, e.blurb), h('small', { class: 'libway' }, e.methods[0].secret === 'token' ? 'Official API key' : e.methods[0].secret === 'ssh' ? 'SSH login' : e.methods[0].secret === 'login' ? 'Admin login' : 'No login needed')))
+      : [h('p', { class: 'hint' }, 'Nothing matches that.')]));
+  };
+  q.addEventListener('input', draw); draw();
+  view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Library'), h('p', { class: 'sub-title' }, 'Pick what you want to connect. Apiary uses the official API key or token wherever one exists and puts it in the Secrets vault. SSH is only used where there is nothing else.'))), h('div', { style: 'margin-bottom:14px' }, q), grid);
 }
 function openLibraryForm(e, vault, done) {
   let m = e.methods[0];
@@ -2178,7 +2239,7 @@ async function pageInfra(tab) {
       location.hash = '#/chat';
     });
     const head = h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, tab === 'map' ? 'Infrastructure map' : 'Devices and connections'), h('p', { class: 'sub-title' }, 'Everything Apiary can reach or manage: servers, VMs, websites and how they connect. Passwords stay in the Secrets vault; only the name of the login is kept here.')),
-      h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn', onclick: guard(() => openLibrary(draw)) }, 'Library'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
+      h('div', { class: 'formrow' }, h('button', { class: 'btn', onclick: askCeo }, 'Help me map it'), h('button', { class: 'btn primary', onclick: () => edit(null) }, 'Add new')));
     const tabs = h('div', { class: 'tabs', role: 'tablist' }, [['devices', 'Devices', '#/infrastructure'], ['map', 'Map', '#/infrastructure/map']].map(([k, t, href]) => h('a', { role: 'tab', 'aria-selected': String(tab === k), class: 'btn', style: 'text-decoration:none', href }, t)));
     const proposed = items.filter((i) => i.state === 'proposed'), real = items.filter((i) => i.state !== 'proposed');
     const fromDisc = proposed.filter((i) => i.by === 'Discovery');
@@ -2207,7 +2268,8 @@ async function pageInfra(tab) {
         h('b', {}, tr.healthy ? 'All good' : 'Troubleshooting'),
         working && !rep ? h('p', { class: 'hint' }, 'Looking at it…') : null,
         rep?.basic?.summary ? h('p', { style: 'margin:6px 0' }, rep.basic.summary) : null,
-        rep?.ai ? h('p', { style: 'white-space:pre-wrap;margin:6px 0' }, rep.ai) : null,
+        rep?.by ? h('p', { class: 'hint', style: 'margin:6px 0' }, working && !rep.ai ? `${rep.by} is investigating. ${rep.byWhy || ''}` : `Investigated by ${rep.by}. ${rep.byWhy || ''}`) : null,
+        rep?.ai ? rich(rep.ai) : null,
         rep?.basic?.checks?.length && !rep.ai ? h('ol', {}, ...rep.basic.checks.map((c) => h('li', {}, c))) : null,
         rep?.aiNote ? h('p', { class: 'hint' }, rep.aiNote) : null,
         working && rep && rep.ai ? h('p', { class: 'hint' }, 'If a repair is possible, it is waiting for your yes on the Approvals page. You are asked once for this problem.') : null,
@@ -2218,7 +2280,7 @@ async function pageInfra(tab) {
         tr.approved ? h('p', { class: 'hint' }, 'You approved repairs for this problem. This ends once it has been back up for 15 minutes.') : null) : null;
       return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', { class: 'kv', style: 'gap:8px' }, iconIdOf(i) ? libIcon(iconIdOf(i), 26, i.name) : null, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
         h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
-        i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? h('p', { style: 'white-space:pre-wrap;margin:4px 0' }, i.notes) : null,
+        i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? rich(i.notes) : null,
         panel, h('div', { class: 'formrow', style: 'margin-top:6px' }, fixBtn, test, discover, h('button', { class: 'btn', onclick: () => edit(i) }, 'Update'), h('button', { class: 'btn danger', onclick: guard(async () => { if (!confirm(`Remove "${i.name}" from the map? Nothing on the real machine changes.`)) return; await api(`/api/infra/${i.id}`, 'DELETE'); draw(); }) }, 'Remove')));
     });
     view.replaceChildren(head, tabs, ...allBar, ...cards, rows.length ? rows : (cards.length ? [] : h('div', { class: 'card empty' }, 'Nothing here yet. Add your Proxmox host, Raspberry Pi, VMs or websites, or press Help me map it and the CEO will ask you a few questions.')));

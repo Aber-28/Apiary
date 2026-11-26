@@ -4,7 +4,7 @@ The Library is a set of ready-made connectors. Pick what you want to connect, su
 
 ## How to use it
 
-1. Open **Infrastructure → Devices** and press **Library**.
+1. Open **Infrastructure → Library** in the left menu.
 2. Click a card, for example **Proxmox VE**.
 3. Fill in the address, and the username and password, key or token. Where there is more than one way in, choose **Connect with**. The card says which is best.
 4. Press **Add and test**.

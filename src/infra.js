@@ -1,3 +1,4 @@
+import { apiInfo } from './cloud.js';
 // The map of the person's infrastructure: devices, servers, VMs, websites and the links between them.
 // Things are added by hand, or proposed by an agent as "is this right?" cards that the person confirms.
 // No passwords live here: an item only names the vault secret that gives access to it.
@@ -40,7 +41,7 @@ export class Infra {
     }
     if (b.port !== undefined) { const p = b.port === '' || b.port === null ? 0 : Number(b.port); if (!Number.isInteger(p) || p < 0 || p > 65535) throw err(400, 'The port must be a number from 1 to 65535'); o.port = p; }
     if (b.url !== undefined) { o.url = clean(b.url, 500); if (o.url && !/^https?:\/\/[^\s]+$/i.test(o.url)) throw err(400, 'The web address must start with http:// or https://'); }
-    for (const [k, n] of [['notes', 1000], ['secret', 80], ['location', 200], ['os', 80]]) if (b[k] !== undefined) o[k] = clean(b[k], n);
+    for (const [k, n] of [['notes', 1000], ['via', 10], ['secret', 80], ['location', 200], ['os', 80]]) if (b[k] !== undefined) o[k] = clean(b[k], n);
     if (b.parentId !== undefined) {
       const pid = b.parentId || '';
       if (pid && !this.get(pid)) throw err(400, 'The place it runs on does not exist');
@@ -131,7 +132,7 @@ export class Infra {
   summary() {
     if (!this.items.length) return '';
     const nm = (id) => this.get(id)?.name;
-    const unifi = (i) => (i.lib === 'unifi' && i.secret && i.address ? ` [Official UniFi Network API, read it first and change nothing without asking: https://${i.address}${i.port && i.port !== 443 ? ':' + i.port : ''}/proxy/network/integration/v1 with the header X-API-KEY set to the key in its login "${i.secret}" (ask to use it); start with GET /v1/sites; the console certificate is usually self-signed]` : '');
+    const unifi = (i) => { const a = apiInfo(i.lib); if (!a || i.via !== 'token' || !i.secret || !i.address) return ''; const sch = (i.url || '').startsWith('http://') ? 'http' : 'https'; return ` [Official ${a.name} API, read it first and change nothing without asking: ${sch}://${i.address}${i.port ? ':' + i.port : ''}${a.base} with ${a.how}; the key is in its login "${i.secret}" (ask to use it); the certificate is often self-signed]`; };
     const mcp = (i) => { const e = i.lib && libraryEntry(i.lib); return e?.mcp && i.secret ? ` [MCP connector "${e.mcp.name}": ask to use its login "${i.secret}" and its tools appear on your next turn]` : ''; };
     return this.items.filter((i) => i.state !== 'proposed').map((i) => `- ${i.name} (${TYPES[i.type] || i.type})${i.address ? ' ' + i.address : ''}${mcp(i)}${unifi(i)}${i.parentId ? ` runs on ${nm(i.parentId)}` : ''}${(i.links || []).length ? ` connects to ${i.links.map((l) => nm(l.to)).join(', ')}` : ''}${i.secret ? ` [vault: ${i.secret}]` : ''}`).join('\n');
   }

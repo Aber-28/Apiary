@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.55.0
+
+- Library is now its own page under Infrastructure, no longer a button above Devices.
+- Library items lead with the official API token or key wherever the product has one; login only where no key exists.
+- Troubleshoot hands the problem to the agent that knows the device (proposer, then infrastructure specialist, then CEO) instead of only running tests.
+- Dashboard moved to the very top of the menu, outside Workspace.
+- Details everywhere (task details, task cards, conversations, approvals, audit, notes, reports) are now formatted: paragraphs, numbered steps, bullet lists, code for paths and addresses.
+
 ## 0.54.1
 
 - UniFi connector using the official UniFi Network API: paste an API key (Settings, Control Plane, Integrations in UniFi Network), Apiary checks it against your console, and agents are told how to use the official API with it, read-only first. The username and password method is still available. (Ubiquiti has no official MCP server, so this uses the official API directly.)

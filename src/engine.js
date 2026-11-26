@@ -25,7 +25,7 @@ import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
 import { UP_MS, gatherFacts, basicAdvice, parseFix, stripFix, isSafeFix, SYSTEM as TROUBLE_SYSTEM } from './troubleshoot.js';
-import { verifyCloudflare, verifyGoogle, verifyUnifi, parseGoogleKey } from './cloud.js';
+import { verifyCloudflare, verifyGoogle, verifyApi, apiInfo, parseGoogleKey } from './cloud.js';
 import { Audit } from './audit.js';
 import { Health, LOGIN_RE } from './health.js';
 import { Telegram } from './telegram.js';
@@ -469,7 +469,7 @@ export class Engine extends EventEmitter {
       this.vault.add(n, value, `Made from the Library (${e.name})`, user, m.secret === 'ssh' ? { type: 'ssh', host, port: port || 22, auth: b.auth === 'key' ? 'key' : 'password' } : { type: m.secret });
       secret = n;
     }
-    const it = this.infra.add({ name, type: e.type, address: host, port: Number.isInteger(port) ? port : 0, url, secret, lib: e.id, notes: `${e.name}, connected with ${m.label.toLowerCase()}.` });
+    const it = this.infra.add({ name, type: e.type, address: host, port: Number.isInteger(port) ? port : 0, url, secret, lib: e.id, via: m.id, notes: `${e.name}, connected with ${m.label.toLowerCase()}.` });
     this.audit.add('infra', { actor: 'You', action: 'added a device from the Library', detail: `${it.name} (${e.name})` });
     this.emit('event', { type: 'infra' });
     return it;
@@ -485,10 +485,11 @@ export class Engine extends EventEmitter {
           it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save();
         }
       } catch { /* leave the plain result */ }
-    } else if (it.status?.ok && it.secret && this.vault.unlocked && it.lib === 'unifi' && this.vault.list().find((x) => x.name === it.secret)?.type === 'token') {
+    } else if (it.status?.ok && it.secret && this.vault.unlocked && apiInfo(it.lib) && this.vault.list().find((x) => x.name === it.secret)?.type === 'token') {
       try {
         const sec = this.vault.byName(it.secret), value = sec && this.vault.value(sec.id);
-        if (value) { const r = await verifyUnifi(it.address, it.port, value, this.unifiGet); it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save(); }
+        const scheme = (it.url || '').startsWith('http://') ? 'http' : 'https';
+        if (value) { const r = await verifyApi(it.lib, { host: it.address, port: it.port, scheme }, value, this.apiGet); if (r) { it.status = { ...it.status, ok: r.ok, detail: this.vault.redact(r.detail) }; this.infra._save(); } }
       } catch { /* leave the plain result */ }
     } else if (it.status?.ok && it.secret && this.vault.unlocked) {
       try {
@@ -530,6 +531,17 @@ export class Engine extends EventEmitter {
     this._troubleRun(it).catch((e) => { t.state = 'done'; t.report = { ...(t.report || {}), error: this.vault.redact(String(e.message)) }; }).finally(() => { this.troubling.delete(id); this.infra._save(); this.emit('event', { type: 'infra' }); });
     return it;
   }
+  // Who investigates: the agent that mapped the device (it knows it best), else an infrastructure specialist, else the CEO.
+  async _troubleAgent(it) {
+    const live = Object.values(this.agents).filter((a) => !this._isProject(a) && !a.removed && a.provider && a.id !== 'interview');
+    const proposer = it.by && live.find((a) => a.name.toLowerCase() === String(it.by).toLowerCase());
+    if (proposer) return { agent: proposer, why: `${proposer.name} mapped this device and knows it best.` };
+    const re = /infra|devops|sysadmin|sre\b|network|systems|platform|server|home ?lab|operations|\bops\b/i;
+    const word = `${it.name} ${it.type} ${it.lib || ''}`.toLowerCase();
+    const spec = live.filter((a) => re.test(`${a.title || ''} ${a.role || ''}`)).sort((a, b) => (word.includes('network') || ['router', 'switch'].includes(it.type) ? /network/i.test(`${b.title} ${b.role}`) - /network/i.test(`${a.title} ${a.role}`) : 0))[0];
+    if (spec) return { agent: spec, why: `${spec.name} is the infrastructure specialist.` };
+    try { const g = await this.general(); return g ? { agent: g, why: 'No infrastructure specialist yet, so the CEO took it.' } : null; } catch { return null; }
+  }
   async _troubleRun(it) {
     const t = it.trouble, red = (x) => this.vault.redact(String(x));
     const facts = await gatherFacts(this.infra, it, this.troubleProbe || {});
@@ -537,9 +549,20 @@ export class Engine extends EventEmitter {
     this.infra._save(); this.emit('event', { type: 'infra' });
     let fix = null;
     try {
-      const text = await this._oneShot(TROUBLE_SYSTEM, `Facts (read-only checks made from the Apiary computer just now):\n${JSON.stringify(facts)}\n\nExplain what is probably wrong and what to check.`);
+      // The agent that knows this device investigates it: it has the device's notes, login and what it runs on.
+      const who = await this._troubleAgent(it);
+      report.by = who ? who.agent.name : ''; report.byWhy = who?.why || ''; this.infra._save(); this.emit('event', { type: 'infra' });
+      const facts2 = `Facts (read-only checks made from the Apiary computer just now):\n${JSON.stringify(facts)}`;
+      let text;
+      if (who && this.troubleViaAgent !== false) {
+        const brief = `TROUBLESHOOTING REQUEST. The person pressed Troubleshoot on "${it.name}" (${it.type}${it.address ? ', ' + it.address : ''}) because it is ${it.status?.ok ? 'reported healthy but they want it checked' : 'not reachable or has a problem'}.\n\nYou know this device best, so investigate it properly like an engineer would, then report back. Look at: the service or VM itself (status, recent logs, disk, memory), the machine it runs on if it is a VM, container or service, and neighbouring devices on the Infrastructure map it depends on (network, DNS, storage). Use your saved logins for READ-ONLY checks only (status, logs, listings); change nothing yourself.\n\n${facts2}\n\n${TROUBLE_SYSTEM}\n\nAnswer in plain words for a non-expert: what is wrong, the evidence you found, and what to check. Put the technical evidence after the plain explanation.`;
+        text = await this.send(who.agent.id, brief, null, {});
+        if (!text || /^\(stopped\)/.test(text)) throw new Error('The agent gave no answer');
+      } else {
+        text = await this._oneShot(TROUBLE_SYSTEM, `${facts2}\n\nExplain what is probably wrong and what to check.`);
+      }
       report.ai = red(stripFix(text)); fix = parseFix(text);
-    } catch (e) { report.aiNote = 'No AI answered, so this is the built-in analysis only.'; }
+    } catch (e) { report.aiNote = 'No agent could investigate, so this is the built-in analysis only.'; }
     this.infra._save(); this.emit('event', { type: 'infra' });
     if (!fix) return finish();
     const safe = fix.commands.filter(isSafeFix); report.manual = fix.commands.filter((c) => !isSafeFix(c)).map(red);

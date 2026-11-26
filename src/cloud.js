@@ -1,6 +1,7 @@
 // Real checks for the cloud connectors in the Library. Each returns { ok, detail } and never includes a secret in its text.
 import { createSign } from 'node:crypto';
 import https from 'node:https';
+import http from 'node:http';
 
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
 const b64u = (b) => Buffer.from(b).toString('base64url');
@@ -43,23 +44,55 @@ export async function verifyGoogle(text, fetchFn = fetch) {
   } catch (e) { return { ok: false, detail: `Could not check the key: ${String(e.message).replace(/-----[\s\S]*/, '').slice(0, 100)}` }; }
 }
 
-// UniFi: the official Network Integration API on the person's own console. Consoles use a self-signed certificate by default,
-// so this one check (and only this one, to the address the person typed) does not insist on a trusted certificate.
-function lanGet(host, port, path, headers) {
+// Official APIs of the things in the Library. Each says where to check a key, how the key is sent, and what an agent should be told.
+// Home consoles use self-signed certificates by default, so these checks (only to the address the person typed) do not insist on a trusted one.
+const bearer = (v) => ({ authorization: `Bearer ${v}` });
+const basic = (v) => ({ authorization: `Basic ${Buffer.from(v).toString('base64')}` });
+export const API = {
+  proxmox: { name: 'Proxmox', base: '/api2/json', path: '/api2/json/version', auth: (v) => ({ authorization: `PVEAPIToken=${v}` }), how: 'the header Authorization: PVEAPIToken=<the token>', ok: (j) => (j?.data?.version ? `Proxmox ${j.data.version}` : null), json: true },
+  homeassistant: { name: 'Home Assistant', base: '/api', path: '/api/', auth: bearer, how: 'the header Authorization: Bearer <the token>', ok: () => '' },
+  n8n: { name: 'n8n', base: '/api/v1', path: '/api/v1/workflows?limit=1', auth: (v) => ({ 'x-n8n-api-key': v }), how: 'the header X-N8N-API-KEY', ok: () => '' },
+  coolify: { name: 'Coolify', base: '/api/v1', path: '/api/v1/version', auth: bearer, how: 'the header Authorization: Bearer <the token>', ok: () => '' },
+  portainer: { name: 'Portainer', base: '/api', path: '/api/status', auth: (v) => ({ 'x-api-key': v }), how: 'the header X-API-Key', ok: (j) => (j?.Version ? `Portainer ${j.Version}` : '') },
+  grafana: { name: 'Grafana', base: '/api', path: '/api/org', auth: bearer, how: 'the header Authorization: Bearer <the token>', ok: () => '' },
+  gitea: { name: 'Gitea', base: '/api/v1', path: '/api/v1/user', auth: (v) => ({ authorization: `token ${v}` }), how: 'the header Authorization: token <the token>', ok: () => '' },
+  truenas: { name: 'TrueNAS', base: '/api/v2.0', path: '/api/v2.0/system/info', auth: bearer, how: 'the header Authorization: Bearer <the key>', ok: (j) => (j?.version ? `TrueNAS ${j.version}` : '') },
+  kubernetes: { name: 'Kubernetes', base: '', path: '/version', auth: bearer, how: 'the header Authorization: Bearer <the token>', ok: (j) => (j?.gitVersion ? `Kubernetes ${j.gitVersion}` : '') },
+  unifi: { name: 'UniFi Network', base: '/proxy/network/integration/v1', path: '/proxy/network/integration/v1/info', auth: (v) => ({ 'x-api-key': v }), how: 'the header X-API-KEY; start with GET /v1/sites', ok: (j) => (j?.applicationVersion ? `Network ${String(j.applicationVersion).slice(0, 20)}` : null), json: true, noApi: 'This console has no official API. It needs UniFi Network 9.0 or newer.' },
+  opnsense: { name: 'OPNsense', base: '/api', path: '/api/core/firmware/status', auth: basic, how: 'HTTP basic authentication with the API key as the user and the secret as the password (the key is stored as key:secret)', ok: () => '' },
+  uptimekuma: { name: 'Uptime Kuma', base: '', path: '/metrics', auth: (v) => basic(`:${v}`), how: 'HTTP basic authentication with an empty user and the API key as the password (GET /metrics)', ok: () => '' },
+  pihole: { name: 'Pi-hole', base: '/api', path: '/api/auth', method: 'POST', body: (v) => JSON.stringify({ password: v }), auth: () => ({ 'content-type': 'application/json' }), how: 'POST /api/auth with the app password to get a session id, then send it as the X-FTL-SID header', ok: (j) => (j?.session?.valid ? '' : null), json: true },
+};
+export const apiInfo = (libId) => API[libId] || null;
+
+function lanReq(scheme, host, port, path, headers, method = 'GET', body = '') {
+  const mod = scheme === 'http' ? http : https;
   return new Promise((resolve, reject) => {
-    const r = https.request({ host, port, path, method: 'GET', headers, rejectUnauthorized: false, timeout: 10000 }, (res) => {
-      let body = ''; res.on('data', (d) => { if (body.length < 1e5) body += d; }); res.on('end', () => { let json = null; try { json = JSON.parse(body); } catch { /* not JSON */ } resolve({ status: res.statusCode, json }); });
+    const r = mod.request({ host, port, path, method, headers: body ? { ...headers, 'content-length': Buffer.byteLength(body) } : headers, rejectUnauthorized: false, timeout: 10000 }, (res) => {
+      let text = ''; res.on('data', (d) => { if (text.length < 1e5) text += d; }); res.on('end', () => { let json = null; try { json = JSON.parse(text); } catch { /* not JSON */ } resolve({ status: res.statusCode, json }); });
     });
-    r.on('timeout', () => r.destroy(new Error('timed out'))); r.on('error', reject); r.end();
+    r.on('timeout', () => r.destroy(new Error('timed out'))); r.on('error', reject); r.end(body || undefined);
   });
 }
-export async function verifyUnifi(host, port, key, get = lanGet) {
-  if (!host) return { ok: false, detail: 'No console address to check' };
+// get(scheme, host, port, path, headers, method, body) -> { status, json }. Tests pass their own.
+export async function verifyApi(libId, { host, port, scheme = 'https' }, value, get = lanReq) {
+  const a = API[libId]; if (!a) return null;
+  if (!host) return { ok: false, detail: 'No address to check' };
   try {
-    const r = await get(String(host), Number(port) || 443, '/proxy/network/integration/v1/info', { 'x-api-key': key, accept: 'application/json' });
-    if (r.status === 200 && r.json) return { ok: true, detail: `The console accepted the API key${r.json.applicationVersion ? ` (Network ${String(r.json.applicationVersion).slice(0, 20)})` : ''}` };
-    if (r.status === 401 || r.status === 403) return { ok: false, detail: 'The console refused the API key. Create a new one under Settings, Control Plane, Integrations.' };
-    if (r.status === 404) return { ok: false, detail: 'This console has no official API. It needs UniFi Network 9.0 or newer.' };
-    return { ok: false, detail: `The console answered with HTTP ${r.status}` };
-  } catch (e) { return { ok: false, detail: `Could not reach the console: ${String(e.message).slice(0, 100)}` }; }
+    const r = await get(scheme, String(host), Number(port) || (scheme === 'http' ? 80 : 443), a.path, { accept: 'application/json', ...a.auth(value) }, a.method || 'GET', a.body ? a.body(value) : '');
+    if (r.status >= 200 && r.status < 300) {
+      const v = a.ok(r.json);
+      if (v === null || (a.json && !r.json)) return { ok: false, detail: `${a.name} answered, but not as expected. Check the address and port.` };
+      return { ok: true, detail: `${a.name} accepted the key${v ? ` (${v})` : ''}` };
+    }
+    if (r.status === 401 || r.status === 403) return { ok: false, detail: `${a.name} refused the key. Create a new one and try again.` };
+    if (r.status === 404 && a.noApi) return { ok: false, detail: a.noApi };
+    return { ok: false, detail: `${a.name} answered with HTTP ${r.status}` };
+  } catch (e) { return { ok: false, detail: `Could not reach ${a.name}: ${String(e.message).slice(0, 100)}` }; }
+}
+// Kept for the UniFi tests and callers: the console accepts the API key.
+export async function verifyUnifi(host, port, key, get) {
+  const g = get ? (sch, h, p, path, hd) => get(h, p, path, hd) : undefined;
+  const r = await verifyApi('unifi', { host, port, scheme: 'https' }, key, g);
+  return r.ok ? { ok: true, detail: r.detail.replace('UniFi Network accepted the key', 'The console accepted the API key') } : { ...r, detail: r.detail.replace('UniFi Network refused the key. Create a new one and try again.', 'The console refused the API key. Create a new one under Settings, Control Plane, Integrations.') };
 }

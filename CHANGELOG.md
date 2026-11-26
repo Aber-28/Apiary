@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.56.2
+
+- Live activity is no longer a main menu item; open it from "See live activity" in the Working now box.
+
 ## 0.56.1
 
 - "Update waiting for N to finish" now counts down live (every 3 seconds) in the top bar and on the Updates page, and the update installs itself as soon as the count reaches zero. Before, the number only refreshed every 5 minutes.

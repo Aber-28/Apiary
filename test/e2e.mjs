@@ -2799,5 +2799,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/HEALTH_GROUPS/.test(js) && /Hide for 30 days/.test(js), 'health page is grouped'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (!/updPoll/.test(js) || !/redraw: draw/.test(js)) throw new Error('a queued update must keep refreshing its count'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  if (/\['#\/activity', 'Live activity'\]/.test(js) || !/href: '#\/activity' }, 'See live activity'/.test(js)) throw new Error('Live activity lives in the Working now box, not the menu'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

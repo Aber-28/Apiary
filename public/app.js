@@ -135,7 +135,7 @@ applyTheme(window.apiaryTheme.get());
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 // A menu entry is [href, label] or { id, label, items: [...] } (a folder; folders can hold folders).
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
     { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
     { id: 'library', label: 'Templates', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },

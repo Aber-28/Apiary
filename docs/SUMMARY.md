@@ -13,6 +13,7 @@
 
 ## Using Apiary
 
+* [Dashboard](using-apiary/dashboard.md)
 * [The main chat and projects](using-apiary/chat-and-projects.md)
 * [Projects and chat](using-apiary/projects.md)
 * [Your CEO and the setup interview](using-apiary/ceo-and-setup-interview.md)

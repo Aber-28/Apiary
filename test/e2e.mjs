@@ -2742,5 +2742,14 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   await call('/api/settings', 'PUT', { imageKeepDays: 30 });
   const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /Keep pictures for/); assert.match(a, /ACTIVE_ATTACH/);
 }
+{
+  const d = (await call('/api/dashboard')).body;
+  for (const k of ['finished', 'counts', 'agents', 'offline', 'recent', 'projects', 'usage']) assert.ok(k in d, `dashboard has ${k}`);
+  assert.ok(Array.isArray(d.finished) && d.recent.every((r) => r.code && r.title), 'recent work lists tasks');
+  assert.equal(typeof d.agents.working, 'number');
+  const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  assert.match(a, /async function pageHome/); assert.match(a, /\|\| '#\/home'/, 'the dashboard is the home page'); assert.match(a, /\['#\/home', 'Dashboard'\]/);
+  assert.doesNotMatch(JSON.stringify(d), /sk-|password|secret/i, 'no secrets on the dashboard');
+}
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

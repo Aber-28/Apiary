@@ -236,6 +236,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       if (url.pathname === '/api/tools/install' && req.method === 'POST') { const b = await readBody(req); return json(res, 202, engine.toolInstaller.start(Array.isArray(b.tools) ? b.tools : [])); }
       if (url.pathname === '/api/provider-usage' && req.method === 'GET') { const v = engine.limitsView(); if (v.pending.length) engine.refreshLimits().catch(() => {}); return json(res, 200, v); }
       if (url.pathname === '/api/provider-usage/refresh' && req.method === 'POST') { const b = await readBody(req); await engine.refreshLimits(b.id || null, true); return json(res, 200, engine.limitsView()); }
+      if (url.pathname === '/api/dashboard' && req.method === 'GET') return json(res, 200, engine.dashboard());
       if (url.pathname === '/api/usage' && req.method === 'GET') return json(res, 200, engine.usage.summary(Number(url.searchParams.get('days')) || 14));
       if (url.pathname === '/api/usage/limits' && req.method === 'PUT') { engine.usage.setLimits((await readBody(req)).limits || {}); return json(res, 200, engine.usage.summary()); }
       // ----- repositories -----

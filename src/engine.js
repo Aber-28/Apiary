@@ -1671,6 +1671,22 @@ export class Engine extends EventEmitter {
     if (this.vault.exists) for (const i of this.vault.list()) out[i.code] = { kind: 'secret', id: i.id, title: i.name, state: 'secret', label: 'Secret', href: '#/secrets' };
     return out;
   }
+  // Everything the Dashboard page shows, in one call. Names and short titles only; never secrets or command output.
+  dashboard() {
+    const now = Date.now(), all = this.tasks.list, DAYS = 28 * 864e5;
+    const finished = all.filter((t) => t.status === 'done' && t.doneAt && now - t.doneAt < DAYS).map((t) => t.doneAt);
+    const helpers = Object.values(this.agents).filter((a) => !this._isProject(a));
+    const who = (t) => t.closedBy || t.assignee?.name || '';
+    const recent = all.filter((t) => ['done', 'blocked', 'inprogress'].includes(t.status)).sort((a, b) => (b.doneAt || b.updatedAt) - (a.doneAt || a.updatedAt)).slice(0, 8)
+      .map((t) => ({ id: t.id, code: t.code, title: t.title, status: t.status, who: who(t), at: t.doneAt || t.updatedAt, project: t.project ? this.agents[t.project]?.name || '' : '', reason: t.status === 'blocked' ? t.reason || '' : '', pics: (t.images || []).length }));
+    const projects = Object.values(this.agents).filter((a) => this._isProject(a) && a.kind !== 'general' && this.stageOf(a) !== 'closed').map((p) => {
+      const mine = all.filter((t) => t.project === p.id); return { id: p.id, name: p.name, total: mine.length, done: mine.filter((t) => t.status === 'done').length, working: this.tree(p.id).some((id) => this.agents[id]?.status === 'working') };
+    }).filter((p) => p.total || p.working).slice(0, 8);
+    const offline = this.infra.items.filter((i) => i.state !== 'proposed' && i.status && i.status.ok === false).map((i) => ({ id: i.id, name: i.name, since: i.status.since || i.status.at, detail: i.status.detail || '' }));
+    const u = this.usage.summary(7);
+    return { now, finished, counts: this.tasks.counts(), agents: { working: helpers.filter((a) => a.status === 'working').length, total: helpers.length }, offline, recent, projects,
+      usage: u.providers.filter((p) => p.id !== 'mock').map((p) => ({ id: p.id, today: p.today, week: p.week, daily: p.daily, weekly: p.weekly, pctDay: p.pctDay, pctWeek: p.pctWeek, hitAt: p.hitAt })) };
+  }
   tasksView() { return this.tasks.list.map((t) => ({ ...this.tasks.view(t), projectName: t.project ? this.agents[t.project]?.name || '' : '' })); }
 
   // A ticket goes to the chosen agent, or to the CEO (who can pass it to the right specialist).

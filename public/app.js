@@ -134,7 +134,7 @@ applyTheme(window.apiaryTheme.get());
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 // A menu entry is [href, label] or { id, label, items: [...] } (a folder; folders can hold folders).
 const NAV = [
-  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
+  { id: 'workspace', label: 'Workspace', icon: ICON.chat, items: [['#/home', 'Dashboard'], ['#/chat', 'Chat'], ['#/activity', 'Live activity'], ['#/projects', 'Projects'], ['#/tasks', 'Tasks'], ['#/approvals', 'Approvals'], ['#/tickets', 'Support tickets'], ['#/terminal', 'Terminal sessions'],
     { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
     { id: 'library', label: 'Library', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
@@ -147,8 +147,8 @@ const NAV = [
     { id: 'system', label: 'System', items: [['#/updates', 'Updates'], ['#/startup', 'Startup'], ['#/folders', 'Folders']] }, ['#/setup', 'Setup guide']] },
 ];
 const navLeaves = (items) => items.flatMap((it) => (Array.isArray(it) ? [it] : navLeaves(it.items)));
-const cur = () => location.hash.replace(/\?.*$/, '') || '#/chat';
-const isActive = (href) => cur() === href || (href === '#/projects' && cur().startsWith('#/project/'));
+const cur = () => location.hash.replace(/\?.*$/, '') || '#/home';
+const isActive = (href) => cur() === href || (href === '#/home' && cur() === '#/') || (href === '#/projects' && cur().startsWith('#/project/'));
 function renderSide() {
   const side = $('#side');
   const newBtn = h('button', { class: 'btn primary big', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project');
@@ -202,6 +202,7 @@ function crumbs(...parts) {
 
 // ---------- routing ----------
 const ROUTES = [
+  [/^#\/(home)?$/, () => pageHome()],
   [/^#\/chat$/, () => pageChat()],
   [/^#\/task\/([\w-]+)$/, (m) => pageTask(m[1])],
   [/^#\/organisation$/, () => { S.nextTab = 'org'; pageChat(); }],
@@ -247,7 +248,7 @@ function route() {
   const hash = cur();
   view.className = 'view'; page = null; ACTIVE_ATTACH = null;
   const r = ROUTES.find(([re]) => re.test(hash));
-  if (!r) { location.hash = '#/chat'; return; }
+  if (!r) { location.hash = '#/home'; return; }
   S.openGroup = NAV.find((g) => navLeaves(g.items).some(([href]) => isActive(href)))?.id ?? S.openGroup; // only one submenu stays open
   renderSide();
   r[1](r[0].exec(hash));
@@ -1520,6 +1521,65 @@ function pageUsage() {
 
 // ---------- task board ----------
 const TASK_COLS = [['backburner', 'Back burner', 'Unfinished ideas. Add detail later'], ['todo', 'To do', 'Ready: work can start'], ['inprogress', 'In progress', 'Someone is on it'], ['blocked', 'Blocked', 'Stuck. Needs a decision'], ['done', 'Done', 'Finished']];
+
+// ---------- dashboard (the home page) ----------
+async function pageHome() {
+  crumbs('Workspace', 'Dashboard');
+  let D = null, range = Number(S.dashRange) || 14;
+  const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+  const dayStart = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
+  const tile = (label, value, sub, href, warn) => h('a', { class: 'dash-k' + (warn ? ' warn' : ''), href }, h('small', {}, label), h('b', {}, String(value)), h('span', {}, sub || ''));
+  const panel = (title, ...body) => h('section', { class: 'dash-pan', 'aria-label': title }, h('h3', {}, title), ...body);
+  const draw = () => {
+    if (!D) { view.replaceChildren(h('div', { class: 'card empty' }, 'Loading your dashboard…')); return; }
+    const today = dayStart(D.now), days = Array.from({ length: range }, (_, i) => today - (range - 1 - i) * 864e5);
+    const bucket = (from, to) => D.finished.filter((t) => t >= from && t < to).length;
+    const per = days.map((d) => bucket(d, d + 864e5)), total = per.reduce((a, b) => a + b, 0), prev = bucket(days[0] - range * 864e5, days[0]), max = Math.max(1, ...per);
+    const waiting = pending(), off = D.offline, warns = S.health?.count || 0;
+    const delta = total - prev;
+    const bars = h('div', { class: 'dash-bars', role: 'img', 'aria-label': `Tasks finished per day over the last ${range} days: ${per.join(', ')}` }, days.map((d, i) => h('div', { class: 'dash-col', title: `${new Date(d).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })}: ${per[i]} finished` },
+      h('i', { style: `height:${Math.round((per[i] / max) * 100)}%`, class: per[i] ? '' : 'zero' }), h('em', {}, range <= 14 || i % 2 === 0 ? String(new Date(d).getDate()) : ''))));
+    const dot = (st) => h('span', { class: 'dot ' + ({ done: 'ok', blocked: 'err', inprogress: 'work pulse' }[st] || 'ok') });
+    const verb = (t) => (t.status === 'done' ? `${t.who || 'Someone'} finished` : t.status === 'blocked' ? `${t.who || 'Someone'} is stuck on` : `${t.who || 'Someone'} is working on`);
+    const feed = D.recent.length ? D.recent.map((t) => h('a', { class: 'dash-row', href: `#/task/${t.id}` }, dot(t.status), h('div', { style: 'flex:1;min-width:0' }, h('span', {}, `${verb(t)} `, h('b', {}, t.code)), h('small', {}, `${t.title}${t.reason ? ' · ' + t.reason : ''} · ${ago(t.at)}${t.project ? ' · ' + t.project : ''}`))))
+      : [h('p', { class: 'hint' }, 'No work yet. Give your CEO something to do and it shows up here.')];
+    const needs = [
+      ...waiting.slice(0, 4).map((a) => h('a', { class: 'dash-row', href: '#/approvals' }, h('div', { style: 'flex:1;min-width:0' }, a.title || 'Approval', h('small', {}, `${a.agentName || 'An agent'} is waiting for your answer`)), h('span', { class: 'pill warn' }, 'Review'))),
+      waiting.length > 4 ? h('a', { class: 'hint', href: '#/approvals' }, `and ${waiting.length - 4} more approvals`) : null,
+      ...off.map((d) => h('div', { class: 'dash-row' }, h('span', { class: 'dot err' }), h('div', { style: 'flex:1;min-width:0' }, d.name, h('small', {}, `Not reachable since ${new Date(d.since).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`)),
+        h('button', { class: 'btn', onclick: guard(async (e) => { e.currentTarget.disabled = true; await api(`/api/infra/${d.id}/troubleshoot`, 'POST', {}); location.hash = '#/infrastructure'; }) }, 'Troubleshoot'))),
+      warns ? h('a', { class: 'dash-row', href: '#/health' }, h('div', { style: 'flex:1' }, `${warns} health ${warns === 1 ? 'warning' : 'warnings'}`, h('small', {}, 'Open the health check')), h('span', { class: 'pill warn' }, 'Look')) : null,
+    ].filter(Boolean);
+    const meters = D.usage.length ? D.usage.map((u) => {
+      const pct = u.pctWeek != null ? Math.min(1, u.pctWeek) : null;
+      return h('div', { class: 'dash-meter' }, h('div', { class: 'kv' }, h('span', {}, u.id === 'claude' ? 'Claude Code' : u.id === 'codex' ? 'Codex' : u.id), h('small', { class: 'hint' }, pct != null ? `${Math.round(pct * 100)}% of your weekly limit${u.hitAt ? ' · limit reached' : ''}` : `${fmtTok(u.week)} tokens this week`)),
+        pct != null ? h('div', { class: 'bar', role: 'progressbar', 'aria-valuenow': String(Math.round(pct * 100)), 'aria-valuemin': '0', 'aria-valuemax': '100' }, h('i', { class: pct > 0.85 ? 'hot' : '', style: `width:${Math.round(pct * 100)}%` })) : null);
+    }) : [h('p', { class: 'hint' }, 'Nothing used yet.')];
+    const empty = !D.recent.length && !D.agents.total && !D.projects.length;
+    view.replaceChildren(
+      h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Dashboard'), h('p', { class: 'sub-title' }, 'What your team has done, and what needs you.')),
+        h('div', { class: 'dash-actions' }, h('select', { 'aria-label': 'Time range', onchange: (e) => { range = S.dashRange = Number(e.target.value); draw(); } }, [[7, 'Last 7 days'], [14, 'Last 14 days'], [28, 'Last 28 days']].map(([v, n]) => h('option', { value: String(v), selected: v === range }, n))),
+          h('a', { class: 'btn', href: '#/chat' }, 'Open chat'), h('button', { class: 'btn primary', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project'))),
+      empty ? h('div', { class: 'card', style: 'margin-bottom:14px' }, h('h2', { style: 'margin-top:0' }, 'Start your first project'), h('p', {}, 'Tell your CEO what you need and it builds a team, makes a plan and gets to work. Everything it does shows up here.'), h('a', { class: 'btn primary', href: '#/chat' }, 'Talk to your CEO')) : null,
+      h('div', { class: 'dash-kpis' },
+        tile('Tasks finished', total, `${delta > 0 ? '+' : ''}${delta} vs the ${range} days before`, '#/tasks'),
+        tile('Agents working now', D.agents.working, `of ${D.agents.total} on the team`, '#/activity'),
+        tile('Waiting for you', waiting.length, waiting.length ? 'approvals to answer' : 'nothing to approve', '#/approvals', waiting.length > 0),
+        tile('Needs attention', off.length + (warns ? 1 : 0), off.length ? `${off[0].name}${off.length > 1 ? ` and ${off.length - 1} more` : ''} offline` : warns ? 'health warnings' : 'all quiet', off.length ? '#/infrastructure' : '#/health', off.length > 0)),
+      panel(`Tasks finished per day`, bars),
+      h('div', { class: 'dash-grid' },
+        panel('What your agents did', ...feed, h('a', { class: 'hint', href: '#/tasks' }, 'All tasks')),
+        panel('Needs you', ...(needs.length ? needs : [h('p', { class: 'hint' }, 'Nothing needs you right now.')]))),
+      h('div', { class: 'dash-grid' },
+        panel('AI usage this week', ...meters, h('a', { class: 'hint', href: '#/usage' }, 'Usage and limits')),
+        panel('Projects', ...(D.projects.length ? D.projects.map((p) => { const pc = p.total ? Math.round((p.done / p.total) * 100) : 0; return h('a', { class: 'dash-row', href: `#/project/${p.id}` }, h('div', { style: 'flex:1;min-width:0' }, p.name, h('small', {}, `${p.done} of ${p.total} tasks done${p.working ? ' · working now' : ''}`), h('div', { class: 'bar' }, h('i', { style: `width:${pc}%` }))), h('span', { class: 'hint' }, `${pc}%`)); }) : [h('p', { class: 'hint' }, 'No active projects.')]), h('a', { class: 'hint', href: '#/projects' }, 'All projects'))));
+  };
+  const load = async () => { try { D = await api('/api/dashboard'); draw(); } catch (e) { if (!D) view.replaceChildren(h('div', { class: 'card empty' }, e.message)); } };
+  const soon = debounce(load, 800);
+  draw(); load();
+  page = { update(ev) { if (['agent', 'approval', 'message', 'removed'].includes(ev.type)) { soon(); if (D && ev.type === 'approval') draw(); } } };
+}
+
 function pageTasks() {
   crumbs('Workspace', 'Tasks');
   let tasks = [], showAllDone = false, agents = [];

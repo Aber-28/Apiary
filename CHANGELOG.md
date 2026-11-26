@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.54.0
+
+- New Dashboard, and it is now the home page: tasks finished (with a per-day chart and a 7/14/28 day range), agents working now, approvals waiting for you, devices that are offline (with a Troubleshoot button), what your agents did most recently, AI usage against your limits, and progress per project. Updates live as work happens. Chat is one click away.
+
 ## 0.53.4
 
 - Copying code from a code box no longer brings extra spaces or blank lines at the start or end, whether you press Copy or select the text yourself.

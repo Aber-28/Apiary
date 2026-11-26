@@ -9,6 +9,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { accessSync, constants, writeFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+const SHARED_START = new Map(); // mock only: see the 'sharedfile' barrier
 import { fileURLToPath } from 'node:url';
 const HELPERS = fileURLToPath(new URL('../bin', import.meta.url));
 
@@ -338,6 +339,9 @@ const mock = {
     } else if (prompt.startsWith('Task from ') && agent.member) {
       onActivity('Working');
       const sees = agent.cwd && existsSync(path.join(agent.cwd, 'security-prereq.txt'));
+      // Test helper: two specialists editing the same file must both have started before either one finishes, so they truly clash
+      // (on a fast or slow machine the second could otherwise start after the first one had already been merged).
+      if (/sharedfile/.test(prompt)) { const k = agent.parentId || 'x', n = (SHARED_START.get(k) || 0) + 1; SHARED_START.set(k, n); for (let i = 0; i < 100 && (SHARED_START.get(k) || 0) < 2; i++) await new Promise((r) => setTimeout(r, 50)); setTimeout(() => SHARED_START.delete(k), 4000).unref(); }
       if (agent.cwd) writeFileSync(path.join(agent.cwd, `${slugify(agent.title || agent.name)}.txt`), `Work by ${agent.name}\n`);
       if (agent.cwd && /sharedfile/.test(prompt)) writeFileSync(path.join(agent.cwd, 'shared.txt'), `Shared file by ${agent.name}\n`);
       out = `Finished the job. Sees prerequisite: ${sees ? 'yes' : 'no'}. Checks: ${(prompt.match(/^- \w+: \w+/gm) || []).join(' | ')}`;

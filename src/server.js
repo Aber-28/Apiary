@@ -186,7 +186,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         if (req.method === 'GET') return json(res, 200, info());
         const b = await readBody(req);
         // changing or removing needs the current password, so a borrowed open window is not enough
-        if (auth.exists && !(await auth.verify(b.current))) { await new Promise((r) => setTimeout(r, 800)); return json(res, 403, { error: 'The current password is not right.' }); }
+        if (auth.exists && !(await auth.verifyThrottled(b.current, ipOf(req)))) { await new Promise((r) => setTimeout(r, 800)); return json(res, 403, { error: 'The current password is not right.' }); }
         if (req.method === 'POST') {
           await auth.set(b.username || auth.username, b.password);
           const value = auth.cookie();
@@ -197,7 +197,8 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       }
 
       if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
-        const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname).replace(/^\/+/, '');
+        let dec; try { dec = decodeURIComponent(url.pathname); } catch { return json(res, 400, { error: 'Bad address' }); }
+        const rel = url.pathname === '/' ? 'index.html' : dec.replace(/^\/+/, '');
         const file = path.resolve(PUBLIC, rel);
         if (!file.startsWith(PUBLIC + path.sep)) return json(res, 403, { error: 'Forbidden' });
         let body; try { body = readFileSync(file); } catch { return json(res, 404, { error: 'Not found' }); }

@@ -2706,10 +2706,9 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const ask = (kind, title, extra = {}) => engine._ask(ag, { kind, title, ...extra });
   const P = engine.policy; for (const r of [...P.rules]) P.remove(r.id);
   assert.equal((await call('/api/policy', 'POST', { kind: 'nonsense', action: 'allow' })).status, 400); assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'maybe' })).status, 400); assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'allow', project: 'nope' })).status, 400);
-  const pending0 = engine.approvals().filter((a) => a.status === 'pending').length;
   const r1 = await call('/api/policy', 'POST', { kind: 'plan', action: 'allow' }); assert.equal(r1.status, 201); assert.match(r1.body.text, /Allow without asking: when an agent wants to accept a project plan/);
   assert.equal((await call('/api/policy', 'POST', { kind: 'plan', action: 'allow' })).status, 409, 'duplicates refused');
-  const res = await ask('plan', 'A plan'); assert.equal(res.decision, 'approve'); assert.equal(engine.approvals().filter((a) => a.status === 'pending').length, pending0, 'nobody was asked');
+  const res = await ask('plan', 'A plan'); assert.equal(res.decision, 'approve'); assert.ok(!engine.approvals().some((a) => a.status === 'pending' && a.title === 'A plan'), 'nobody was asked');
   const auto = engine.approvals().find((a) => a.title === 'A plan'); assert.ok(auto.auto && auto.status === 'approved' && /rule/.test(auto.note));
   assert.ok((await call('/api/audit?kind=approval&q=automatically')).body.items.length >= 1);
   // other kinds still ask
@@ -2825,5 +2824,16 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.ok(/function openWhatsNew/.test(js) && /target: '_blank', rel: 'noopener'/.test(js) && /addEventListener\('cancel', \(e\) => e\.preventDefault\(\)\)/.test(js) && /checkWhatsNew\(\);\n\}\)\(\)/.test(js), 'dialog opens at start, links open in a new tab, only OK closes it'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/path\.includes\(sd\)/.test(js) && !/!sd\.contains\(e\.target\)/.test(js), 'tapping a menu folder must not close the phone menu'); }
 { const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/Compact task cards/.test(css), 'task cards are compact'); }
+{ const srvjs = fsRead(new URL('../src/server.js', import.meta.url), 'utf8'), authjs = fsRead(new URL('../src/auth.js', import.meta.url), 'utf8');
+  assert.ok(/verifyThrottled\(b\.current, ipOf\(req\)\)/.test(srvjs) && /async verifyThrottled/.test(authjs), 'account changes are throttled like sign-in');
+  assert.ok(/Bad address/.test(srvjs), 'malformed URLs give 400, not 500');
+  const a = new (await import('../src/auth.js')).Auth(path.join(os.tmpdir(), 'auth-' + Date.now() + '.json')); await a.set('tester', 'a long enough passphrase');
+  let locked = false; for (let i = 0; i < 8; i++) { try { await a.verifyThrottled('nope', '1.2.3.4'); } catch (e) { if (e.status === 429) locked = true; } }
+  assert.ok(locked, 'repeated wrong current passwords get locked out'); }
+{ const a = new (await import('../src/auth.js')).Auth(path.join(os.tmpdir(), 'auth-par-' + Date.now() + '.json')); await a.set('tester2', 'a long enough passphrase');
+  const out = await Promise.all(Array.from({ length: 30 }, (_, i) => a.login('tester2', 'guess' + i, '9.9.9.9').then(() => 'ok', (e) => e.status)));
+  assert.ok(out.filter((s) => s === 429).length >= 20, `guesses sent in parallel are locked out (${out.join(',')})`);
+  assert.ok(!out.includes('ok'));
+  await assert.rejects(a.login('tester2', 'a long enough passphrase', '8.8.8.8'), (e) => e.status === 429, 'while the account is locked even the right password waits'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

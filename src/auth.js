@@ -71,9 +71,21 @@ export class Auth {
     const keys = [`ip:${ip}`, `user:${String(username || '').trim().toLowerCase()}`];
     const wait = this._wait(keys);
     if (wait > 0) throw err(429, `Too many wrong tries. Wait ${Math.ceil(wait / 1000)} seconds and try again.`, { retryAfter: Math.ceil(wait / 1000) });
-    if (!(await this._ok(username, password))) { this._fail(keys); throw err(401, 'Wrong username or password.'); }
+    // Count the try BEFORE checking it. Otherwise many guesses sent at the same moment all pass the lock check together.
+    this._fail(keys);
+    if (!(await this._ok(username, password))) throw err(401, 'Wrong username or password.');
     for (const k of keys) this.fails.delete(k);
     return this.cookie();
+  }
+  // Same slow-down as sign-in, so the account page cannot be used to guess the password quickly. Throws 429 while locked.
+  async verifyThrottled(password, ip = '?') {
+    const keys = [`acct:ip:${ip}`, 'acct:all'];
+    const wait = this._wait(keys);
+    if (wait > 0) throw err(429, `Too many wrong tries. Wait ${Math.ceil(wait / 1000)} seconds and try again.`, { retryAfter: Math.ceil(wait / 1000) });
+    this._fail(keys); // counted before the check, so guesses sent in parallel cannot slip past the lock
+    const ok = await this.verify(password);
+    if (ok) for (const k of keys) this.fails.delete(k);
+    return ok;
   }
   async verify(password) { this._load(); if (!this.exists) return false; return this._ok(this.data.username, password); }
 

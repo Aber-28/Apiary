@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.60.2
+
+- Fixed: guesses sent at the same moment could skip the sign-in lock, so a password could be guessed much faster than intended. Every try is now counted before it is checked.
+- Fixed: the account page (change or remove your password) now has the same lock-out for wrong current passwords as sign-in.
+- Fixed: an address with broken % characters caused a server error; it now returns a plain "Bad address".
+- Fixed: the automatic checks on GitHub (the CI emails) were failing now and then because of a timing-dependent test. The test is now deterministic.
+
 ## 0.60.1
 
 - Task cards are much shorter: the title and notes are cut to two lines, the status chip (the column already says it) is gone, the details line is a single line, and the Responsible and status dropdowns and the Start and Edit buttons are smaller and share a row. Open a task to see everything.

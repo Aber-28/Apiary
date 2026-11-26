@@ -1453,10 +1453,11 @@ function rich(text, cls = '') {
   return root;
 }
 
+function boldIn(str) { const out = []; let last = 0; for (const m of str.matchAll(/\*\*([^*\n]+)\*\*/g)) { out.push(...chipsIn(str.slice(last, m.index)), h('b', {}, m[1])); last = m.index + m[0].length; } out.push(...chipsIn(str.slice(last))); return out; }
 function inlineCode(str) {
   const out = []; let last = 0;
-  for (const m of str.matchAll(/`([^`\n]+)`/g)) { out.push(...chipsIn(str.slice(last, m.index))); out.push(h('code', { class: 'ic' }, m[1])); last = m.index + m[0].length; }
-  out.push(...chipsIn(str.slice(last)));
+  for (const m of str.matchAll(/`([^`\n]+)`/g)) { out.push(...boldIn(str.slice(last, m.index))); out.push(h('code', { class: 'ic' }, m[1])); last = m.index + m[0].length; }
+  out.push(...boldIn(str.slice(last)));
   return out;
 }
 // side: 'me' (yours, right) or 'them' (an agent, left, in its colour)

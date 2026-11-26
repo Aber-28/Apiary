@@ -883,8 +883,8 @@ let orgIds;
   assert.ok(estimateTokens('x'.repeat(400)) === 100);
 
   // plain English by default, and it can be turned off
-  assert.equal(engine.plainEnglish, true); assert.match(engine._system(orgIds.ne), /plain, simple English/);
-  await call('/api/settings', 'PUT', { plainEnglish: false }); assert.doesNotMatch(engine._system(orgIds.ne), /plain, simple English/);
+  assert.equal(engine.plainEnglish, true); assert.match(engine._system(orgIds.ne), /plain, simple English/); assert.match(engine._system(orgIds.ne), /PLAIN REPORTS/);
+  await call('/api/settings', 'PUT', { plainEnglish: false }); assert.doesNotMatch(engine._system(orgIds.ne), /plain, simple English/); assert.doesNotMatch(engine._system(orgIds.ne), /PLAIN REPORTS/);
   await call('/api/settings', 'PUT', { plainEnglish: true }); assert.match(engine._system(orgIds.ne), /plain, simple English/);
   assert.equal((await call('/api/state')).body.plainEnglish, true);
 
@@ -2806,5 +2806,6 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   if (!/function unwall\(/.test(js) || !/h\('div', \{ class: 'task' \}, rich\(it\.task\)\)/.test(js) || !/inlineCode\(unwall\(/.test(js)) throw new Error('long text must be broken into paragraphs everywhere'); }
 { const leads = Object.values(engine.agents).filter((a) => !a.parentId && a.role !== 'Chief executive'); assert.ok(leads.every((a) => a.role !== 'Lead agent'), 'project leads say which project they lead'); }
+{ const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/function boldIn\(/.test(js), 'chat shows **bold** as bold'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.58.0
+
+- With "Agents write in plain, simple English" ticked, agents now report back in a few short sentences about what changed for you, and leave out file names, function names, test details and numbered code-change lists unless you ask. They end with one line offering the technical details. Commands you must run still come in a code block.
+- **Bold** text written by agents now shows as bold in chat instead of showing the asterisks.
+
 ## 0.57.2
 
 - A project's lead agent now has the role "Leads the <project> project" instead of the generic "Lead agent", so the Agents list says which project each lead belongs to. Existing projects are updated automatically.

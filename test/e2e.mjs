@@ -2874,7 +2874,12 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const lg = layoutGraph([cm('m', 'a', 'f'), cm('f', 'b'), cm('a', 'b'), cm('b')]);
   assert.deepEqual(lg.rows.map((r) => r.lane), [0, 1, 0, 1], 'a side branch gets its own lane'); assert.equal(lg.rows[0].merge, true, 'two parents means a merge'); assert.deepEqual(lg.rows[0].to, [0, 1], 'the merge reaches both branches');
   assert.equal(lg.rows[3].after.length, 0, 'the lanes close at the first save');
-  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
+  g('checkout', '-q', 'main'); g('commit', '-q', '--allow-empty', '-m', 'on main'); g('checkout', '-q', '-b', 'side', 'HEAD~1'); g('commit', '-q', '--allow-empty', '-m', 'side work'); g('checkout', '-q', 'release/1.2');
+  const pic = (await inspect(engine, d)).map;
+  assert.equal(pic.base, 'main'); assert.ok(pic.line.length >= 2 && pic.here.onMain === false, 'the picture knows you are on a side branch');
+  assert.ok(pic.branches.some((x) => x.name === 'side' && x.ahead === 1 && Number.isInteger(x.index)), 'an unmerged branch hangs off the main line');
+  assert.ok(pic.merged.includes('release/1.2') === false && pic.branches.some((x) => x.name === 'release/1.2'), 'your own unmerged branch is shown');
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function simpleMap') && appjs.includes('Not merged into main yet'), 'the simple map is drawn'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
 }
 
 console.log('all e2e checks passed');

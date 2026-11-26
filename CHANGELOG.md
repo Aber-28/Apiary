@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.64.0
+
+- Changed: the Repository map now opens with a simple picture: the main branch as a line of recent saves, a green "You are here" marker, and unmerged branches hanging off it on dashed curves with a "Not merged into main yet" note. The detailed lane graph moved into a collapsed "Detailed history".
+
 ## 0.63.0
 
 - New: the Repository map now draws a real branch graph: coloured lanes, arrows where a branch splits off, ringed saves for merges, and branch and tag names beside each save.

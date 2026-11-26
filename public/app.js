@@ -1793,6 +1793,43 @@ function pageRepos() {
   draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
 }
 
+// The simple map: the main branch as a row of recent saves, "you are here", and unmerged branches hanging off it.
+function simpleMap(m, remote, when) {
+  const GAP = 124, LEFT = 56, MAINY = 128, ns = 'http://www.w3.org/2000/svg', n = m.line.length;
+  const el = (tag, attrs = {}, text) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text !== undefined) e.textContent = text; return e; };
+  const cut = (t, k) => { t = String(t || ''); return t.length > k ? t.slice(0, k - 1) + '…' : t; };
+  const X = (i) => LEFT + i * GAP, mainEnd = X(n - 1) + 70;
+  const rows = m.branches, rowY = (i) => MAINY + 150 + i * 104;
+  const statusX = (b) => Math.max(X(b.index) + GAP + 300, mainEnd - 250);
+  const W = Math.max(mainEnd, ...rows.map((b) => statusX(b) + 250)), H = rows.length ? rowY(rows.length - 1) + 60 : MAINY + 80;
+  const svg = el('svg', { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: 'rm2', role: 'img', 'aria-label': 'Map of the main branch and the other branches' });
+  svg.append(el('text', { x: 4, y: 22, class: 'rm2-title' }, remote ? `${m.base} on GitHub (the official copy)` : `${m.base} (the main line)`));
+  svg.append(el('line', { x1: X(0), y1: MAINY, x2: X(n - 1), y2: MAINY, class: 'rm2-main' }));
+  const callout = (cx, y, text, toY) => {
+    svg.append(el('rect', { x: cx - 62, y, width: 124, height: 34, rx: 9, class: 'rm2-here' }), el('text', { x: cx, y: y + 22, 'text-anchor': 'middle', class: 'rm2-heret' }, text),
+      el('path', { d: `M${cx} ${y + 36} L${cx} ${toY}`, class: 'rm2-arrow' }), el('path', { d: `M${cx - 5} ${toY - 6} L${cx} ${toY} L${cx + 5} ${toY - 6}`, class: 'rm2-arrow' }));
+  };
+  m.line.forEach((c, i) => {
+    const last = i === n - 1, hereMain = m.here.onMain && last;
+    svg.append(el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: hereMain ? 'rm2-node rm2-on' : 'rm2-node' }));
+    svg.append(el('text', { x: X(i), y: MAINY + 46, 'text-anchor': 'middle', class: last ? 'rm2-lab rm2-labb' : 'rm2-lab' }, cut(c.tag || c.subject, 16)),
+      el('text', { x: X(i), y: MAINY + 64, 'text-anchor': 'middle', class: 'rm2-sub' }, when(c.date)));
+    svg.append(Object.assign(el('title'), { textContent: `${c.subject} (${c.hash})` }));
+  });
+  if (m.here.onMain) callout(X(n - 1), 36, 'You are here', MAINY - 22);
+  rows.forEach((b, i) => {
+    const xf = X(b.index), xb = xf + GAP - 8, y = rowY(i), sx = statusX(b);
+    svg.append(el('path', { d: `M${xf} ${MAINY + 74} C${xf} ${y} ${xf + 24} ${y} ${xb - 17} ${y}`, class: 'rm2-br' }));
+    svg.append(el('circle', { cx: xb, cy: y, r: 15, class: 'rm2-bnode' }));
+    svg.append(el('text', { x: xb + 26, y: y - 12, class: 'rm2-bname' }, cut(b.name, 36)), el('text', { x: xb + 26, y: y + 30, class: 'rm2-sub' }, cut(`${b.subject} · ${when(b.date)}`, 48)));
+    svg.append(el('line', { x1: xb + 17, y1: y, x2: sx - 8, y2: y, class: 'rm2-br' }));
+    svg.append(el('rect', { x: sx, y: y - 24, width: 236, height: 48, rx: 9, class: 'rm2-warn' }), el('text', { x: sx + 118, y: y - 3, 'text-anchor': 'middle', class: 'rm2-warnt' }, 'Not merged into main yet'),
+      el('text', { x: sx + 118, y: y + 14, 'text-anchor': 'middle', class: 'rm2-sub' }, cut([b.agentProject ? `Agent work: ${b.agentProject}` : '', `${b.ahead} save${b.ahead === 1 ? '' : 's'} ahead`, b.remote ? '' : 'only on this computer'].filter(Boolean).join(' · '), 40)));
+    if (b.current || (!m.here.onMain && m.here.branch === b.name)) callout(xb, y - 74, 'You are here', y - 22);
+  });
+  return svg;
+}
+
 // The branch map: a drawing of commits in lanes, with branches splitting off and merging back.
 const LANE_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
 function branchGraph(g, when) {
@@ -1857,7 +1894,10 @@ function pageRepoMap() {
           h('small', { class: 'hint mono' }, b.isDefault ? '' : `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'}`))))),
       (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
         (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
-      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Branch map'), h('small', { class: 'hint' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
+      d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, d.remote, when)),
+        d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
+        d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
+      h('details', { class: 'card', style: 'margin-top:12px' }, h('summary', {}, h('b', {}, 'Detailed history')), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
         (d.graph?.rows || []).length ? h('div', { class: 'rm-scroll' }, branchGraph(d.graph, when)) : h('p', { class: 'hint' }, 'No saves yet.')));
   };
   const remote = (d) => h('div', {},

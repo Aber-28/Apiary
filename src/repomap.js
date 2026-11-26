@@ -78,10 +78,11 @@ export async function inspect(engine, dir) {
   for (const w of worktrees) w.agentProject = projectOf(w.branch);
   const commits = lines(log.stdout).map((l) => { const [h, s, a, d, refsText, par] = l.split(US); return { hash: h, subject: s, author: a, date: d, parents: String(par || '').split(' ').filter(Boolean), refs: String(refsText || '').split(',').map((x) => x.trim().replace(/^HEAD -> /, '')).filter((x) => x && x !== 'HEAD' && !x.startsWith('origin/HEAD')) }; });
   const graph = layoutGraph(commits);
+  const picture = await buildMap(dir, { base, defaultBranch, current, branches, projectOf });
   return {
     path: dir, remote: clean(remote.stdout), defaultBranch, current, detached: current === 'HEAD',
     head: { hash, subject, author, date: when }, ahead, behind, changes, clean: changes === 0, hasUpstream: !!bm[2],
-    branches, worktrees, commits: commits.slice(0, 20), graph,
+    branches, worktrees, commits: commits.slice(0, 20), graph, map: picture,
   };
 }
 
@@ -108,4 +109,30 @@ export function layoutGraph(commits) {
     active = next;
   }
   return { rows, lanes: Math.min(maxLane + 1, 10) };
+}
+
+// The simple picture: the main branch as a row of recent saves, "you are here", and the other branches hanging off it.
+async function buildMap(dir, { base, defaultBranch, current, branches, projectOf }) {
+  if (!base) return null;
+  const log = await G(dir, ['log', '--first-parent', '--max-count=8', `--format=%H${US}%h${US}%s${US}%D${US}%cI`, base]);
+  const line = lines(log.stdout).map((l) => { const [full, hash, subject, refsText, date] = l.split(US); const tag = (String(refsText || '').split(',').map((x) => x.trim()).find((x) => x.startsWith('tag: ')) || '').slice(5); return { full, hash, subject, tag, date }; }).reverse();
+  if (!line.length) return null;
+  const find = async (ref) => {
+    const mb = await G(dir, ['merge-base', base, ref]);
+    const full = mb.stdout.trim(); const i = line.findIndex((c) => c.full === full);
+    return { index: i >= 0 ? i : 0, earlier: i < 0 && mb.code === 0 };
+  };
+  const out = [], mergedNames = [];
+  const others = branches.filter((b) => !b.isDefault).slice(0, 30);
+  await Promise.all(others.map(async (b) => {
+    const ref = b.local ? b.name : `origin/${b.name}`;
+    const merged = (await G(dir, ['merge-base', '--is-ancestor', ref, base])).code === 0;
+    if (merged) { mergedNames.push(b.name); return; }
+    const at = await find(ref);
+    out.push({ name: b.name, subject: b.subject, date: b.date, ahead: b.aheadDefault || 0, behind: b.behindDefault || 0, local: b.local, remote: b.remote, current: b.current, agentProject: b.agentProject || null, ...at });
+  }));
+  out.sort((a, b) => (b.current - a.current) || String(b.date).localeCompare(String(a.date)));
+  const onMain = current === defaultBranch;
+  const here = onMain ? { onMain: true, index: line.length - 1 } : { onMain: false, branch: current, ...(await find('HEAD')) };
+  return { base: defaultBranch, line, here, branches: out.slice(0, 8), hiddenBranches: Math.max(0, out.length - 8), merged: mergedNames.slice(0, 12), mergedCount: mergedNames.length };
 }

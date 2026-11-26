@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.59.2
+
+- The header above a chat or project is much more compact on desktop: smaller buttons and dropdowns, labels beside them instead of above, and tighter tabs, so it takes a fraction of the space it did.
+
 ## 0.59.1
 
 - Dragging a picture onto the chat attached it twice. It is now attached once.

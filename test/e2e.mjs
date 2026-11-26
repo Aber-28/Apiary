@@ -2813,5 +2813,6 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.ok(/\.\.\.\(S\.orgDone \? \[h\('p', \{ class: 'hint' \}, 'Your CEO leads this project/.test(js) && /st\.team && !S\.orgDone/.test(js), 'with a CEO set up, no lead/team choice is offered'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/hide = \(a\) => S\.orgDone && !a\.parentId && a\.kind !== 'general'/.test(js), 'project leads are not listed again when a CEO exists'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/e\.attachHandled/.test(js), 'a dropped picture is attached once'); }
+{ const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/Compact chat header on desktop/.test(css), 'the chat header is compact'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

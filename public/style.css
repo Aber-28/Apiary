@@ -403,3 +403,13 @@ a.dash-row:hover{background:var(--hover)}
 .hgroup,.hrow{border:1px solid var(--line);border-radius:12px;background:var(--surface);margin-bottom:8px}.hgroup>summary,.hrow>summary{display:flex;align-items:center;gap:10px;padding:10px 14px;cursor:pointer;list-style:none;flex-wrap:wrap}.hgroup>summary::-webkit-details-marker,.hrow>summary::-webkit-details-marker{display:none}
 .hlist{padding:0 10px 10px}.hlist .hrow{margin:6px 0 0;background:var(--surface2)}.hbody{padding:2px 14px 12px}.hbody p{margin:6px 0}
 .hdot{width:10px;height:10px;border-radius:50%;background:var(--ok);flex:none}.hdot.err{background:var(--err)}.hdot.warn{background:var(--accent)}.hdot.info{background:var(--muted)}.hgroup>summary .hint{margin-left:auto}
+/* Compact chat header on desktop: one tight row, labels beside the pickers */
+@media (min-width:901px){
+.chat-head{padding:8px 20px;gap:8px 10px}
+.chat-head h1{font-size:15px}.chat-head .t .hint{font-size:11.5px}
+.chat-head .btn{min-height:30px;padding:0 10px;font-size:12.5px;border-radius:8px}
+.chat-head .model-box{flex-direction:row;align-items:center;gap:6px}.chat-head .model-box small{font-size:10px}
+.chat-head select{min-height:30px;height:30px;padding:0 26px 0 8px;font-size:12.5px;border-radius:8px}.chat-head .model-pick{max-width:190px}
+.chat-head .chip,.chat-head .pill{height:22px;font-size:11px}
+.tabs button{min-height:34px;padding:0 12px;font-size:13px}
+}

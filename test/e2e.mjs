@@ -2726,7 +2726,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   await until(() => engine.messages(chat.id).some((m) => m.role === 'user' && /Fix the layout/.test(m.text) && m.images?.length === 1));
   const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function attacher/); assert.match(a, /onpaste: att\.onPaste/);
 }
-{ const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function codeBlock/); assert.match(a, /class: 'codeblock'/); assert.match(a, /clipboard\.writeText/); }
+{ const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function codeBlock/); assert.match(a, /class: 'codeblock'/); assert.match(a, /clipboard\.writeText/); assert.match(a, /oncopy/); assert.match(a, /\.trim\(\);   \/\/ no stray/); }
 { const sys = engine._system(engine.agents[(await call('/api/chat')).body.id]); assert.match(sys, /fenced code block/, 'agents are told to put commands in code blocks'); }
 {
   assert.equal((await call('/api/settings')).body.imageKeepDays, 30, 'pictures are kept 30 days by default');

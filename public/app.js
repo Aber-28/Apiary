@@ -1341,12 +1341,12 @@ function chipsIn(str) {
   return out;
 }
 function codeBlock(code, lang) {
-  const text = code.replace(/\n$/, '');
+  const text = code.replace(/[ \t]+$/gm, '').replace(/^\s*\n/, '').trim();   // no stray blank lines or spaces at either end
   const btn = h('button', { type: 'button', class: 'copy', 'aria-label': 'Copy this code', onclick: async () => {
     try { await navigator.clipboard.writeText(text); } catch { const t = h('textarea', { style: 'position:fixed;opacity:0' }); t.value = text; document.body.append(t); t.select(); try { document.execCommand('copy'); } catch { /* nothing more to try */ } t.remove(); }
     btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
   } }, 'Copy');
-  return h('div', { class: 'codeblock' }, h('div', { class: 'cb-bar' }, h('span', {}, lang || 'code'), btn), h('pre', { tabindex: '0' }, h('code', {}, text)));
+  return h('div', { class: 'codeblock' }, h('div', { class: 'cb-bar' }, h('span', {}, lang || 'code'), btn), h('pre', { tabindex: '0', oncopy: (e) => { const sel = String(getSelection()).replace(/[ \t]+$/gm, '').trim(); if (sel) { e.clipboardData.setData('text/plain', sel); e.preventDefault(); } } }, h('code', {}, text)));
 }
 function linkify(text) {
   const str = String(text ?? ''), out = [];

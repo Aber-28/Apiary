@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.4
+
+- Copying code from a code box no longer brings extra spaces or blank lines at the start or end, whether you press Copy or select the text yourself.
+
 ## 0.53.3
 
 - The Buy me a coffee link now sits in the footer at the bottom of the menu, always visible, instead of on the Updates page.

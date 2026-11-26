@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.62.1
+
+- Fixed: the What's-new window had no space around its text. It now has proper padding and spacing between items.
+
 ## 0.62.0
 
 - New: Repository map (Knowledge menu). Pick a repository on this computer or on your GitHub account and see where you are: the branch, unsaved changes, every branch with how far it is from main, which branches are agent work, each agent's checkout, recent activity and open pull requests. Read-only.

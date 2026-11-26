@@ -434,3 +434,14 @@ dialog.news{max-width:min(640px,94vw);width:100%}.news-body{max-height:56vh;over
 .rm-behind{justify-content:flex-end}.rm-bar i{display:block;height:100%;background:var(--muted)}.rm-ahead i{background:var(--accent)}
 .rm-commit{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 2px;border-bottom:1px solid var(--line)}
 @media (max-width:640px){.rm-row{grid-template-columns:1fr;gap:4px}}
+/* What's-new window: room around the text */
+dialog.news>div{padding:28px 32px 24px}
+dialog.news h2{margin:0 0 6px!important}
+dialog.news .news-body{margin:14px -8px 0;padding:0 8px}
+.news-ver li{margin:0 0 10px;line-height:1.55}
+.news-ver ul{padding-left:22px;margin:8px 0 0}
+dialog.news .news-ver h3{margin:18px 0 6px}
+dialog.news .news-ver h4{margin:14px 0 8px}
+dialog.news button.primary,dialog.news .btn.primary{margin-top:6px}
+@media (max-width:640px){dialog.news>div{padding:20px 18px 16px}}
+.news-body+.dlg-actions{margin-top:20px}

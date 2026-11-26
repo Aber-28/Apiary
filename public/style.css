@@ -359,3 +359,8 @@ div.f{display:flex;flex-direction:column;gap:6px;font-weight:600;margin-bottom:1
 .codeblock pre{margin:0;padding:10px 12px;overflow-x:auto;white-space:pre;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;user-select:all}
 .codeblock code{font:inherit}
 code.ic{font:12.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;padding:1px 5px;border-radius:5px;background:rgba(127,127,127,.2);overflow-wrap:anywhere}
+
+.side-foot{margin-top:auto;padding-top:10px;border-top:1px solid var(--line);text-align:center;font-size:12.5px}
+.side-foot .coffee{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:0 12px;border-radius:8px;color:var(--muted);font-weight:600}
+.side-foot .coffee:hover{background:var(--hover);color:var(--text)}
+.side-foot{position:sticky;bottom:-18px;background:var(--surface);padding-bottom:10px;margin-bottom:-18px;z-index:2}

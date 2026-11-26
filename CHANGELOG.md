@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.53.3
+
+- The Buy me a coffee link now sits in the footer at the bottom of the menu, always visible, instead of on the Updates page.
+
 ## 0.53.2
 
 - You choose how long attached pictures are kept: 30 days (default), 90, 180, 365 or never delete. Settings, Access and safety. Counted from the day the picture was attached; checked at start and every few hours.

@@ -184,7 +184,8 @@ function renderSide() {
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
     newBtn, S.onboardingDone && S.account && !S.account.exists ? h('a', { href: '#/signin', class: 'signin-nag', role: 'alert' }, 'No sign-in yet. Anyone who can reach this page can use it. Create one now') : null, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, groups),
     h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
-    workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')));
+    workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')),
+    h('div', { class: 'side-foot' }, h('a', { class: 'coffee', href: 'https://www.buymeacoffee.com/aber28', target: '_blank', rel: 'noopener noreferrer', title: 'Apiary is free. If it saves you time, a coffee helps keep it going.' }, h('span', { 'aria-hidden': 'true' }, '☕'), ' Buy me a coffee')));
 }
 function navPath(items, label, trail = []) {
   for (const it of items) {
@@ -979,8 +980,7 @@ function pageUpdates() {
         u.notes?.length ? h('details', { open: true }, h('summary', {}, 'What is new'), h('pre', { class: 'diffstat mono', style: 'white-space:pre-wrap' }, [].concat(u.notes).join('\n'))) : null,
         queuedMsg ? h('p', { class: 'hint', role: 'status', style: 'margin-top:10px' }, queuedMsg) : null,
         h('div', { class: 'kv', style: 'margin-top:12px' }, check, install, forceNow, cancelQueue), busy,
-        h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))),
-      h('div', { class: 'card', style: 'margin-top:12px' }, h('p', {}, h('b', {}, 'Enjoying Apiary?')), h('p', { class: 'hint' }, 'It is free to use. If it saves you time, a coffee helps keep it going. Nothing is ever locked behind it.'), h('p', {}, h('a', { class: 'btn', href: 'https://buymeacoffee.com/aber28', target: '_blank', rel: 'noopener noreferrer' }, 'Buy me a coffee (5 euro)'))));
+        h('label', { class: 'f', style: 'margin-top:12px;max-width:340px' }, 'Look for new versions', auto, h('small', {}, 'A new version is only downloaded. It is never installed until you press Install.'))));
   };
   draw(); refreshUpdate().then(() => { if (cur() === '#/updates') draw(); if (S.update?.state === 'installing') updateOverlay(S.version); }); page = { shows: () => true };
 }

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.60.0
+
+- Fixed: phone menu. Tapping a menu group (Workspace, Agents and so on) opened it and then closed the whole menu, so you had to open the menu again to see it. The menu now stays open until you pick a page or tap outside it.
+- After an update, the first thing you see when Apiary comes back is a "What is new" window listing the new features and the corrections since the version you last saw. Page names in it (Library, Dashboard, Health, Approvals and so on) are links that open in a new tab, so the list stays on screen. It stays until you press OK, on every device, and never shows again for that version.
+
 ## 0.59.2
 
 - The header above a chat or project is much more compact on desktop: smaller buttons and dropdowns, labels beside them instead of above, and tighter tabs, so it takes a fraction of the space it did.

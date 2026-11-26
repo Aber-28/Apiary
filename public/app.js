@@ -127,7 +127,8 @@ if (location.protocol === 'http:' && !['localhost', '127.0.0.1', '[::1]'].includ
 $('#theme').onclick = themeMenu;
 $('#menu').onclick = () => $('#side').classList.toggle('open');
 // tapping outside the open menu (or pressing Escape) closes it
-document.addEventListener('click', (e) => { const sd = $('#side'); if (sd.classList.contains('open') && !sd.contains(e.target) && !e.target.closest('#menu')) sd.classList.remove('open'); });
+// A tap inside the menu never closes it. The path is read from the event itself, because tapping a folder redraws the menu and the tapped button is no longer in the page by the time this runs.
+document.addEventListener('click', (e) => { const sd = $('#side'), path = e.composedPath ? e.composedPath() : []; if (sd.classList.contains('open') && !path.includes(sd) && !path.some((n) => n.id === 'menu')) sd.classList.remove('open'); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#side').classList.remove('open'); });
 applyTheme(window.apiaryTheme.get());
 
@@ -2754,10 +2755,42 @@ function pageStartup() {
   api('/api/service').then(draw).catch((e) => box.replaceChildren(h('p', {}, e.message)));
 }
 
+// ---------- what's new after an update ----------
+// Words in the notes that become links to the matching page. They always open in a new tab, so the notes stay on screen.
+const NEWS_LINKS = [[/\bLibrary\b/, '#/library'], [/\bDashboard\b/, '#/home'], [/\bHealth\b/, '#/health'], [/\bApprovals?\b/, '#/approvals'], [/\bTroubleshoot\b/, '#/infrastructure'], [/\bDevices\b/, '#/infrastructure'], [/\bUpdates page\b|\bUpdate now!/, '#/updates'], [/\bAgents list\b|\bAll agents\b/, '#/agents'], [/\bProjects\b/, '#/projects'], [/\bTasks\b/, '#/tasks'], [/\bLive activity\b/, '#/activity'], [/\baudit log\b/i, '#/audit'], [/\bSecrets vault\b|\bvault\b/, '#/secrets'], [/\bTelegram\b/, '#/telegram'], [/\bBackups\b/, '#/backups'], [/\bMemory\b/, '#/memory'], [/\bOrganisation\b/, '#/organisation'], [/\bRunbooks\b/, '#/runbooks'], [/\bWeekly report\b/, '#/reports'], [/\bTeam meetings\b/, '#/meetings'], [/\bTeams\b/, '#/teams'], [/\bUsage\b/, '#/usage'], [/\bRepositories\b/, '#/repositories'], [/\bTerminal sessions\b/, '#/terminal'], [/\bChat\b/, '#/chat'], [/\bAppearance\b/, '#/appearance'], [/\bSetup guide\b/, '#/setup']];
+// A changelog line that starts with "Fixed:" is a fix. Older lines without it are sorted by wording.
+const isFix = (t) => /^fix(ed)?:/i.test(t) || /\b(fixed|no longer|stopped|wrongly|bug|crash|twice|stuck|stale|could not|couldn't|used to)\b/i.test(t);
+const noFixTag = (t) => { const r = t.replace(/^fix(ed)?:\s*/i, ''); return r.charAt(0).toUpperCase() + r.slice(1); };
+function newsLine(text) {
+  text = noFixTag(text);
+  const used = new Set(), hits = [];
+  for (const [re, hash] of NEWS_LINKS) { const m = re.exec(text); if (m && !used.has(hash)) { used.add(hash); hits.push({ i: m.index, len: m[0].length, hash }); } }
+  hits.sort((a, b) => a.i - b.i); const out = []; let at = 0;
+  for (const x of hits) { if (x.i < at) continue; if (x.i > at) out.push(...inlineCode(text.slice(at, x.i))); out.push(h('a', { href: `${location.origin}/${x.hash}`, target: '_blank', rel: 'noopener' }, text.slice(x.i, x.i + x.len))); at = x.i + x.len; }
+  if (at < text.length) out.push(...inlineCode(text.slice(at)));
+  return h('li', {}, ...out);
+}
+function openWhatsNew(data) {
+  const sections = [];
+  for (const e of data.entries) {
+    const feats = e.items.filter((t) => !isFix(t)), fixes = e.items.filter(isFix);
+    sections.push(h('div', { class: 'news-ver' }, h('h3', {}, `Version ${e.version}`),
+      feats.length ? h('div', {}, h('h4', {}, 'New'), h('ul', {}, feats.map(newsLine))) : null,
+      fixes.length ? h('div', {}, h('h4', {}, 'Fixed'), h('ul', {}, fixes.map(newsLine))) : null));
+  }
+  const ok = h('button', { class: 'btn primary big', type: 'button' }, 'OK');
+  const dlg = h('dialog', { class: 'news', 'aria-label': `What is new in Apiary ${data.version}` }, h('div', {}, h('h2', { style: 'font-size:20px;margin:0 0 4px' }, `Apiary is now version ${data.version}`), h('p', { class: 'hint', style: 'margin:0 0 10px' }, 'Here is what is new. Links open in a new tab, so you can come back to this list.'), h('div', { class: 'news-body' }, sections), h('div', { class: 'dlg-actions' }, ok)));
+  dlg.addEventListener('cancel', (e) => e.preventDefault()); // only OK closes it
+  ok.onclick = guard(async () => { await api('/api/whatsnew/seen', 'POST', {}); dlg.close(); dlg.remove(); });
+  document.body.append(dlg); dlg.showModal(); ok.focus();
+}
+async function checkWhatsNew() { try { const d = await api('/api/whatsnew'); if (d.entries?.length) openWhatsNew(d); } catch { /* not important */ } }
+
 // ---------- boot ----------
 (async () => {
   try { await loadState(); } catch (e) { toast(e.message, true); }
   connectEvents(); route(); refreshConns(); loadUsage(); if (S.update?.state === 'installing') updateOverlay(S.version);
   api('/api/tools').then((t) => { if (t.install.state === 'running') installOverlay(t.install.tools); }).catch(() => {});
   if (!S.onboardingDone && cur() !== '#/setup') openSetup();
+  checkWhatsNew();
 })();

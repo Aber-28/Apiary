@@ -413,3 +413,5 @@ a.dash-row:hover{background:var(--hover)}
 .chat-head .chip,.chat-head .pill{height:22px;font-size:11px}
 .tabs button{min-height:34px;padding:0 12px;font-size:13px}
 }
+
+dialog.news{max-width:min(640px,94vw);width:100%}.news-body{max-height:56vh;overflow:auto;margin:0 -6px;padding:0 6px}.news-ver{margin:0 0 14px}.news-ver h3{font-size:15px;margin:10px 0 2px}.news-ver h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:8px 0 2px}.news-ver ul{margin:2px 0 6px;padding-left:20px}.news-ver li{margin:4px 0}.news a{text-decoration:underline}

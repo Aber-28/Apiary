@@ -29,6 +29,27 @@ import { EVERY } from './limits.js';
 
 const MIME = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ico': 'image/x-icon' };
 const VERSION = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+
+// ---- "What is new" shown after an update ----
+const vnum = (v) => String(v).split('.').map((n) => parseInt(n, 10) || 0);
+const vcmp = (a, b) => { const x = vnum(a), y = vnum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
+function changelogEntries() {
+  let txt = ''; try { txt = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8'); } catch { return []; }
+  const out = []; let cur = null;
+  for (const line of txt.split('\n')) {
+    const h = line.match(/^## (\d+\.\d+\.\d+)\s*$/);
+    if (h) { cur = { version: h[1], items: [] }; out.push(cur); continue; }
+    const b = cur && line.match(/^[-*] (.+)$/); if (b) cur.items.push(b[1].trim());
+  }
+  return out.filter((e) => e.items.length);
+}
+function whatsNew(engine) {
+  const d = (engine.store.data.whatsNew ||= {});
+  let from = d.seen;
+  if (!from) { if (!engine.store.data.settings?.onboardingDone) { d.seen = VERSION; engine.store.save(); return { version: VERSION, entries: [] }; } from = null; }
+  const entries = changelogEntries().filter((e) => vcmp(e.version, VERSION) <= 0 && (from ? vcmp(e.version, from) > 0 : e.version === VERSION)).slice(0, 12);
+  return { version: VERSION, from, entries: from === VERSION ? [] : entries };
+}
 const PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
 const HOST = process.env.APIARY_HOST || '127.0.0.1';
 const PORT = Number(process.env.APIARY_PORT || 7777);
@@ -517,6 +538,8 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         startUpdate();
         return json(res, 202, { started: true, forced: !!(b.total && ub.force) });
       }
+      if (url.pathname === '/api/whatsnew' && req.method === 'GET') return json(res, 200, whatsNew(engine));
+      if (url.pathname === '/api/whatsnew/seen' && req.method === 'POST') { (engine.store.data.whatsNew ||= {}).seen = VERSION; engine.store.save(); return json(res, 200, { ok: true, version: VERSION }); }
       if (url.pathname === '/api/update/cancel' && req.method === 'POST') {
         if (!updater) throw Object.assign(new Error('Updates are not available here.'), { status: 409 });
         updater.s.queued = false; updater.s.busy = 0; engine.holdNewWork(false);

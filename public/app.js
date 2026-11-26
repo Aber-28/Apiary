@@ -5,6 +5,7 @@ const S = { agents: [], providers: [], limits: {}, defs: [], approvals: [], appr
 const $ = (s) => document.querySelector(s);
 const view = $('#view');
 let page = null; // { update?() } for the current route
+let ACTIVE_ATTACH = null; // the picture attacher of the page on screen: a paste anywhere on the page goes to it
 
 const ICON = {
   shield: 'M12 2l8 3v6c0 5-3.5 9-8 11-4.5-2-8-6-8-11V5z M9 12l2 2 4-4',
@@ -243,7 +244,7 @@ const ROUTES = [
 ];
 function route() {
   const hash = cur();
-  view.className = 'view'; page = null;
+  view.className = 'view'; page = null; ACTIVE_ATTACH = null;
   const r = ROUTES.find(([re]) => re.test(hash));
   if (!r) { location.hash = '#/chat'; return; }
   S.openGroup = NAV.find((g) => navLeaves(g.items).some(([href]) => isActive(href)))?.id ?? S.openGroup; // only one submenu stays open
@@ -256,7 +257,7 @@ addEventListener('hashchange', route);
 function refreshConns() { return api('/api/connections').then((c) => { S.conns = c; renderSide(); }).catch(() => {}); }
 async function loadState() {
   const st = await api('/api/state');
-  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], reviewWork: st.reviewWork !== false, approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, account: st.account || { exists: false }, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false });
+  Object.assign(S, { agents: st.agents, providers: st.providers, limits: st.limits, defs: st.defs, teams: st.teams || [], memory: st.memory || { enabled: true, count: 0 }, approvals: st.approvals || [], reviewWork: st.reviewWork !== false, approvalsDefault: st.approvalsDefault !== false, onboardingDone: st.onboardingDone !== false, orgDone: !!st.orgDone, account: st.account || { exists: false }, defaultProvider: st.defaultProvider || '', version: st.version, meeting: st.meeting || { frequency: 'off' }, autoUpdate: st.autoUpdate !== false, updateCheck: st.updateCheck || 'daily', vault: st.vault || { exists: false, unlocked: false }, update: st.update || null, plainEnglish: st.plainEnglish !== false, imageKeepDays: st.imageKeepDays ?? 30 });
   S.health = st.health; S.runbookDrafts = st.runbookDrafts || 0; renderUpdateChip(); renderSignOut();
   updateBadge();
 }
@@ -657,7 +658,7 @@ function pageProject(leadId, general = false) {
       if (r.tagged?.length) toast(`Sent to ${r.tagged.join(' and ')}. The answer will appear here.`);
     });
     const composer = h('div', { class: 'composer' }, att.strip, pop, att.btn, att.file, input, h('button', { class: 'btn primary big', onclick: send }, 'Send'));
-    att.dropOn(composer);
+    att.dropOn(el.body); att.dropOn(composer); ACTIVE_ATTACH = att;
     el.body.replaceChildren(msgsEl, liveEl, composer);
     drawMsgs();
   };
@@ -1332,15 +1333,37 @@ function refChip(code) {
   const title = r.kind === 'secret' ? `${code} · ${r.title} (secret)` : `${code} · ${r.title} · ${r.label || word}`;
   return h('a', { class: `idchip st-${r.state}`, href: r.href || '#', title, 'aria-label': title }, h('span', { class: 'idc' }, code), h('span', { class: 'idi', 'aria-hidden': 'true' }, icon));
 }
+// Plain text with task/approval chips (T-0004), `inline code` and ``` fenced blocks ```. Fenced blocks get a Copy button.
+function chipsIn(str) {
+  const out = []; let last = 0;
+  for (const m of str.matchAll(/\b(?:T|TK|AP|SC)-\d{4,}\b/g)) { out.push(str.slice(last, m.index)); out.push(refChip(m[0])); last = m.index + m[0].length; }
+  out.push(str.slice(last));
+  return out;
+}
+function codeBlock(code, lang) {
+  const text = code.replace(/\n$/, '');
+  const btn = h('button', { type: 'button', class: 'copy', 'aria-label': 'Copy this code', onclick: async () => {
+    try { await navigator.clipboard.writeText(text); } catch { const t = h('textarea', { style: 'position:fixed;opacity:0' }); t.value = text; document.body.append(t); t.select(); try { document.execCommand('copy'); } catch { /* nothing more to try */ } t.remove(); }
+    btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
+  } }, 'Copy');
+  return h('div', { class: 'codeblock' }, h('div', { class: 'cb-bar' }, h('span', {}, lang || 'code'), btn), h('pre', { tabindex: '0' }, h('code', {}, text)));
+}
 function linkify(text) {
   const str = String(text ?? ''), out = [];
   let last = 0;
-  for (const m of str.matchAll(/\b(?:T|TK|AP|SC)-\d{4,}\b/g)) {
-    out.push(str.slice(last, m.index));
-    out.push(refChip(m[0]));
+  // an unfinished block (the AI is still typing) is already shown as code
+  for (const m of str.matchAll(/```[ \t]*([\w+#.-]*)[ \t]*\n([\s\S]*?)(?:\n?```|$)/g)) {
+    out.push(...inlineCode(str.slice(last, m.index)));
+    out.push(codeBlock(m[2], m[1]));
     last = m.index + m[0].length;
   }
-  out.push(str.slice(last));
+  out.push(...inlineCode(str.slice(last).replace(/^\n/, '')));
+  return out;
+}
+function inlineCode(str) {
+  const out = []; let last = 0;
+  for (const m of str.matchAll(/`([^`\n]+)`/g)) { out.push(...chipsIn(str.slice(last, m.index))); out.push(h('code', { class: 'ic' }, m[1])); last = m.index + m[0].length; }
+  out.push(...chipsIn(str.slice(last)));
   return out;
 }
 // side: 'me' (yours, right) or 'them' (an agent, left, in its colour)
@@ -1376,6 +1399,13 @@ async function shrinkImage(file) {
   } catch { if (file.size > 8 * 1024 * 1024) throw new Error('That picture is too large (limit 8 MB).'); return readAs(file); }
 }
 const MAX_PICS = 6;
+document.addEventListener('paste', (e) => {
+  if (!ACTIVE_ATTACH || e.defaultPrevented) return;
+  const fs = [...(e.clipboardData?.files || [])].filter((f) => f.type.startsWith('image/'));
+  if (fs.length) { e.preventDefault(); ACTIVE_ATTACH.add(fs); }
+});
+// A picture dropped anywhere else on the window must not make the browser open it and leave Apiary.
+for (const ev of ['dragover', 'drop']) window.addEventListener(ev, (e) => { if ([...(e.dataTransfer?.types || [])].includes('Files')) e.preventDefault(); });
 const picUrl = (id) => `/api/images/${encodeURIComponent(id)}`;
 // A row of small pictures that are in a message or task. Click to open full size.
 const picStrip = (list) => list?.length ? h('div', { class: 'pics' }, list.map((im) => h('a', { href: picUrl(im.id), target: '_blank', rel: 'noopener', title: im.name }, h('img', { class: 'pic', src: picUrl(im.id), alt: im.name || 'Attached picture', loading: 'lazy' })))) : null;
@@ -1503,6 +1533,7 @@ function pageTasks() {
       t.log?.length ? h('details', {}, h('summary', {}, 'History'), h('ul', { class: 'hint' }, t.log.slice().reverse().map((l) => h('li', {}, `${new Date(l.at).toLocaleString()}: ${l.text}`)))) : null,
       h('div', { class: 'dlg-actions' }, h('button', { class: 'btn danger', value: 'x', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'DELETE'); d.close(); load(); })(); } }, 'Delete'), h('span', { style: 'flex:1' }), h('button', { class: 'btn', value: 'c' }, 'Cancel'),
         h('button', { class: 'btn primary', value: 's', onclick: (e) => { e.preventDefault(); guard(async () => { await api('/api/tasks/' + t.id, 'PUT', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value, images: att.items() }); d.close(); load(); })(); } }, 'Save')));
+    att.dropOn(d); const prevActive = ACTIVE_ATTACH; ACTIVE_ATTACH = att; d.addEventListener('close', () => { ACTIVE_ATTACH = prevActive; });
   };
   const card = (t) => h('div', { class: 'tcard' }, h('b', { class: 'ttl' }, h('span', { class: 'chip mono', title: 'Task ID', style: 'margin-right:6px' }, t.code || ''), h('a', { href: `#/task/${t.id}`, title: 'Open this task' }, t.title)),
     t.parentCode ? h('small', { class: 'hint', style: 'display:block' }, `Subtask of ${t.parentCode}`) : null,
@@ -1522,10 +1553,10 @@ function pageTasks() {
     const title = h('input', { type: 'text', placeholder: 'What needs doing, or what is the idea?', 'aria-label': 'New task title', onkeydown: (e) => { if (e.key === 'Enter') add.click(); } }), notes = h('input', { type: 'text', placeholder: 'More detail (optional)', 'aria-label': 'Details' }), labels = h('input', { type: 'text', placeholder: 'Labels, e.g. website, money', 'aria-label': 'Labels' });
     const st = h('select', { 'aria-label': 'Where does it go' }, h('option', { value: 'backburner' }, 'Back burner (unfinished idea)'), h('option', { value: 'todo' }, 'To do (ready to start)'));
     const who = agentSel(agents.find((a) => a.ceo)?.id, 'Who does it');
-    const att = attacher(); notes.onpaste = att.onPaste; title.onpaste = att.onPaste;
+    const att = attacher(); notes.onpaste = att.onPaste; title.onpaste = att.onPaste; ACTIVE_ATTACH = att;
     const add = h('button', { class: 'btn primary', onclick: guard(async () => { await api('/api/tasks', 'POST', { title: title.value, notes: notes.value, labels: labels.value, status: st.value, assignee: who.value, images: att.items() }); load(); }) }, 'Add');
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Tasks'), h('p', { class: 'sub-title' }, 'Everything in one place. Agents add and move tasks as they work. Add your own: "Back burner" is an unfinished idea you will fill in later; "To do" is ready, so work on it can start.'))),
-      h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, who, att.btn, add), att.file, att.strip),
+      (() => { const c = h('div', { class: 'card', style: 'margin-bottom:16px' }, h('div', { class: 'formrow' }, title, st), h('div', { class: 'formrow', style: 'margin-top:8px' }, notes, labels, who, att.btn, add), att.file, att.strip, h('small', { class: 'hint' }, 'Tip: paste or drop a screenshot here to attach it.')); att.dropOn(c); return c; })(),
       h('div', { class: 'board' }, TASK_COLS.map(([k, name, sub]) => {
         let list = tasks.filter((t) => t.status === k); const more = k === 'done' && !showAllDone && list.length > 12; if (more) list = list.slice(0, 12);
         return h('section', { class: 'col', 'aria-label': name }, h('h3', {}, name, h('span', { class: 'count' }, String(tasks.filter((t) => t.status === k).length))), h('small', { class: 'hint' }, sub), list.length ? list.map(card) : h('p', { class: 'hint empty-col' }, 'Nothing here'), more ? h('button', { class: 'btn', onclick: () => { showAllDone = true; draw(); } }, 'Show all') : null);
@@ -2220,6 +2251,9 @@ async function pageAccess() {
       h('h2', { style: 'margin-top:20px' }, 'Safe and Full access'), h('p', {}, 'Safe lets an agent edit files in its own folder. Full access lets it run any command without asking. Choose per project when you create it.'),
       h('h2', { style: 'margin-top:20px' }, 'Git projects'), h('p', {}, 'In a git repository every agent works on its own branch and checkout, so your own working copy is never touched. Nothing is pushed until you open a pull request.')));
   view.append(await trustCard());
+  const keep = h('select', { 'aria-label': 'How long to keep pictures', onchange: guard(async (e) => { await api('/api/settings', 'PUT', { imageKeepDays: Number(e.target.value) }); S.imageKeepDays = Number(e.target.value); toast('Saved'); }) },
+    [[30, '30 days (recommended)'], [90, '90 days'], [180, '180 days'], [365, '365 days'], [0, 'Never delete']].map(([v, n]) => h('option', { value: String(v), selected: v === S.imageKeepDays }, n)));
+  view.append(h('div', { class: 'card', style: 'max-width:720px;margin-top:16px' }, h('h2', {}, 'Pictures and screenshots'), h('p', {}, 'Pictures you attach to chats and tasks are stored on this computer, in Apiary\'s own folder. Choose how long they are kept. After that, each picture is deleted automatically, counted from the day it was attached.'), h('label', { class: 'f' }, 'Keep pictures for', keep), h('p', { class: 'hint' }, 'Deleting a picture does not delete the chat or task it was in; the picture just no longer shows there.')));
 }
 // The six slider positions. Keep in step with TRUST_LEVELS in src/command-rules.js.
 const TRUST_LABELS = ['Ask me for every command', 'Read-only commands run; everything else asks', 'Simple commands run; chains, scripts and changes ask', 'Chains run too; scripts, changes and destructive commands ask', 'Everything runs except deleting, rebooting and destroying', 'Everything runs without asking'];

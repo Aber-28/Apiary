@@ -1,8 +1,17 @@
 # Changelog
 
+## 0.53.2
+
+- You choose how long attached pictures are kept: 30 days (default), 90, 180, 365 or never delete. Settings, Access and safety. Counted from the day the picture was attached; checked at start and every few hours.
+- Pictures can be pasted from the clipboard anywhere on the chat or tasks page, and dropped anywhere on the chat, the new-task form and the edit-task window. A picture dropped elsewhere no longer makes the browser navigate away.
+
+## 0.53.1
+
+- Commands and code in chat now show in a dark code box with a Copy button, ready to paste into SSH or a terminal. Short names in `backticks` show as inline code. Agents are told to always put commands in code blocks.
+
 ## 0.53.0
 
-- Pictures and screenshots: attach them to a chat message (paperclip, paste or drag and drop) and to tasks (new and edit). The agent looks at them and acts on what it sees. Works with Claude Code, Codex and web (API key) connections. Only real PNG/JPEG/GIF/WebP files are accepted (checked by content), stored privately and tidied after 60 days.
+- Pictures and screenshots: attach them to a chat message (paperclip, paste or drag and drop) and to tasks (new and edit). The agent looks at them and acts on what it sees. Works with Claude Code, Codex and web (API key) connections. Only real PNG/JPEG/GIF/WebP files are accepted (checked by content), stored privately and deleted after your chosen retention (30 days by default).
 
 ## 0.52.1
 

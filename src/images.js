@@ -6,6 +6,8 @@ import path from 'node:path';
 
 export const MAX_IMAGE = 8 * 1024 * 1024;   // per picture, after decoding
 export const MAX_PER_MESSAGE = 6;
+export const KEEP_CHOICES = [30, 90, 180, 365, 0];   // days; 0 = never delete
+export const DEFAULT_DAYS = 30;
 const TYPES = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 const err = (status, message) => Object.assign(new Error(message), { status });
 
@@ -52,9 +54,12 @@ export class Images {
   // Paths for the AI to open.
   files(list) { return (list || []).map((x) => this.find(x.id)).filter(Boolean).map((f) => ({ path: f.path, mime: f.mime })); }
   // Old pictures are dropped after a while so the folder does not grow forever.
-  prune(days = 60) {
-    const cut = Date.now() - days * 864e5;
-    for (const f of readdirSync(this.dir)) { try { const p = path.join(this.dir, f); if (statSync(p).mtimeMs < cut) unlinkSync(p); } catch { /* gone already */ } }
+  // days = 0 means keep them for ever. Returns how many were deleted.
+  prune(days = DEFAULT_DAYS) {
+    if (!days) return 0;
+    const cut = Date.now() - days * 864e5; let n = 0;
+    for (const f of readdirSync(this.dir)) { try { const p = path.join(this.dir, f); if (statSync(p).mtimeMs < cut) { unlinkSync(p); n++; } } catch { /* gone already */ } }
+    return n;
   }
 }
 

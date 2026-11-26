@@ -15,7 +15,7 @@ import { readFileSync, mkdirSync, realpathSync, existsSync, statSync, readdirSyn
 import path from 'node:path';
 import { providers, which } from './providers.js';
 import { HOME } from './store.js';
-import { Images } from './images.js';
+import { Images, KEEP_CHOICES, DEFAULT_DAYS } from './images.js';
 import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
@@ -90,7 +90,7 @@ export class Engine extends EventEmitter {
     super();
     this.store = store;
     this.connections = new Connections(store);
-    this.images = new Images(path.join(HOME, 'images')); try { this.images.prune(); } catch { /* best effort */ }
+    this.images = new Images(path.join(HOME, 'images')); this.pruneImages(); setInterval(() => this.pruneImages(), 6 * 3600e3).unref?.();
     this.ctls = new Map();     // agentId -> AbortController of the running provider call
     this.chains = new Map();   // agentId -> promise chain (one turn at a time per agent)
     this.stopped = new Set();  // agents asked to stop mid-delegation
@@ -275,6 +275,10 @@ export class Engine extends EventEmitter {
     if (onboardingDone !== undefined) st.onboardingDone = !!onboardingDone;
     this.store.save();
   }
+  // How long attached pictures stay on this machine (days; 0 = never delete). Checked at start and every few hours.
+  get imageKeepDays() { const v = this.store.data.settings.imageKeepDays; return KEEP_CHOICES.includes(v) ? v : DEFAULT_DAYS; }
+  setImageKeepDays(v) { v = Number(v); if (!KEEP_CHOICES.includes(v)) throw httpErr(400, `Choose ${KEEP_CHOICES.filter(Boolean).join(', ')} days or never delete`); this.store.data.settings.imageKeepDays = v; this.store.save(); this.pruneImages(); return v; }
+  pruneImages() { try { return this.images.prune(this.imageKeepDays); } catch { return 0; } }
   get memoryEnabled() { return this.store.data.settings.memory !== false; }
   setMemoryEnabled(v) { this.store.data.settings.memory = !!v; this.store.save(); return this.memoryEnabled; }
   // A project has no agent of its own. Whoever is responsible for it (the CEO unless you chose another agent) does the work,
@@ -1144,6 +1148,7 @@ export class Engine extends EventEmitter {
     if (standing) s += `\nStanding instructions for you:\n${standing}\n`;
     if (agent.method === 'api') s += 'You are connected through a web API: you cannot read files or run commands. Answer in text only.\n';
     if (agent.git) s += `You are working on git branch ${agent.git.branch} in your own checkout. Your changes are committed for you after each turn; do not switch branches or push.\n`;
+    if (!agent.parentId) s += 'FORMATTING: Whenever you give the human something to copy and run or paste (a terminal or SSH command, a config line, a file path to type, a script, a key), put it in a fenced code block (three backticks, then the language such as bash) and nothing else inside it, one command per line, with no $ prompt in front. Short names, commands or file names inside a sentence go in single backticks.\n';
     s += agent.parentId
       ? 'Your reply goes back to the agent that gave you this task, not to a human. Be concrete and concise: say what you did, what you found, and where any files are.\n'
       : 'Your replies go to the human you are working for. Be clear and concise.\n';

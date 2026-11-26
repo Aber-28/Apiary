@@ -2726,5 +2726,21 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   await until(() => engine.messages(chat.id).some((m) => m.role === 'user' && /Fix the layout/.test(m.text) && m.images?.length === 1));
   const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function attacher/); assert.match(a, /onpaste: att\.onPaste/);
 }
+{ const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /function codeBlock/); assert.match(a, /class: 'codeblock'/); assert.match(a, /clipboard\.writeText/); }
+{ const sys = engine._system(engine.agents[(await call('/api/chat')).body.id]); assert.match(sys, /fenced code block/, 'agents are told to put commands in code blocks'); }
+{
+  assert.equal((await call('/api/settings')).body.imageKeepDays, 30, 'pictures are kept 30 days by default');
+  for (const d of [90, 180, 365, 0]) { assert.equal((await call('/api/settings', 'PUT', { imageKeepDays: d })).body.imageKeepDays, d); }
+  assert.equal((await call('/api/settings', 'PUT', { imageKeepDays: 45 })).status, 400, 'only the offered choices');
+  const { Images } = await import('../src/images.js'); const { mkdtempSync, utimesSync, existsSync } = await import('node:fs'); const os = await import('node:os'); const path = await import('node:path');
+  const im = new Images(mkdtempSync(path.join(os.tmpdir(), 'pics-'))), png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+  const old = im.save({ data: png.toString('base64') }), fresh = im.save({ data: png.toString('base64') });
+  const ago = (d) => new Date(Date.now() - d * 864e5); utimesSync(im.find(old.id).path, ago(40), ago(40));
+  assert.equal(im.prune(0), 0, 'never delete keeps everything'); assert.ok(im.find(old.id));
+  assert.equal(im.prune(90), 0, '40 days old is kept under a 90 day limit');
+  assert.equal(im.prune(30), 1); assert.equal(im.find(old.id), null, 'older than 30 days is deleted'); assert.ok(im.find(fresh.id), 'newer pictures stay');
+  await call('/api/settings', 'PUT', { imageKeepDays: 30 });
+  const a = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.match(a, /Keep pictures for/); assert.match(a, /ACTIVE_ATTACH/);
+}
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

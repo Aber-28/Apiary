@@ -39,5 +39,9 @@ What happens next: the agent looks at the picture and acts on it, for example "t
 
 Good to know:
 - PNG, JPEG, GIF and WebP only, up to 6 pictures per message and 8 MB each. Big screenshots are shrunk in your browser first.
-- Pictures are stored privately in Apiary's own folder (not inside your projects) and tidied away after about 60 days.
+- Pictures are stored privately in Apiary's own folder (not inside your projects). By default each one is deleted 30 days after it was attached. Change this under Settings, Access and safety, Pictures and screenshots: 30, 90, 180 or 365 days, or never delete.
 - Anything visible in a picture goes to the AI you chose, so avoid screenshots that show passwords or keys.
+
+## Code you can copy
+
+When an agent gives you a command to paste into SSH or a terminal, it appears in a dark code box with a **Copy** button, one command per line. Short names and file paths inside a sentence show as `inline code`.

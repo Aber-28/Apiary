@@ -188,18 +188,19 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         return res.end(body);
       }
       if (req.method === 'GET' && url.pathname === '/api/state') {
-        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, reviewWork: engine.reviewWork, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), health: engine.health.summary, runbookDrafts: engine.runbooks.draftCount, usageLimits: engine.usage.limits, version: VERSION });
+        return json(res, 200, { agents: Object.values(engine.agents), providers: engine.available, limits: engine.limits, defs: Object.values(engine.defs), teams: Object.values(engine.teams), memory: { enabled: engine.memoryEnabled, count: engine.memory.items.length }, account: { exists: auth.exists, username: auth.username }, approvals: engine.approvals(), approvalsDefault: engine.approvalsDefault, reviewWork: engine.reviewWork, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, imageKeepDays: engine.imageKeepDays, vault: { exists: engine.vault.exists, unlocked: engine.vault.unlocked, auto: engine.vault.auto }, update: updater ? updater.status : { state: 'unsupported' }, tasks: engine.tasks.counts(), health: engine.health.summary, runbookDrafts: engine.runbooks.draftCount, usageLimits: engine.usage.limits, version: VERSION });
       }
       if (url.pathname === '/api/settings') {
-        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, reviewWork: engine.reviewWork, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
+        if (req.method === 'GET') return json(res, 200, { limits: engine.limits, reviewWork: engine.reviewWork, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, imageKeepDays: engine.imageKeepDays });
         if (req.method === 'PUT') {
           const b = await readBody(req);
           const limits = engine.setLimits(b.limits || {});
           if (b.approvalsDefault !== undefined) engine.setApprovalsDefault(b.approvalsDefault);
           if (b.reviewWork !== undefined) engine.setReviewWork(b.reviewWork);
           if (b.memory !== undefined) engine.setMemoryEnabled(b.memory);
+          if (b.imageKeepDays !== undefined) engine.setImageKeepDays(b.imageKeepDays);
           engine.setSettings(b);
-          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish });
+          return json(res, 200, { limits, approvalsDefault: engine.approvalsDefault, onboardingDone: engine.onboardingDone, defaultProvider: engine.defaultProvider, orgDone: engine.orgDone, meeting: engine.meeting, autoUpdate: engine.autoUpdate, updateCheck: engine.updateCheck, plainEnglish: engine.plainEnglish, imageKeepDays: engine.imageKeepDays });
         }
       }
       // ----- task board -----

@@ -42,7 +42,7 @@
 * [Live activity](using-apiary/live-activity.md)
 * [Support tickets](using-apiary/support-tickets.md)
 * [Repositories](using-apiary/repositories.md)
-* [Repository map](using-apiary/repository-map.md)
+* [GitHub repository map](using-apiary/repository-map.md)
 * [Usage](using-apiary/usage.md)
 * [Choosing the right model](using-apiary/model-advice.md)
 * [Memory](using-apiary/memory.md)

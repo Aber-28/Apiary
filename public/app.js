@@ -140,9 +140,9 @@ const NAV = [
     { id: 'reuse', label: 'Plan and reuse', items: [['#/project-templates', 'Project templates'], ['#/runbooks', 'Runbooks'], ['#/reports', 'Weekly report']] }] },
   { id: 'agents', label: 'Agents', icon: ICON.agents, items: [['#/agents', 'All agents'], ['#/organisation', 'Organisation'], ['#/meetings', 'Team meetings'],
     { id: 'library', label: 'Templates', items: [['#/teams', 'Teams'], ['#/templates', 'Saved agents'], ['#/rules', 'Delegation rules']] },
-    { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories'], ['#/repomap', 'Repository map']] }] },
+    { id: 'knowledge', label: 'Knowledge', items: [['#/memory', 'Memory'], ['#/repositories', 'Repositories']] }] },
   { id: 'infra', label: 'Infrastructure', icon: ICON.infra, items: [['#/infrastructure', 'Devices'], ['#/library', 'Library'], ['#/infrastructure/map', 'Map'], ['#/health', 'Health']] },
-  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], { id: 'ai', label: 'AI tools', items: [['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex']] }, ['#/connections/github', 'GitHub']] },
+  { id: 'connections', label: 'Connections', icon: ICON.link, items: [['#/connections', 'Overview'], ['#/usage', 'Usage'], { id: 'ai', label: 'AI tools', items: [['#/connections/claude', 'Claude Code'], ['#/connections/codex', 'Codex']] }, { id: 'github', label: 'GitHub', items: [['#/connections/github', 'Connection'], ['#/repomap', 'GitHub repository map']] }] },
   { id: 'security', label: 'Security', icon: ICON.shield || ICON.sliders, items: [['#/signin', 'Sign-in'], ['#/secrets', 'Secrets vault'], ['#/policy', 'Approval rules'], ['#/access', 'Access and safety'], ['#/audit', 'Audit log']] },
   { id: 'settings', label: 'Settings', icon: ICON.sliders, items: [['#/appearance', 'Appearance'], ['#/telegram', 'Telegram alerts'],
     { id: 'data', label: 'Data', items: [['#/backups', 'Backups'], ['#/transfer', 'Export and import'], ['#/reset', 'Factory reset']] },
@@ -1861,7 +1861,7 @@ function branchGraph(g, when) {
 
 // ---------- repository map ----------
 function pageRepoMap() {
-  crumbs('Knowledge', 'Repository map');
+  crumbs('Connections', 'GitHub repository map');
   let choice = sessionStorageGet('repomap') || '', list = { local: [], remote: [], remoteError: '' };
   const body = h('div', {});
   const when = (d) => (d ? ago(new Date(d).getTime()) : '');
@@ -1927,7 +1927,7 @@ function pageRepoMap() {
       list.local.length ? h('optgroup', { label: 'On this computer' }, list.local.map((r) => h('option', { value: r.id, selected: r.id === choice }, r.name))) : null,
       list.remote.length ? h('optgroup', { label: 'On your GitHub account' }, list.remote.map((r) => h('option', { value: 'g:' + r.name, selected: 'g:' + r.name === choice }, r.name + (r.private ? ' (private)' : '')))) : null);
     sel.value = choice;
-    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Repository map'), h('p', { class: 'sub-title' }, 'Pick a repository to see where you are: the branch, what is waiting to be saved, who is working on which branch, and what is open on GitHub. Nothing here changes anything.')),
+    view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'GitHub repository map'), h('p', { class: 'sub-title' }, 'Pick a repository to see where you are: the branch, what is waiting to be saved, who is working on which branch, and what is open on GitHub. Nothing here changes anything.')),
       h('div', { class: 'kv' }, sel, h('button', { class: 'btn', onclick: guard(async () => { await draw(); }) }, 'Refresh'))),
       list.remoteError ? h('p', { class: 'hint' }, 'GitHub repositories are not shown: ' + list.remoteError) : null,
       !list.local.length && !list.remote.length ? h('div', { class: 'card empty' }, 'No repositories yet. Add one under Repositories, or connect GitHub under Connections.') : null, body);
@@ -2904,7 +2904,7 @@ function pageStartup() {
 
 // ---------- what's new after an update ----------
 // Words in the notes that become links to the matching page. They always open in a new tab, so the notes stay on screen.
-const NEWS_LINKS = [[/\bLibrary\b/, '#/library'], [/\bDashboard\b/, '#/home'], [/\bHealth\b/, '#/health'], [/\bApprovals?\b/, '#/approvals'], [/\bTroubleshoot\b/, '#/infrastructure'], [/\bDevices\b/, '#/infrastructure'], [/\bUpdates page\b|\bUpdate now!/, '#/updates'], [/\bAgents list\b|\bAll agents\b/, '#/agents'], [/\bProjects\b/, '#/projects'], [/\bTasks\b/, '#/tasks'], [/\bLive activity\b/, '#/activity'], [/\baudit log\b/i, '#/audit'], [/\bSecrets vault\b|\bvault\b/, '#/secrets'], [/\bTelegram\b/, '#/telegram'], [/\bBackups\b/, '#/backups'], [/\bMemory\b/, '#/memory'], [/\bOrganisation\b/, '#/organisation'], [/\bRunbooks\b/, '#/runbooks'], [/\bWeekly report\b/, '#/reports'], [/\bTeam meetings\b/, '#/meetings'], [/\bTeams\b/, '#/teams'], [/\bUsage\b/, '#/usage'], [/\bRepository map\b/, '#/repomap'], [/\bRepositories\b/, '#/repositories'], [/\bTerminal sessions\b/, '#/terminal'], [/\bChat\b/, '#/chat'], [/\bAppearance\b/, '#/appearance'], [/\bSetup guide\b/, '#/setup']];
+const NEWS_LINKS = [[/\bLibrary\b/, '#/library'], [/\bDashboard\b/, '#/home'], [/\bHealth\b/, '#/health'], [/\bApprovals?\b/, '#/approvals'], [/\bTroubleshoot\b/, '#/infrastructure'], [/\bDevices\b/, '#/infrastructure'], [/\bUpdates page\b|\bUpdate now!/, '#/updates'], [/\bAgents list\b|\bAll agents\b/, '#/agents'], [/\bProjects\b/, '#/projects'], [/\bTasks\b/, '#/tasks'], [/\bLive activity\b/, '#/activity'], [/\baudit log\b/i, '#/audit'], [/\bSecrets vault\b|\bvault\b/, '#/secrets'], [/\bTelegram\b/, '#/telegram'], [/\bBackups\b/, '#/backups'], [/\bMemory\b/, '#/memory'], [/\bOrganisation\b/, '#/organisation'], [/\bRunbooks\b/, '#/runbooks'], [/\bWeekly report\b/, '#/reports'], [/\bTeam meetings\b/, '#/meetings'], [/\bTeams\b/, '#/teams'], [/\bUsage\b/, '#/usage'], [/\b(GitHub )?[Rr]epository map\b/, '#/repomap'], [/\bRepositories\b/, '#/repositories'], [/\bTerminal sessions\b/, '#/terminal'], [/\bChat\b/, '#/chat'], [/\bAppearance\b/, '#/appearance'], [/\bSetup guide\b/, '#/setup']];
 // A changelog line that starts with "Fixed:" is a fix. Older lines without it are sorted by wording.
 const isFix = (t) => /^fix(ed)?:/i.test(t) || /\b(fixed|no longer|stopped|wrongly|bug|crash|twice|stuck|stale|could not|couldn't|used to)\b/i.test(t);
 const noFixTag = (t) => { const r = t.replace(/^fix(ed)?:\s*/i, ''); return r.charAt(0).toUpperCase() + r.slice(1); };

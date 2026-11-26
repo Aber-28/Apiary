@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.64.2
+
+- Changed: the Repository map is now called **GitHub repository map** and lives under Connections, GitHub (next to the GitHub connection) instead of Agents, Knowledge.
+
 ## 0.64.1
 
 - Fixed: repositories picked from "On your GitHub account" only showed lists, with no map. They now get the same picture: the main line with version tags, and unmerged branches hanging off the save they started from.

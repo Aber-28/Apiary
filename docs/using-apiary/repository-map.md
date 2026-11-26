@@ -1,6 +1,6 @@
-# Repository map
+# GitHub repository map
 
-A page that shows **where you are** in a repository, at a glance. Open **Knowledge, Repository map**.
+A page that shows **where you are** in a repository, at a glance. Open **Connections, GitHub, GitHub repository map**.
 
 ## Pick a repository
 

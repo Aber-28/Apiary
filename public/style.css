@@ -415,3 +415,12 @@ a.dash-row:hover{background:var(--hover)}
 }
 
 dialog.news{max-width:min(640px,94vw);width:100%}.news-body{max-height:56vh;overflow:auto;margin:0 -6px;padding:0 6px}.news-ver{margin:0 0 14px}.news-ver h3{font-size:15px;margin:10px 0 2px}.news-ver h4{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:8px 0 2px}.news-ver ul{margin:2px 0 6px;padding-left:20px}.news-ver li{margin:4px 0}.news a{text-decoration:underline}
+
+/* Compact task cards */
+.tcard{padding:8px 10px}.tcard .ttl{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.3}
+.tcard .tnote{-webkit-line-clamp:2;margin:2px 0;font-size:12px}.tcard .tnote p{margin:0}.tcard .tnote ul,.tcard .tnote ol{margin:0;padding-left:16px}
+.tcard .tsub{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+.tcard .chips{margin:4px 0}.tcard .tmeta{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px}
+.tcard .tresp{display:block;margin-top:6px}.tcard .tctl{margin-top:6px;gap:6px;flex-wrap:wrap}
+.tcard select{width:100%;height:30px;min-height:30px;padding:0 24px 0 8px;font-size:12.5px;border-radius:8px}.tcard .tctl select{width:auto;flex:1 1 90px;min-width:0}
+.tcard .btn{min-height:30px;padding:0 10px;font-size:12.5px;border-radius:8px}

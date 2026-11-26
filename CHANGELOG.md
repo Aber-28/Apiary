@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.60.1
+
+- Task cards are much shorter: the title and notes are cut to two lines, the status chip (the column already says it) is gone, the details line is a single line, and the Responsible and status dropdowns and the Start and Edit buttons are smaller and share a row. Open a task to see everything.
+
 ## 0.60.0
 
 - Fixed: phone menu. Tapping a menu group (Workspace, Agents and so on) opened it and then closed the whole menu, so you had to open the menu again to see it. The menu now stays open until you pick a page or tap outside it.

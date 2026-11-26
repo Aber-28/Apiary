@@ -2824,5 +2824,6 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
   assert.ok(/function openWhatsNew/.test(js) && /target: '_blank', rel: 'noopener'/.test(js) && /addEventListener\('cancel', \(e\) => e\.preventDefault\(\)\)/.test(js) && /checkWhatsNew\(\);\n\}\)\(\)/.test(js), 'dialog opens at start, links open in a new tab, only OK closes it'); }
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/path\.includes\(sd\)/.test(js) && !/!sd\.contains\(e\.target\)/.test(js), 'tapping a menu folder must not close the phone menu'); }
+{ const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/Compact task cards/.test(css), 'task cards are compact'); }
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

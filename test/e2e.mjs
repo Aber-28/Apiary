@@ -2912,7 +2912,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   assert.ok((await fsRead(new URL('../public/index.html', import.meta.url), 'utf8')).includes('doc-top'));
   assert.ok(appjs.includes('function crumbHref') && appjs.includes("class: 'crumb', href"), 'breadcrumb parents are links');
   assert.ok(appjs.includes('setInterval(pollSystem, 1000)'), 'machine stats refresh every second');
-  const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/\.sys \.m\{display:inline-block;width:9ch/.test(css) && /\.sys \.m\.net\{width:/.test(css), 'each figure has a fixed slot, so nothing moves when the numbers change');
+  const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(css.includes('input.num-inline{width:84px') && appjs.includes("class: 'num-inline', type: 'number', min: '1', max: '600'"), 'small number boxes in a sentence are readable'); assert.ok(/\.sys \.m\{display:inline-block;width:9ch/.test(css) && /\.sys \.m\.net\{width:/.test(css), 'each figure has a fixed slot, so nothing moves when the numbers change');
   const sys = (await import('../src/system.js')); sys.snapshot(); await new Promise((r) => setTimeout(r, 1000)); const snap = sys.snapshot();
   assert.ok(snap.net && snap.net.rx >= 0 && snap.net.tx >= 0, 'network speed is reported');
   const live = (await call('/api/system')).body; assert.ok('net' in live && 'cpu' in live);

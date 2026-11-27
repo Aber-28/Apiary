@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.65.2
+
+- Fixed: the small number box inside a sentence (Telegram alerts minutes, backups to keep) was a thin pill that hid its number. It is now a normal-sized box with the number centred.
+
 ## 0.65.1
 
 - Fixed: the CPU, RAM, disk and network figures at the top no longer shift sideways as the numbers change. Each one has a fixed slot.

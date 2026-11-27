@@ -481,3 +481,5 @@ dialog.news button.primary,dialog.news .btn.primary{margin-top:6px}
 .sys{flex:none}.sys .m.net{width:29ch}
 .sys .m.net b{width:9.5ch}
 @media (max-width:1180px){.sys .m{width:8.6ch}.sys .m.net{width:28ch}}
+/* Small number boxes that sit inside a sentence */
+input.num-inline{width:84px;min-height:38px;padding:6px 8px;text-align:center;display:inline-block;margin:0 6px;vertical-align:middle;font-variant-numeric:tabular-nums}

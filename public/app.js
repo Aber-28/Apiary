@@ -2086,7 +2086,7 @@ async function pageTelegram() {
     const token = h('input', { type: 'password', autocomplete: 'off', spellcheck: 'false', placeholder: st.hasToken ? 'Saved in the vault. Paste a new one to replace it.' : '123456789:ABC…', 'aria-label': 'Bot token' });
     const on = h('input', { type: 'checkbox', checked: c.enabled, disabled: !st.linked }), ev = {};
     for (const k of ['approvals', 'health', 'tasks']) ev[k] = h('input', { type: 'checkbox', checked: c.events[k] });
-    const mins = h('input', { type: 'number', min: '1', max: '600', value: c.longTaskMinutes, 'aria-label': 'Minutes' });
+    const mins = h('input', { class: 'num-inline', type: 'number', min: '1', max: '600', value: c.longTaskMinutes, 'aria-label': 'Minutes' });
     const saveToken = guard(async () => { if (!token.value.trim()) return toast('Paste the bot token first'); await api('/api/telegram', 'PUT', { token: token.value }); toast('Token saved in the vault'); draw(); });
     const save = guard(async () => { await api('/api/telegram', 'PUT', { enabled: on.checked, events: Object.fromEntries(Object.entries(ev).map(([k, el]) => [k, el.checked])), longTaskMinutes: Number(mins.value) }); toast('Saved'); draw(); });
     const link = guard(async () => { await api('/api/telegram/link', 'POST', {}); draw(); });
@@ -2327,7 +2327,7 @@ async function pageBackups() {
     const every = h('select', {}, [['daily', 'Every day'], ['weekly', 'Every week']].map(([k, t]) => h('option', { value: k, selected: c.every === k }, t)));
     const day = h('select', { 'aria-label': 'Day of the week' }, days.map((n, i) => h('option', { value: i, selected: c.weekday === i }, n)));
     const time = h('input', { type: 'time', value: c.time, 'aria-label': 'Time' });
-    const keep = h('input', { type: 'number', min: '1', max: '60', value: c.keep, 'aria-label': 'How many to keep' });
+    const keep = h('input', { class: 'num-inline', type: 'number', min: '1', max: '60', value: c.keep, 'aria-label': 'How many to keep' });
     const vault = h('input', { type: 'checkbox', checked: c.vault }), files = h('input', { type: 'checkbox', checked: c.files });
     const dir = h('input', { type: 'text', value: c.dir, spellcheck: 'false', autocapitalize: 'none', 'aria-label': 'Backup folder' });
     const dir2 = h('input', { type: 'text', value: c.dir2, placeholder: 'Optional, for example /mnt/nas/apiary-backups', spellcheck: 'false', autocapitalize: 'none', 'aria-label': 'Second folder' });

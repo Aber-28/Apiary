@@ -2607,21 +2607,25 @@ async function pageInfra(tab) {
       const discover = i.secret && i.via !== 'token' && i.secretKind !== 'token' ? h('button', { class: 'btn', title: 'Reads which virtual machines and containers this device runs. It never changes anything.', onclick: guard(async (e) => { const b = e.currentTarget; b.disabled = true; b.textContent = 'Looking…'; try { discoveryDialog(await api(`/api/infra/${i.id}/discover`, 'POST', {}), draw); } finally { b.disabled = false; b.textContent = 'Discover'; } }) }, 'Discover') : null;
       const test = h('button', { class: 'btn', onclick: guard(async (e) => { e.target.disabled = true; e.target.textContent = 'Testing…'; try { await api(`/api/infra/${i.id}/test`, 'POST', {}); } finally { draw(); } }) }, 'Test connection');
       const tr = i.trouble, working = tr?.state === 'working';
-      const fixBtn = (i.status && !i.status.ok) || (tr && !tr.healthy) ? h('button', { class: 'btn primary', disabled: working, title: 'Finds out what is wrong, in plain words, and what to check. If it can repair it safely it asks you once.', onclick: guard(async (e) => { e.currentTarget.disabled = true; try { await api(`/api/infra/${i.id}/troubleshoot`, 'POST', {}); } finally { draw(); } }) }, working ? 'Troubleshooting…' : 'Troubleshoot') : null;
+      const fixBtn = (i.status && !i.status.ok) || (tr && !tr.healthy) ? h('button', { class: 'btn primary', disabled: working, title: 'Checks it itself with the logins it has, starts it again if it is simply stopped, and tells you only what it could not do', onclick: guard(async (e) => { e.currentTarget.disabled = true; try { await api(`/api/infra/${i.id}/troubleshoot`, 'POST', {}); } finally { draw(); } }) }, working ? 'Troubleshooting…' : 'Troubleshoot') : null;
       const rep = tr?.report, panel = tr && (rep || working) ? h('div', { class: 'trouble' },
         h('b', {}, tr.healthy ? 'All good' : 'Troubleshooting'),
         working && !rep ? h('p', { class: 'hint' }, 'Looking at it…') : null,
         rep?.basic?.summary ? h('p', { style: 'margin:6px 0' }, rep.basic.summary) : null,
         rep?.by ? h('p', { class: 'hint', style: 'margin:6px 0' }, working && !rep.ai ? `${rep.by} is investigating. ${rep.byWhy || ''}` : `Investigated by ${rep.by}. ${rep.byWhy || ''}`) : null,
+        rep?.tried?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'What was checked and tried:'), h('ul', {}, ...rep.tried.map((c) => h('li', {}, c)))) : null,
         rep?.ai ? rich(rep.ai) : null,
-        rep?.basic?.checks?.length && !rep.ai ? h('ol', {}, ...rep.basic.checks.map((c) => h('li', {}, c))) : null,
         rep?.aiNote ? h('p', { class: 'hint' }, rep.aiNote) : null,
         working && rep && rep.ai ? h('p', { class: 'hint' }, 'If a repair is possible, it is waiting for your yes on the Approvals page. You are asked once for this problem.') : null,
+        tr.log?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'Commands it ran:'), h('ul', {}, ...tr.log.map((l) => h('li', {}, h('code', {}, l.cmd), l.code === 0 ? ' ✓' : ` (failed, code ${l.code})`)))) : null,
+        rep?.couldnt?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'What it could not do:'), h('ul', {}, ...rep.couldnt.map((c) => h('li', {}, c)))) : null,
+        rep?.needYou?.length ? h('div', {}, h('p', { style: 'margin:6px 0 2px;font-weight:600' }, 'What you need to do:'), h('ol', {}, ...rep.needYou.map((c) => h('li', {}, c)))) : null,
+        !rep?.structured && rep?.basic?.checks?.length && !working ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, rep.ai ? 'Things to check yourself:' : 'Nothing more could be checked automatically. Things to check yourself:'), h('ol', {}, ...rep.basic.checks.map((c) => h('li', {}, c)))) : null,
         rep?.manual?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'For you to do yourself (Apiary will not run these):'), h('ul', {}, ...rep.manual.map((c) => h('li', {}, h('code', {}, c))))) : null,
         rep?.note ? h('p', { class: 'hint' }, rep.note) : null,
-        tr.log?.length ? h('div', {}, h('p', { class: 'hint', style: 'margin:6px 0 2px' }, 'What it ran:'), h('ul', {}, ...tr.log.map((l) => h('li', {}, h('code', {}, l.cmd), l.code === 0 ? ' ✓' : ` (failed, code ${l.code})`)))) : null,
         rep?.outcome ? h('p', { style: 'font-weight:600;margin:6px 0' }, rep.outcome) : null,
-        tr.approved ? h('p', { class: 'hint' }, 'You approved repairs for this problem. This ends once it has been back up for 15 minutes.') : null) : null;
+        tr.approved ? h('p', { class: 'hint' }, 'You approved repairs for this problem. This ends once it has been back up for 15 minutes.') : null,
+        !working ? h('div', { style: 'margin-top:8px' }, h('button', { class: 'btn', title: 'Wipes these steps and the report', onclick: guard(async () => { await api(`/api/infra/${i.id}/troubleshoot/clear`, 'POST', {}); draw(); }) }, 'Clear')) : null) : null;
       return h('div', { class: 'card' }, h('div', { class: 'kv', style: 'justify-content:space-between;gap:8px;flex-wrap:wrap' }, h('div', { class: 'kv', style: 'gap:8px' }, iconIdOf(i) ? libIcon(iconIdOf(i), 26, i.name) : null, h('b', {}, i.name), ' ', h('span', { class: 'pill' }, types[i.type] || i.type)), st),
         h('p', { class: 'hint', style: 'margin:6px 0' }, [i.address ? `${i.address}${i.port ? ':' + i.port : ''}` : '', i.url, i.parentId && byId.get(i.parentId) ? `runs on ${byId.get(i.parentId).name}` : '', (i.links || []).length ? `connects to ${i.links.map((l) => byId.get(l.to)?.name).filter(Boolean).join(', ')}` : '', i.secret ? `login: ${i.secret}` : '', i.os, i.location].filter(Boolean).join(' · ')),
         i.status ? h('p', { class: 'hint' }, `${i.status.detail} (${ago(i.status.at)})`) : null, i.notes ? rich(i.notes) : null,

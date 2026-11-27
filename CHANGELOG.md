@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.69.0
+
+- New: Troubleshoot now does the checking itself. For a virtual machine or container found on a Proxmox or Docker host, it asks the host what state it is in with the saved login, and starts it again if it had simply stopped (no approval needed for a start). Restarts and reboots still ask once.
+- New: the Troubleshoot report says what was checked and tried, what it could not do (for example no saved login) and only the steps you really have to do yourself. The AI is asked to follow the same layout.
+- New: a Clear button on the Troubleshoot report wipes the steps and report.
+
 ## 0.68.5
 
 - Fixed: circles on the map of a repository that is only on GitHub did nothing when clicked. They now open details and a Copy to this computer button. The version numbers under the circles are clickable too.

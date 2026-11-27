@@ -1872,6 +1872,27 @@ let orgIds;
       await call(`/api/infra/${dev.id}/troubleshoot`, 'POST', {}); await until(() => pend().length === 1, 8000);
       await call(`/api/approvals/${pend()[0].id}/decide`, 'POST', { decision: 'deny' }); await until(() => dev.trouble.state === 'done', 8000);
       assert.equal(ran.length, 0, 'a declined repair never runs'); assert.ok(dev.trouble.report.manual.includes('systemctl restart nginx'));
+      { // autonomous: it asks the host about a stopped machine, starts it, and reports what it could not do
+        const { parseReport, triedFromFacts } = await import('../src/troubleshoot.js');
+        const pr = parseReport('TRIED:\n- Looked at the logs\nFOUND:\nThe disk is full.\nCOULD NOT:\n- Check the router (no login)\nYOU NEED TO:\n1. Plug the cable back in'); assert.deepEqual([pr.tried, pr.found, pr.couldnt, pr.needYou], [['Looked at the logs'], 'The disk is full.', ['Check the router (no login)'], ['Plug the cable back in']]);
+        assert.equal(parseReport('just some free text'), null, 'free text still shows as it is'); assert.ok(triedFromFacts({ dns: { ok: true, ip: '1.2.3.4' }, ports: { 22: { open: false, why: 'refused' } } }).length === 2);
+        const hostDev = engine.infra.add({ name: 'PVE host', type: 'server', address: '127.0.0.1', port: livePort, secret: 'Trouble SSH' });
+        const vm = engine.infra.add({ name: 'Stopped VM', type: 'server', address: '127.0.0.1', port: 1, parentId: hostDev.id }); vm.found = { key: 'proxmox-vm:100' };
+        const asked = []; engine.discoveryRun = async ({ script }) => { const c = script.trim(); if (/apiary-ok/.test(c)) return { code: 0, stdout: 'apiary-ok', stderr: '' }; asked.push(c); if (c === 'qm status 100') return { code: 0, stdout: 'status: stopped', stderr: '' }; if (c === 'qm start 100') { vm.port = livePort; return { code: 0, stdout: '', stderr: '' }; } return { code: 1, stdout: '', stderr: 'no' }; };
+        engine.troubleViaAgent = false; const before = pend().length;
+        await call(`/api/infra/${vm.id}/troubleshoot`, 'POST', {}); await until(() => vm.trouble?.state === 'done', 8000);
+        assert.deepEqual(asked, ['qm status 100', 'qm start 100'], 'it asked the host, then started the stopped machine on its own'); assert.equal(pend().length, before, 'starting a stopped machine needs no approval');
+        assert.match(vm.trouble.report.outcome, /started it/); assert.ok(vm.trouble.report.tried.some((x) => /It was stopped/.test(x)));
+        // no login for the host: it says so instead of handing out chores
+        const lone = engine.infra.add({ name: 'Lone host', type: 'server', address: '127.0.0.1', port: 1 }), vm2 = engine.infra.add({ name: 'Lone VM', type: 'server', address: '127.0.0.1', port: 1, parentId: lone.id }); vm2.found = { key: 'proxmox-vm:7' };
+        await call(`/api/infra/${vm2.id}/troubleshoot`, 'POST', {}); await until(() => vm2.trouble?.state === 'done', 8000);
+        assert.ok(vm2.trouble.report.couldnt.some((x) => /no saved login for Lone host/.test(x)), 'what it could not do is reported');
+        // Clear wipes the steps
+        assert.equal((await call(`/api/infra/${vm2.id}/troubleshoot/clear`, 'POST', {})).status, 200); assert.equal(vm2.trouble, undefined, 'Clear wipes the steps and report');
+        assert.equal((await call('/api/infra/nope/troubleshoot/clear', 'POST', {})).status, 404);
+        delete engine.troubleViaAgent;
+        const ui = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(ui.includes("troubleshoot/clear") && ui.includes('What it could not do') && ui.includes('What you need to do'), 'the panel has Clear and the three report parts');
+      }
       delete engine.discoveryRun; delete engine.troubleProbe; delete process.env.APIARY_FIX_WAIT_MS; srv.close();
     }
     // testing checks the port and also signs in for real

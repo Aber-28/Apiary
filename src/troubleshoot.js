@@ -75,3 +75,23 @@ export function basicAdvice(f) {
 }
 
 export const SYSTEM = 'You are the troubleshooter inside Apiary, a home and small-office infrastructure app. Explain to a non-expert, in plain words, what is probably happening to a device that is down or unreachable, and what to check, most likely cause first. Be short: a few sentences, then a numbered list of at most 5 checks. Use only the facts given; say when you are guessing. If a safe repair could help (restarting a service, starting a VM, rebooting), end with ONE fenced block named apiary-fix like ```apiary-fix\n{"on":"device","commands":["systemctl restart nginx"],"why":"The web server is not answering"}\n``` using plain single commands only (systemctl, docker, qm, pct, reboot, journalctl, ping, uptime, df -h). Use "on":"host" when the command must run on the machine the device runs on (for example qm start 101 on the Proxmox host). Never ask for passwords or keys and never suggest deleting anything.';
+
+// A readable list of what Apiary itself checked from the network, for the "what was tried" part of the report.
+export function triedFromFacts(f) {
+  const t = [];
+  if (f.dns) t.push(f.dns.ok ? `Looked up the name: found ${f.dns.ip}.` : `Looked up the name: not found (${f.dns.why}).`);
+  for (const [port, r] of Object.entries(f.ports || {})) t.push(`Knocked on port ${port}: ${r.open ? 'it answered' : `no answer (${r.why})`}.`);
+  if (f.runsOn) t.push(`Checked ${f.runsOn.name}, which it runs on: ${f.runsOn.ok === true ? 'reachable' : f.runsOn.ok === false ? 'not reachable' : 'not tested yet'}.`);
+  if (f.neighbours?.length) t.push(`Looked at nearby devices: ${f.neighbours.map((n) => `${n.name} ${n.ok ? 'up' : 'down'}`).join(', ')}.`);
+  return t;
+}
+
+// The agent is asked to answer under four headings. Returns null when it did not, so the old free-text answer still shows.
+export function parseReport(text) {
+  const t = String(text || ''), H = /^\s*(?:#+\s*|\*\*)?(TRIED|FOUND|COULD NOT|YOU NEED TO)\s*:?\s*(?:\*\*)?:?\s*$/gim;
+  const marks = [...t.matchAll(H)]; if (marks.length < 2) return null;
+  const out = { tried: [], found: '', couldnt: [], needYou: [] };
+  const items = (x) => x.split('\n').map((l) => l.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim()).filter((l) => l && !/^(none|nothing|n\/a)\.?$/i.test(l));
+  marks.forEach((m, i) => { const body = t.slice(m.index + m[0].length, marks[i + 1]?.index ?? t.length).replace(/```apiary-fix[\s\S]*?```/gi, '').trim(), k = m[1].toUpperCase(); if (k === 'TRIED') out.tried = items(body); else if (k === 'FOUND') out.found = body; else if (k === 'COULD NOT') out.couldnt = items(body); else out.needYou = items(body); });
+  return out;
+}

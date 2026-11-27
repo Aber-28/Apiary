@@ -26,7 +26,7 @@ import { buildProfile, DEPARTMENTS, pickName, inferDepartment } from './roles.js
 import { Infra } from './infra.js';
 import { probe as discoveryProbe, sshRun, explainSsh } from './discovery.js';
 import { byId as libraryEntry, view as libraryView, iconFor } from './library.js';
-import { UP_MS, gatherFacts, basicAdvice, parseFix, stripFix, isSafeFix, SYSTEM as TROUBLE_SYSTEM } from './troubleshoot.js';
+import { UP_MS, gatherFacts, basicAdvice, parseFix, stripFix, isSafeFix, triedFromFacts, parseReport, SYSTEM as TROUBLE_SYSTEM } from './troubleshoot.js';
 import { verifyCloudflare, verifyGoogle, verifyApi, apiInfo, parseGoogleKey } from './cloud.js';
 import { Audit } from './audit.js';
 import { Health, LOGIN_RE } from './health.js';
@@ -550,6 +550,38 @@ export class Engine extends EventEmitter {
     this._troubleRun(it).catch((e) => { t.state = 'done'; t.report = { ...(t.report || {}), error: this.vault.redact(String(e.message)) }; }).finally(() => { this.troubling.delete(id); this.infra._save(); this.emit('event', { type: 'infra' }); });
     return it;
   }
+  // Wipes the steps and report so the device is clean again. Not while it is being looked at.
+  clearTrouble(id) {
+    const it = this.infra.get(id); if (!it) throw Object.assign(new Error('No such device'), { status: 404 });
+    if (this.troubling?.has(id)) throw Object.assign(new Error('It is still being looked at. Clear it when it has finished.'), { status: 409 });
+    delete it.trouble; this.infra._save(); this.emit('event', { type: 'infra' }); return it;
+  }
+  // Asks the machine this one runs on (the hypervisor or Docker host) what state it is in, using its saved login, and starts it if it is simply stopped.
+  async _hostCheck(it, report, t) {
+    const red = (x) => this.vault.redact(String(x)), ref = String(it.found?.key || ''), [tag, id] = [ref.split(':')[0], ref.slice(ref.indexOf(':') + 1)];
+    const cmds = { 'proxmox-vm': [`qm status ${id}`, `qm start ${id}`], 'proxmox-ct': [`pct status ${id}`, `pct start ${id}`], docker: [`docker ps -a`, `docker start ${id}`] }[tag];
+    const parent = it.parentId && this.infra.get(it.parentId);
+    if (!parent) { report.couldnt.push('This device is not placed inside a host on the map, so I could only check it from the network.'); return false; }
+    if (!cmds || !isSafeFix(cmds[0]) || !isSafeFix(cmds[1])) { report.couldnt.push(`I do not know how to ask ${parent.name} about this kind of machine, so I could only check it from the network.`); return false; }
+    const target = this._sshTarget(parent);
+    if (!target) { report.couldnt.push(this.vault.unlocked ? `I have no saved login for ${parent.name}, so I could not ask it what state ${it.name} is in.` : `The secrets vault is locked, so I could not use the saved login for ${parent.name}. Unlock it and press Troubleshoot again.`); return false; }
+    const run = (cmd) => (this.discoveryRun || sshRun)({ name: target.name, env: target.env, shell: 'sh', script: cmd + '\n', timeoutMs: 60000 });
+    const r = await run(cmds[0]), out = red((r.stdout || r.stderr || '').trim());
+    t.log.push({ at: Date.now(), cmd: cmds[0], code: r.code, out: out.slice(0, 600) });
+    const mine = tag === 'docker' ? out.split('\n').find((l) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(l)) || '' : out;
+    report.tried.push(`Asked ${parent.name} what state ${it.name} is in ("${cmds[0]}"): ${r.code === 0 ? (mine.split('\n')[0].slice(0, 120) || 'no answer') : 'that did not work'}.`);
+    if (r.code !== 0) { report.couldnt.push(`${parent.name} would not answer: ${out.split('\n')[0].slice(0, 140) || 'no reason given'}.`); return false; }
+    if (!/\b(stopped|exited|created|shut ?off)\b/i.test(mine)) return false;
+    // A machine that is simply stopped is started again straight away: starting never takes anything away.
+    this.audit.add('infra', { actor: 'Troubleshooter', action: `started ${it.name} (it was stopped)`, detail: cmds[1] });
+    const s = await run(cmds[1]);
+    t.log.push({ at: Date.now(), cmd: cmds[1], code: s.code, out: red((s.stdout || s.stderr || '').trim().slice(0, 600)) });
+    report.tried.push(`It was stopped, so I started it ("${cmds[1]}"): ${s.code === 0 ? 'done' : 'that did not work'}.`);
+    if (s.code !== 0) { report.couldnt.push(`Starting it failed: ${red((s.stderr || s.stdout || '').trim().split('\n')[0].slice(0, 140))}.`); return false; }
+    await new Promise((x) => setTimeout(x, Number(process.env.APIARY_FIX_WAIT_MS ?? 20000)));
+    await this.testDevice(it.id);
+    return !!it.status?.ok;
+  }
   // Who investigates: the agent that mapped the device (it knows it best), else an infrastructure specialist, else the CEO.
   async _troubleAgent(it) {
     const live = Object.values(this.agents).filter((a) => !this._isProject(a) && !a.removed && a.provider && a.id !== 'interview');
@@ -564,7 +596,11 @@ export class Engine extends EventEmitter {
   async _troubleRun(it) {
     const t = it.trouble, red = (x) => this.vault.redact(String(x));
     const facts = await gatherFacts(this.infra, it, this.troubleProbe || {});
-    const report = t.report = { at: Date.now(), basic: basicAdvice(facts), ai: '', manual: [] };
+    const report = t.report = { at: Date.now(), basic: basicAdvice(facts), ai: '', manual: [], tried: triedFromFacts(facts), couldnt: [], needYou: [] };
+    this.infra._save(); this.emit('event', { type: 'infra' });
+    try {
+      if (await this._hostCheck(it, report, t)) { report.outcome = `${it.name} is reachable again after I started it.`; report.basic = { summary: `${it.name} had simply stopped. I started it and it is back.`, checks: [] }; t.state = 'done'; return; }
+    } catch (e) { report.couldnt.push(`Checking the host failed: ${red(e.message).slice(0, 140)}.`); }
     this.infra._save(); this.emit('event', { type: 'infra' });
     let fix = null;
     try {
@@ -574,13 +610,15 @@ export class Engine extends EventEmitter {
       const facts2 = `Facts (read-only checks made from the Apiary computer just now):\n${JSON.stringify(facts)}`;
       let text;
       if (who && this.troubleViaAgent !== false) {
-        const brief = `TROUBLESHOOTING REQUEST. The person pressed Troubleshoot on "${it.name}" (${it.type}${it.address ? ', ' + it.address : ''}) because it is ${it.status?.ok ? 'reported healthy but they want it checked' : 'not reachable or has a problem'}.\n\nYou know this device best, so investigate it properly like an engineer would, then report back. Look at: the service or VM itself (status, recent logs, disk, memory), the machine it runs on if it is a VM, container or service, and neighbouring devices on the Infrastructure map it depends on (network, DNS, storage). Use your saved logins for READ-ONLY checks only (status, logs, listings); change nothing yourself.\n\n${facts2}\n\n${TROUBLE_SYSTEM}\n\nAnswer in plain words for a non-expert: what is wrong, the evidence you found, and what to check. Put the technical evidence after the plain explanation.`;
+        const brief = `TROUBLESHOOTING REQUEST. The person pressed Troubleshoot on "${it.name}" (${it.type}${it.address ? ', ' + it.address : ''}) because it is ${it.status?.ok ? 'reported healthy but they want it checked' : 'not reachable or has a problem'}.\n\nYou know this device best, so investigate it properly like an engineer would, then report back. Look at: the service or VM itself (status, recent logs, disk, memory), the machine it runs on if it is a VM, container or service, and neighbouring devices on the Infrastructure map it depends on (network, DNS, storage). Use your saved logins for READ-ONLY checks only (status, logs, listings); change nothing yourself. Do the checking yourself: never ask the person to look at something you can look at with a login you have. Only list a step for the person when you genuinely cannot do it (no login, physical access, a power cable).\n\n${facts2}\n\n${TROUBLE_SYSTEM}\n\nAnswer in plain words for a non-expert, under exactly these four headings, each on its own line:\nTRIED: what you checked, one line each, with what you saw.\nFOUND: what is wrong and the evidence, plain explanation first.\nCOULD NOT: what you could not check and why (for example, no login for it). Write None if nothing.\nYOU NEED TO: only the steps a person must do. Write None if nothing.`;
         text = await this.send(who.agent.id, brief, null, {});
         if (!text || /^\(stopped\)/.test(text)) throw new Error('The agent gave no answer');
       } else {
         text = await this._oneShot(TROUBLE_SYSTEM, `${facts2}\n\nExplain what is probably wrong and what to check.`);
       }
-      report.ai = red(stripFix(text)); fix = parseFix(text);
+      const pr = parseReport(stripFix(text));
+      if (pr) { report.tried.push(...pr.tried.map(red)); report.couldnt.push(...pr.couldnt.map(red)); report.needYou = pr.needYou.map(red); report.ai = red(pr.found); report.structured = true; } else report.ai = red(stripFix(text));
+      fix = parseFix(text);
     } catch (e) { report.aiNote = 'No agent could investigate, so this is the built-in analysis only.'; }
     this.infra._save(); this.emit('event', { type: 'infra' });
     if (!fix) return finish();

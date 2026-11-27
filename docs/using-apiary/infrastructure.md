@@ -37,6 +37,10 @@ Names and addresses shrink to fit their box. If one is still too long it is shor
 
 ## Troubleshoot a device that is down
 
+**It does the checking itself.** When you press Troubleshoot, Apiary uses the logins it already has before it asks you for anything. If the device is a virtual machine or container that was found on a host (Proxmox or Docker), it asks that host what state the machine is in. **If the machine has simply stopped, Apiary starts it again straight away**, with no approval, because starting never takes anything away, and tells you it did. Restarts and reboots still ask you once, as below.
+
+The report then has up to four parts: **What was checked and tried**, what was found, **What it could not do** (for example "I have no saved login for the host") and **What you need to do**, which lists only the steps a person really has to do, such as a power cable. Press **Clear** on the card to wipe the steps and the report once you are done with them.
+
 When a device is **Not reachable**, press **Troubleshoot** on its card. Apiary first tests it again, then looks (without logging in anywhere) at its name, its ports, the machine it runs on and its neighbours. The AI turns that into a plain-words explanation and a short list of what to check, most likely cause first. If no AI is connected you still get a built-in explanation.
 
 If a safe repair could help, the troubleshooter asks you **once** for that problem. The card on the Approvals page shows exactly what it would run and on which machine (the device itself, or the host it runs on, through a login already in your vault). Only these are ever allowed: restarting or starting a service, a container or a virtual machine, rebooting, and read-only checks such as `uptime`, `df -h` or `ping`. Anything else the AI suggests is listed for **you** to do, and Apiary does not run it. Everything it ran is shown on the card and in the audit log.

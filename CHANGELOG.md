@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.70.2
+
+- Changed: the Git actions card is gone from the top of a GitHub-only repository, since the circles now do the work. A small Copy to this computer button sits next to Open on GitHub for pull, push and saving your own changes.
+- Fixed: the circle menu on the map could be cut off at the bottom. It has room now and its buttons are more compact.
+
 ## 0.70.1
 
 - Fixed: when a task is closed, the related subtasks it refers to are now always listed oldest first. They sometimes came in a different order, which made a test fail at random.

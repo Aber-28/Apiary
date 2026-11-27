@@ -1941,7 +1941,7 @@ function pageRepoMap() {
     const pop = h('div', { class: 'rm-pop', 'aria-live': 'polite' });
     const mapBox = h('div', { class: 'rm-scroll rm-anchor' });
     const cur = d.current || '';
-    const drawMap = () => { mapBox.style.paddingBottom = picked ? '190px' : ''; mapBox.replaceChildren(simpleMap(d.map, d.remote, when, (p) => { picked = (picked && picked.name === p.name && picked.kind === p.kind) ? null : p; drawMap(); drawPop(); }, picked), picked ? pop : null); };
+    const drawMap = () => { mapBox.style.paddingBottom = picked ? '260px' : ''; mapBox.replaceChildren(simpleMap(d.map, d.remote, when, (p) => { picked = (picked && picked.name === p.name && picked.kind === p.kind) ? null : p; drawMap(); drawPop(); }, picked), picked ? pop : null); };
     const drawPop = () => {
       if (!picked) { pop.replaceChildren(); return; }
       { const at = picked.at || { x: 160, y: 56, w: 700 }; pop.style.left = Math.max(4, Math.min(at.x - 170, at.w - 350)) + 'px'; pop.style.top = at.y + 'px'; }
@@ -2012,7 +2012,7 @@ function pageRepoMap() {
   const remote = (d) => {
     let rp = null;
     const rpop = h('div', { class: 'rm-pop', 'aria-live': 'polite' }), rbox = h('div', { class: 'rm-scroll rm-anchor' });
-    const rdraw = () => { rbox.style.paddingBottom = rp ? '170px' : ''; rbox.replaceChildren(simpleMap(d.map, true, when, (p) => { rp = (rp && rp.kind === p.kind && rp.name === p.name) ? null : p; rdraw(); rshow(); }, rp), rp ? rpop : null); };
+    const rdraw = () => { rbox.style.paddingBottom = rp ? '260px' : ''; rbox.replaceChildren(simpleMap(d.map, true, when, (p) => { rp = (rp && rp.kind === p.kind && rp.name === p.name) ? null : p; rdraw(); rshow(); }, rp), rp ? rpop : null); };
     const rshow = () => {
       if (!rp) { rpop.replaceChildren(); return; }
       { const at = rp.at || { x: 160, y: 56, w: 700 }; rpop.style.left = Math.max(4, Math.min(at.x - 170, at.w - 350)) + 'px'; rpop.style.top = at.y + 'px'; }
@@ -2033,14 +2033,12 @@ function pageRepoMap() {
       }
       rpop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start;flex-wrap:nowrap' }, h('div', {}, h('b', {}, title), sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
         h('button', { class: 'btn', 'aria-label': 'Close', title: 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
-        h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts), h('small', { class: 'hint', style: 'display:block;margin-top:8px' }, 'These change GitHub directly. Pull, push and saving your own changes need a copy on this computer (Copy to this computer, at the top).'));
+        h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts), h('small', { class: 'hint', style: 'display:block;margin-top:8px' }, 'These change GitHub directly. Pull, push and saving your own changes need a copy on this computer (Copy to this computer, at the top of the page).'));
     };
     queueMicrotask(() => { rshow(); if (d.map) rdraw(); });
     return h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
-      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
-    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('p', { class: 'hint', style: 'margin:4px 0 8px' }, 'Fetch, pull, push, save changes, merge and branch work on a copy on this computer. Copy it once and the buttons appear here.'),
-      h('button', { class: 'btn primary', onclick: () => copyRepo(d.name) }, 'Copy to this computer')),
+      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), h('div', { class: 'kv', style: 'margin-top:6px;flex-wrap:wrap' }, d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null, h('button', { class: 'btn', title: 'Pull, push and saving your own changes need a copy on this computer', onclick: () => copyRepo(d.name) }, 'Copy to this computer'))),
     d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), rbox,
       d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: `, d.map.merged.map((n) => h('button', { class: 'chip', onclick: () => { rp = { kind: 'merged', name: n, at: { x: 160, y: 40, w: 700 } }; rdraw(); rshow(); }, title: 'Click for actions' }, n)), d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : '', '.') : null,
       d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,

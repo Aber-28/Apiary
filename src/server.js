@@ -9,6 +9,7 @@ import { CONNECTION_IDS } from './connections.js';
 import { github } from './github.js';
 import { localRepos, inspect as inspectRepo } from './repomap.js';
 import { perform as gitPerform } from './gitops.js';
+import { briefTick, deliver as deliverBrief, setBrief, briefSettings } from './brief.js';
 import { providers } from './providers.js';
 import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
@@ -510,6 +511,9 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         if (req.method === 'DELETE' && !r[2]) { engine.templates.remove(r[1]); return json(res, 200, { ok: true }); }
         if (req.method === 'POST' && r[2]) { const b = await readBody(req); if (!b.provider) throw Object.assign(new Error('provider is required'), { status: 400 }); return json(res, 201, await engine.templates.start(r[1], b)); }
       }
+      if (url.pathname === '/api/brief' && req.method === 'GET') return json(res, 200, { settings: briefSettings(engine.store), latest: (engine.store.data.briefs || [])[0] || null, history: (engine.store.data.briefs || []).slice(1, 8).map((b) => ({ at: b.at, date: b.date, headline: b.headline })) });
+      if (url.pathname === '/api/brief' && req.method === 'PUT') { const st = setBrief(engine, await readBody(req)); engine.audit.add('system', { actor: 'You', action: 'changed the morning brief settings', detail: st.enabled ? `on, ${st.time}${st.telegram ? ', Telegram' : ''}` : 'off' }); return json(res, 200, st); }
+      if (url.pathname === '/api/brief/run' && req.method === 'POST') { await readBody(req); return json(res, 200, await deliverBrief(engine, Date.now(), false)); }
       if (url.pathname === '/api/telegram' && req.method === 'GET') return json(res, 200, { config: engine.telegram.config, status: engine.telegram.status });
       if (url.pathname === '/api/telegram' && req.method === 'PUT') { const status = engine.telegram.setConfig(await readBody(req)); engine.audit.add('system', { actor: 'You', action: 'changed Telegram alert settings' }); return json(res, 200, { config: engine.telegram.config, status }); }
       if (url.pathname === '/api/telegram/test' && req.method === 'POST') { await readBody(req); return json(res, 200, await engine.telegram.test()); }
@@ -666,6 +670,7 @@ export function main(links = []) {
   };
   const server = createServer(engine, { updater, restart });
   setInterval(() => engine.tickMeetings().catch(() => {}), 60000).unref();
+  setInterval(() => briefTick(engine).catch(() => {}), 60000).unref();   // the morning brief, once a day at the chosen time
   setTimeout(() => engine.telegram.poll(), 3000).unref();
   setTimeout(() => engine.health.run().catch(() => {}), 15000).unref();
   setInterval(() => engine.health.run().catch(() => {}), 5 * 60000).unref();   // the map turns red by itself

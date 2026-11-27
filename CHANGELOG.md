@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.71.0
+
+- New: the morning brief. A short plain-words summary at the top of the Dashboard of what needs you, what was done in the last day, what Apiary did and how much AI was used. Make one on demand, or turn on a daily one at a time you choose, with an optional short version on Telegram. It is made once a day, even across restarts.
+
 ## 0.70.3
 
 - Fixed: the Buy me a coffee area at the bottom of the menu was see-through in the glass themes, so the Connections list showed behind it. It is solid now.

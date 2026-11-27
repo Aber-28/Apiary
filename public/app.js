@@ -1642,11 +1642,26 @@ const TASK_COLS = [['backburner', 'Back burner', 'Unfinished ideas. Add detail l
 // ---------- dashboard (the home page) ----------
 async function pageHome() {
   crumbs('Dashboard');
-  let D = null, range = Number(S.dashRange) || 14;
+  let D = null, range = Number(S.dashRange) || 14, B = null;
   const fmtTok = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
   const dayStart = (ms) => { const d = new Date(ms); d.setHours(0, 0, 0, 0); return d.getTime(); };
   const tile = (label, value, sub, href, warn) => h('a', { class: 'dash-k' + (warn ? ' warn' : ''), href }, h('small', {}, label), h('b', {}, String(value)), h('span', {}, sub || ''));
   const panel = (title, ...body) => h('section', { class: 'dash-pan', 'aria-label': title }, h('h3', {}, title), ...body);
+  const briefCard = () => {
+    if (!B) return null;
+    const st = B.settings, b = B.latest, save = guard(async (patch) => { B.settings = await api('/api/brief', 'PUT', patch); drawBrief(); });
+    const tone = { warn: 'work', ok: 'ok', info: 'info' };
+    return h('div', { class: 'card brief', style: 'margin-bottom:14px' },
+      h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap;gap:8px' }, h('div', {}, h('h2', { style: 'margin:0' }, '☀️ Morning brief'), h('small', { class: 'hint' }, b ? `${b.date} · made ${ago(b.at)}` : 'A short summary of the last day and what needs you.')),
+        h('button', { class: 'btn', onclick: guard(async (e) => { e.currentTarget.disabled = true; await api('/api/brief/run', 'POST', {}); }) }, b ? 'Make a new one now' : 'Make one now')),
+      b ? h('div', {}, h('p', { style: 'font-weight:600;margin:10px 0 6px' }, b.headline),
+        b.sections.map((sec) => h('div', { style: 'margin:8px 0' }, h('span', { class: 'pill ' + (tone[sec.tone] || '') , style: 'height:20px;font-size:11px' }, sec.title), h('ul', { style: 'margin:6px 0 0;padding-left:20px' }, sec.items.map((x) => h('li', {}, x)))))) : h('p', { class: 'hint', style: 'margin:10px 0' }, 'No brief yet. Press the button for a first one, or turn on the daily brief below.'),
+      h('div', { class: 'kv', style: 'margin-top:12px;flex-wrap:wrap;gap:14px;border-top:1px solid var(--line);padding-top:10px' },
+        h('label', { class: 'kv' }, h('input', { type: 'checkbox', checked: st.enabled, onchange: (e) => save({ enabled: e.target.checked }) }), ' Make one every morning at'),
+        h('input', { type: 'time', value: st.time, 'aria-label': 'Time of the morning brief', onchange: (e) => e.target.value && save({ time: e.target.value }) }),
+        h('label', { class: 'kv' }, h('input', { type: 'checkbox', checked: st.telegram, onchange: (e) => save({ telegram: e.target.checked }) }), ' Also send a short version to Telegram')));
+  };
+  const drawBrief = () => { const el = document.querySelector('.brief'); const n = briefCard(); if (el && n) el.replaceWith(n); };
   const draw = () => {
     if (!D) { view.replaceChildren(h('div', { class: 'card empty' }, 'Loading your dashboard…')); return; }
     const today = dayStart(D.now), days = Array.from({ length: range }, (_, i) => today - (range - 1 - i) * 864e5);
@@ -1677,6 +1692,7 @@ async function pageHome() {
       h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'Dashboard'), h('p', { class: 'sub-title' }, 'What your team has done, and what needs you.')),
         h('div', { class: 'dash-actions' }, h('select', { 'aria-label': 'Time range', onchange: (e) => { range = S.dashRange = Number(e.target.value); draw(); } }, [[7, 'Last 7 days'], [14, 'Last 14 days'], [28, 'Last 28 days']].map(([v, n]) => h('option', { value: String(v), selected: v === range }, n))),
           h('a', { class: 'btn', href: '#/chat' }, 'Open chat'), h('button', { class: 'btn primary', onclick: () => openNewProject() }, svg(ICON.plus, 16, 2.2), 'New project'))),
+      briefCard(),
       empty ? h('div', { class: 'card', style: 'margin-bottom:14px' }, h('h2', { style: 'margin-top:0' }, 'Start your first project'), h('p', {}, 'Tell your CEO what you need and it builds a team, makes a plan and gets to work. Everything it does shows up here.'), h('a', { class: 'btn primary', href: '#/chat' }, 'Talk to your CEO')) : null,
       h('div', { class: 'dash-kpis' },
         tile('Tasks finished', total, `${delta > 0 ? '+' : ''}${delta} vs the ${range} days before`, '#/tasks'),
@@ -1691,10 +1707,11 @@ async function pageHome() {
         panel('AI usage this week', ...meters, h('a', { class: 'hint', href: '#/usage' }, 'Usage and limits')),
         panel('Projects', ...(D.projects.length ? D.projects.map((p) => { const pc = p.total ? Math.round((p.done / p.total) * 100) : 0; return h('a', { class: 'dash-row', href: `#/project/${p.id}` }, h('div', { style: 'flex:1;min-width:0' }, p.name, h('small', {}, `${p.done} of ${p.total} tasks done${p.working ? ' · working now' : ''}`), h('div', { class: 'bar' }, h('i', { style: `width:${pc}%` }))), h('span', { class: 'hint' }, `${pc}%`)); }) : [h('p', { class: 'hint' }, 'No active projects.')]), h('a', { class: 'hint', href: '#/projects' }, 'All projects'))));
   };
+  const loadBrief = async () => { try { B = await api('/api/brief'); if (D) draw(); } catch { /* the brief is optional */ } };
   const load = async () => { try { D = await api('/api/dashboard'); draw(); } catch (e) { if (!D) view.replaceChildren(h('div', { class: 'card empty' }, e.message)); } };
   const soon = debounce(load, 800);
-  draw(); load();
-  page = { update(ev) { if (['agent', 'approval', 'message', 'removed'].includes(ev.type)) { soon(); if (D && ev.type === 'approval') draw(); } } };
+  draw(); load(); loadBrief();
+  page = { update(ev) { if (ev.type === 'brief') loadBrief(); if (['agent', 'approval', 'message', 'removed'].includes(ev.type)) { soon(); if (D && ev.type === 'approval') draw(); } } };
 }
 
 function pageTasks() {

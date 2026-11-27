@@ -3035,5 +3035,28 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('WITHOUT asking you') && appjs.includes('more of your Claude or Codex allowance'), 'the warning is shown before turning it on');
 }
 
+// ---- morning brief: a short plain summary, once a day, never repeated by a restart ----
+{
+  const { buildBrief, briefTick, setBrief, briefSettings } = await import('../src/brief.js');
+  const b = buildBrief(engine); assert.ok(b.headline.length > 5 && Array.isArray(b.sections) && b.short.includes('Morning brief') && b.short.length < 500, 'a brief has a headline and a short version');
+  const down = engine.infra.add({ name: 'Brief box', type: 'server', address: '127.0.0.1', port: 1 }); down.status = { ok: false, at: Date.now(), since: Date.now() - 3600000, detail: 'x' };
+  const b2 = buildBrief(engine); assert.equal(b2.calm, false); const num = (x) => Number((/^(\d+)/.exec(x.headline) || [0, 0])[1]); assert.equal(num(b2), num(b) + 1, 'a device that is down needs you'); engine.infra.remove(down.id);
+  assert.equal(briefSettings(engine.store).enabled, false, 'off by default'); assert.throws(() => setBrief(engine, { time: '25:99' }), /07:30/);
+  const at = (h, m) => { const d = new Date(); d.setHours(h, m, 0, 0); return d; };
+  delete engine.store.data.briefLast; delete engine.store.data.briefs; setBrief(engine, { enabled: false, time: '07:30', telegram: false });
+  assert.equal(await briefTick(engine, at(9, 0)), null, 'nothing is sent while it is off');
+  engine.store.data.settings.brief.enabled = true;
+  assert.equal(await briefTick(engine, at(7, 0)), null, 'not before the chosen time'); const first = await briefTick(engine, at(7, 31)); assert.ok(first && first.headline, 'sent at the chosen time');
+  assert.equal(await briefTick(engine, at(8, 0)), null, 'only one a day'); assert.equal(engine.store.data.briefs.length, 1);
+  assert.equal(engine.store.data.briefLast, first.day, 'the day is saved, so a restart cannot send it again');
+  // turning it on after the time has passed waits for tomorrow
+  delete engine.store.data.briefLast; engine.store.data.settings.brief.enabled = false; const now = new Date(); setBrief(engine, { time: '00:00' }); setBrief(engine, { enabled: true });
+  assert.ok(engine.store.data.briefLast, 'enabling late in the day does not send one at once');
+  const g = (await call('/api/brief')).body; assert.equal(g.settings.enabled, true); assert.ok(g.latest);
+  assert.equal((await call('/api/brief', 'PUT', { time: 'nope' })).status, 400); const run = await call('/api/brief/run', 'POST', {}); assert.equal(run.status, 200); assert.ok(run.body.sections);
+  engine.store.data.settings.brief.enabled = false;
+  const ui = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(ui.includes('Morning brief') && ui.includes('/api/brief/run'), 'the dashboard shows the brief');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

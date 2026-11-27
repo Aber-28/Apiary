@@ -24,7 +24,7 @@ export class Tasks {
     this.store.data.taskSeq = seq;
   }
   byCode(code) { return Object.values(this.all).find((t) => t.code === String(code).trim().toUpperCase()); }
-  children(t) { return Object.values(this.all).filter((x) => x.parent === t.id); }
+  children(t) { return Object.values(this.all).filter((x) => x.parent === t.id).sort((a, b) => (a.createdAt - b.createdAt) || (a.num - b.num)); }   // oldest first, so the order never depends on how ids happen to sort
   // "Closed by Agent X. Refer to T-0004." Names the closer and points to the related task.
   _closure(t, by) {
     const par = t.parent && this.all[t.parent], kids = this.children(t);

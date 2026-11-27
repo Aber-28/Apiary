@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.70.1
+
+- Fixed: when a task is closed, the related subtasks it refers to are now always listed oldest first. They sometimes came in a different order, which made a test fail at random.
+- Fixed: the previous release was labelled 0.69.3 inside the app instead of 0.70.0, so the Updates page could not offer it as new. This release carries the correct number.
+
 ## 0.70.0
 
 - New: for a repository that is only on GitHub, the circles now work on GitHub itself. Start a branch from a version, tag it, merge a branch into main, open a pull request, or delete a merged branch, with no copy on your computer. Merges and deletes ask first, a clashing merge changes nothing, and only merged branches can be deleted.

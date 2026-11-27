@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.68.2
+
+- Changed: a repository that is only on GitHub now shows a Copy to this computer button that brings in the Git buttons. The long branch and activity lists under the map are gone, since the map and buttons replace them.
+
 ## 0.68.1
 
 - Changed: the "What is new" notes always list New first, then Changed, Fixed and Removed, each heading with its own icon.

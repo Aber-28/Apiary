@@ -1951,32 +1951,25 @@ function pageRepoMap() {
     return h('div', {},
       here(d), bar2,
       d.projects?.length || d.uses?.length ? h('p', { class: 'hint' }, [...(d.projects?.length ? ['Used by: ' + d.projects.join(', ')] : []), ...(d.uses || [])].join('. ')) : null,
-      h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${bs.length})`), h('small', { class: 'hint' }, 'The bar shows how far each branch has moved from the main branch: grey = behind, coloured = ahead.'),
-        h('div', { class: 'rm-branches' }, bs.map((b) => h('div', { class: 'rm-row' + (b.current ? ' cur' : '') },
-          h('div', {}, h('b', {}, b.name), ' ', b.current ? h('span', { class: 'pill ok', style: 'height:18px;font-size:10px' }, 'you are here') : null, b.isDefault ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px' }, 'main') : null,
-            b.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, 'agent work: ' + b.agentProject) : null, !b.local ? h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, 'only on GitHub') : null,
-            h('small', { class: 'hint', style: 'display:block' }, `${b.subject || ''} · ${when(b.date)}`)),
-          b.isDefault ? h('small', { class: 'hint' }, 'the base') : bar(b),
-          h('small', { class: 'hint mono' }, b.isDefault ? '' : `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'}`))))),
       (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
         (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
       d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet. Click a circle to merge, switch, branch or tidy up.'), mapBox,
         d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: `, d.map.merged.map((n) => h('button', { class: 'chip', onclick: () => { picked = { kind: 'merged', name: n }; drawMap(); drawPop(); window.scrollTo?.({ top: 0 }); }, title: 'Click for actions' }, n)), d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : '', '.') : null,
-        d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
+        d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,
       h('details', { class: 'card', style: 'margin-top:12px' }, h('summary', {}, h('b', {}, 'Detailed history')), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
         (d.graph?.rows || []).length ? h('div', { class: 'rm-scroll' }, branchGraph(d.graph, when)) : h('p', { class: 'hint' }, 'No saves yet.')));
   };
   const remote = (d) => h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
-      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet. Git buttons work on repositories on this computer: add it under Repositories first.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
+      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
+    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('p', { class: 'hint', style: 'margin:4px 0 8px' }, 'Fetch, pull, push, save changes, merge and branch work on a copy on this computer. Copy it once and the buttons appear here.'),
+      h('button', { class: 'btn primary', onclick: guard(async () => { toast('Copying…'); await api('/api/repos', 'POST', { source: d.name }); const keep = d.name; await draw(); const hit = list.local.find((r) => r.name === keep || r.name.endsWith('/' + keep.split('/').pop())); if (hit) { choice = hit.id; sessionStorageSet('repomap', choice); sel.value = choice; await show(); } toast('Copied. The Git buttons are ready.'); }) }, 'Copy to this computer')),
     d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, true, when)),
       d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
-      d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
+      d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Open pull requests (${d.pulls.length})`),
       d.pulls.length ? d.pulls.map((p) => h('div', { class: 'rm-commit' }, h('b', {}, `#${p.number}`), h('span', {}, p.title), p.draft ? h('span', { class: 'pill' }, 'draft') : null, h('small', { class: 'hint' }, `${p.from} → ${p.into} · ${p.author} · ${when(p.updatedAt)}`), h('a', { href: p.url, target: '_blank', rel: 'noopener' }, 'Open'))) : h('p', { class: 'hint' }, 'None open.')),
-    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${d.branches.length})`), d.branches.map((b) => h('div', { class: 'rm-commit' }, h('b', {}, b.name), b.name === d.defaultBranch ? h('span', { class: 'pill info', style: 'height:18px;font-size:10px' }, 'main') : null, b.protected ? h('span', { class: 'pill', style: 'height:18px;font-size:10px' }, 'protected') : null, h('small', { class: 'hint mono' }, b.sha)))),
-    h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Recent activity'), d.commits.map(commitRow)),
-    h('p', { class: 'hint' }, 'To let agents work on it, add it under Repositories or start a project from it.'));
+    h('p', { class: 'hint' }, 'Copying it also lets agents work on it (it appears under Repositories).'));
   const show = async () => {
     if (!choice) { body.replaceChildren(h('div', { class: 'card empty' }, 'Choose a repository above.')); return; }
     body.replaceChildren(h('div', { class: 'card empty' }, 'Looking…'));

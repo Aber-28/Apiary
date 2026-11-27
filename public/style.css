@@ -474,5 +474,10 @@ dialog.news button.primary,dialog.news .btn.primary{margin-top:6px}
 #crumbs a.crumb{color:inherit;text-decoration:none;border-radius:6px;padding:2px 4px;margin:0 -4px}
 #crumbs a.crumb:hover{background:var(--hover);text-decoration:underline}
 #crumbs .sep{opacity:.6}
-.sys span{min-width:0}.sys b{display:inline-block;min-width:3ch;text-align:right}.sys span:last-child b{min-width:0}
 @media (max-width:1180px){.sys{gap:8px;font-size:10px}}
+/* Machine stats: every figure has a fixed slot so nothing shifts when the numbers change */
+.sys .m{display:inline-block;width:9ch;text-align:left;white-space:nowrap}
+.sys .m b{display:inline-block;width:4ch;text-align:right}
+.sys{flex:none}.sys .m.net{width:29ch}
+.sys .m.net b{width:9.5ch}
+@media (max-width:1180px){.sys .m{width:8.6ch}.sys .m.net{width:28ch}}

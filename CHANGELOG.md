@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.65.1
+
+- Fixed: the CPU, RAM, disk and network figures at the top no longer shift sideways as the numbers change. Each one has a fixed slot.
+
 ## 0.65.0
 
 - New: icons on every page and folder in the menu.

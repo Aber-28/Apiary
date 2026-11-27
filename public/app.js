@@ -2069,9 +2069,9 @@ async function pollSystem() {
   sysBusy = true;
   try {
     const s = await api('/api/system');
-    const part = (label, pct, tip) => h('span', { class: pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : '', title: tip }, label + ' ', h('b', {}, pct == null ? '–' : pct + '%'));
+    const part = (label, pct, tip) => h('span', { class: 'm ' + (pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : ''), title: tip }, label + ' ', h('b', {}, pct == null ? '–' : pct + '%'));
     const mp = s.mem ? Math.round(100 * s.mem.used / s.mem.total) : null, dp = s.disk ? Math.round(100 * s.disk.used / s.disk.total) : null;
-    el.replaceChildren(part('CPU', s.cpu, `${s.cores} cores. Load ${s.load.join(' / ')} (1, 5, 15 minutes)`), part('RAM', mp, s.mem ? `${GB(s.mem.used)} used of ${GB(s.mem.total)}` : ''), part('Disk', dp, s.disk ? `${GB(s.disk.total - s.disk.used)} free of ${GB(s.disk.total)}` : ''), s.net ? h('span', { title: 'Network speed right now: received (down) and sent (up), across the real network cards' }, '↓ ', h('b', {}, RATE(s.net.rx)), ' ↑ ', h('b', {}, RATE(s.net.tx))) : null);
+    el.replaceChildren(part('CPU', s.cpu, `${s.cores} cores. Load ${s.load.join(' / ')} (1, 5, 15 minutes)`), part('RAM', mp, s.mem ? `${GB(s.mem.used)} used of ${GB(s.mem.total)}` : ''), part('Disk', dp, s.disk ? `${GB(s.disk.total - s.disk.used)} free of ${GB(s.disk.total)}` : ''), s.net ? h('span', { class: 'm net', title: 'Network speed right now: received (down) and sent (up), across the real network cards' }, '↓ ', h('b', {}, RATE(s.net.rx)), ' ↑ ', h('b', {}, RATE(s.net.tx))) : null);
     el.hidden = false;
   } catch { /* the page is about to redirect or the server is restarting */ } finally { sysBusy = false; }
 }

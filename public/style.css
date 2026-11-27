@@ -510,3 +510,5 @@ input.num-inline{width:84px;min-height:38px;padding:6px 8px;text-align:center;di
 .rm-pop .btn[aria-label="Close"]{min-height:30px;height:30px;width:30px;padding:0;flex:none}
 
 .rm-pop .kv .btn:not([aria-label="Close"]){min-height:34px;padding:0 12px;font-size:13px}
+/* The footer with the coffee link stays solid in every theme, so nothing shows through it when the menu scrolls under it */
+.side-foot{background:linear-gradient(var(--surface),var(--surface)),var(--bg)}

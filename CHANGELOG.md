@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.70.3
+
+- Fixed: the Buy me a coffee area at the bottom of the menu was see-through in the glass themes, so the Connections list showed behind it. It is solid now.
+
 ## 0.70.2
 
 - Changed: the Git actions card is gone from the top of a GitHub-only repository, since the circles now do the work. A small Copy to this computer button sits next to Open on GitHub for pull, push and saving your own changes.

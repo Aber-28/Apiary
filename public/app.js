@@ -220,25 +220,8 @@ function navPath(items, label, trail = []) {
   }
   return null;
 }
-// Where a heading or folder in the trail leads: its first page.
-function crumbHref(label) {
-  const find = (items) => {
-    for (const it of items) {
-      if (Array.isArray(it)) { if (it[1] === label) return it[0]; }
-      else { if (it.label === label) return navLeaves(it.items)[0]?.[0]; const r = find(it.items); if (r) return r; }
-    }
-    return null;
-  };
-  return find(NAV);
-}
-function crumbs(...parts) {
-  const last = parts[parts.length - 1];
-  if (parts.length === 2) for (const g of NAV) { const r = navPath(g.items, last, [g.label]); if (r) { parts = r; break; } }   // the trail follows the menu
-  $('#crumbs').replaceChildren(...parts.flatMap((p, i) => {
-    const href = i === parts.length - 1 ? null : crumbHref(p);
-    return [i ? h('span', { class: 'sep', 'aria-hidden': 'true' }, '/') : null, i === parts.length - 1 ? h('b', { 'aria-current': 'page' }, p) : href ? h('a', { class: 'crumb', href }, p) : h('span', {}, p)];
-  }).filter(Boolean));
-}
+// The path above each page was removed; pages still call this, so it stays as a no-op.
+function crumbs() {}
 
 // ---------- routing ----------
 const ROUTES = [

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.66.0
+
+- Removed: the path (breadcrumbs) above each page. The menu already shows where you are, and each page has its own title.
+
 ## 0.65.2
 
 - Fixed: the small number box inside a sentence (Telegram alerts minutes, backups to keep) was a thin pill that hid its number. It is now a normal-sized box with the number centred.

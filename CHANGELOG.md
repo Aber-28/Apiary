@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.68.1
+
+- Changed: the "What is new" notes always list New first, then Changed, Fixed and Removed, each heading with its own icon.
+
 ## 0.68.0
 
 - Changed: Telegram alerts are sent once. An approval is announced a single time, and an identical alert is not repeated for 24 hours (it was 10 minutes).

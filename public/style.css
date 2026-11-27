@@ -493,3 +493,6 @@ input.num-inline{width:84px;min-height:38px;padding:6px 8px;text-align:center;di
 .gitout .cmd{color:#7dd3fc}.gitout .note{color:#fcd34d}.gitout .err{color:#fca5a5}
 .chip{border:1px solid var(--border,#ccc);background:transparent;color:inherit;border-radius:999px;padding:1px 9px;margin:0 3px 3px 0;font:inherit;font-size:12px;cursor:pointer}
 .chip:hover{background:var(--hover,rgba(127,127,127,.15))}
+
+.news-kind h4{display:flex;align-items:center;gap:7px}
+.news-kind.new h4{color:var(--ok-text,#15803d)}.news-kind.changed h4{color:var(--info-text,#1d4ed8)}.news-kind.fixed h4{color:var(--accent-text,#b45309)}.news-kind.removed h4{color:var(--err,#b91c1c)}

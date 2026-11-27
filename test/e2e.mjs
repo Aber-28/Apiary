@@ -2818,6 +2818,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const wn = (await call('/api/whatsnew')).body;
   assert.ok(wn.entries.length >= 2 && wn.entries.every((e) => e.items.length), 'lists every version since the last one seen');
   assert.ok(wn.entries[0].version === wn.version && wn.entries.some((e) => e.version === vers[1]), 'newest first, includes skipped versions');
+  { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(js.includes('const NEWS_KINDS') && /\['new'.*\['changed'.*\['fixed'.*\['removed'/s.test(js), 'notes are grouped New, Changed, Fixed, Removed, each with an icon'); }
   assert.equal((await call('/api/whatsnew/seen', 'POST', {})).status, 200);
   assert.equal((await call('/api/whatsnew')).body.entries.length, 0, 'gone once OK is pressed');
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');

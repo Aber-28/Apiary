@@ -2814,10 +2814,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
 { const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(/e\.attachHandled/.test(js), 'a dropped picture is attached once'); }
 { const css = fsRead(new URL('../public/style.css', import.meta.url), 'utf8'); assert.ok(/Compact chat header on desktop/.test(css), 'the chat header is compact'); }
 { // what's new after an update
-  engine.store.data.settings.onboardingDone = true; engine.store.data.whatsNew = { seen: '0.60.0' };
+  engine.store.data.settings.onboardingDone = true; const vers = [...fsRead(new URL('../CHANGELOG.md', import.meta.url), 'utf8').matchAll(/^## (\d+\.\d+\.\d+)/gm)].map((m) => m[1]); engine.store.data.whatsNew = { seen: vers[4] };
   const wn = (await call('/api/whatsnew')).body;
   assert.ok(wn.entries.length >= 2 && wn.entries.every((e) => e.items.length), 'lists every version since the last one seen');
-  assert.ok(wn.entries[0].version === wn.version && wn.entries.some((e) => e.version === '0.61.0'), 'newest first, includes skipped versions');
+  assert.ok(wn.entries[0].version === wn.version && wn.entries.some((e) => e.version === vers[1]), 'newest first, includes skipped versions');
   assert.equal((await call('/api/whatsnew/seen', 'POST', {})).status, 200);
   assert.equal((await call('/api/whatsnew')).body.entries.length, 0, 'gone once OK is pressed');
   const js = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');

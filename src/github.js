@@ -39,7 +39,53 @@ export function validateSource(spec) {
   throw new GitHubError('Use owner/name, an https:// URL, or an existing absolute path');
 }
 
+const NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*\/$)[A-Za-z0-9._\/-]{1,100}$/, SHA = /^[0-9a-f]{40}$/;
+const enc = (n) => n.split('/').map(encodeURIComponent).join('/');
+export const githubActions = ['branch', 'tag', 'merge', 'deletebranch', 'pr'];
+
 export const github = {
+  // Changes made on GitHub itself (nothing on this computer). A short fixed list; merges and deletes need `confirmed`.
+  async act(conn, repo, action, a = {}, confirmed = false) {
+    if (!SPEC_REPO.test(String(repo || ''))) throw new GitHubError('Choose a repository');
+    if (!githubActions.includes(action)) throw new GitHubError('That GitHub action is not available');
+    if (['merge', 'deletebranch'].includes(action) && confirmed !== true) throw new GitHubError('This action needs your confirmation');
+    const nm = (v, what) => { if (typeof v !== 'string' || !NAME.test(v)) throw new GitHubError(`${what} must be letters, numbers, dots, dashes or slashes`); return v; };
+    const call = async (method, p, body) => {
+      if (conn.method === 'token') { if (!conn.token) throw new GitHubError('Add a GitHub token under Connections first', 409); return rest(conn.token, p, { method, ...(body ? { body: JSON.stringify(body) } : {}) }); }
+      const r = await run('gh', ['api', '-X', method, p.replace(/^\//, ''), ...(body ? ['--input', '-'] : [])], { timeout: 30000, env: ghEnv(conn), input: body ? JSON.stringify(body) : undefined });
+      if (r.code !== 0) throw new GitHubError(`GitHub said no: ${(r.stderr || r.stdout || '').trim().slice(0, 200) || 'is gh signed in?'}`, 409);
+      return r.stdout.trim() ? JSON.parse(r.stdout) : {};
+    };
+    const info = await call('GET', `/repos/${repo}`), def = info.default_branch;
+    const shaOf = async (ref) => { if (SHA.test(ref)) return ref; const b = await call('GET', `/repos/${repo}/branches/${enc(nm(ref, 'The starting point'))}`); return b.commit?.sha; };
+    try {
+      if (action === 'branch') { const n = nm(a.name, 'The new branch name'), sha = await shaOf(String(a.from || def)); await call('POST', `/repos/${repo}/git/refs`, { ref: `refs/heads/${n}`, sha }); return { ok: true, message: `Created branch ${n} on GitHub.` }; }
+      if (action === 'tag') { const n = nm(a.name, 'The tag name'), sha = await shaOf(String(a.sha || def)); await call('POST', `/repos/${repo}/git/refs`, { ref: `refs/tags/${n}`, sha }); return { ok: true, message: `Tagged ${n} on GitHub.` }; }
+      if (action === 'merge') {
+        const head = nm(a.head, 'The branch'), base = nm(a.base || def, 'The target branch');
+        if (head === base) throw new GitHubError('A branch cannot be merged into itself');
+        const r = await call('POST', `/repos/${repo}/merges`, { base, head, commit_message: `Merge ${head} into ${base} (from Apiary)` });
+        return { ok: true, message: r?.sha ? `Merged ${head} into ${base} on GitHub.` : `${base} already has everything from ${head}. Nothing to merge.` };
+      }
+      if (action === 'deletebranch') {
+        const n = nm(a.name, 'The branch name'); if (n === def) throw new GitHubError('The main branch is never deleted');
+        const cmp = await call('GET', `/repos/${repo}/compare/${enc(def)}...${enc(n)}`);
+        if (cmp.ahead_by) throw new GitHubError(`${n} has ${cmp.ahead_by} save(s) that are not in ${def} yet, so it is not deleted`);
+        await call('DELETE', `/repos/${repo}/git/refs/heads/${enc(n)}`); return { ok: true, message: `Deleted merged branch ${n} on GitHub.` };
+      }
+      if (action === 'pr') {
+        const head = nm(a.head, 'The branch'), title = String(a.title || '').trim().slice(0, 200) || `Merge ${head}`;
+        const r = await call('POST', `/repos/${repo}/pulls`, { title, head, base: def }); return { ok: true, message: `Opened pull request #${r.number} into ${def}.`, url: r.html_url };
+      }
+    } catch (e) {
+      if (e instanceof GitHubError && e.status !== 502) throw e;
+      const m = String(e.message || '');
+      if (/409|conflict/i.test(m) && action === 'merge') throw new GitHubError('The two branches changed the same lines, so GitHub did not merge them. Nothing was changed. Open a pull request to resolve it.', 409);
+      if (/422|already exists/i.test(m)) throw new GitHubError('GitHub says that name already exists or is not valid. Pick another name.', 409);
+      throw e;
+    }
+  },
+
   async status(conn) {
     if (conn.method === 'token') {
       if (!conn.token) return { ok: false, reason: 'No token saved' };

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.70.0
+
+- New: for a repository that is only on GitHub, the circles now work on GitHub itself. Start a branch from a version, tag it, merge a branch into main, open a pull request, or delete a merged branch, with no copy on your computer. Merges and deletes ask first, a clashing merge changes nothing, and only merged branches can be deleted.
+- Changed: the close button on the circle menu is small and sits beside the title.
+
 ## 0.69.3
 
 - Fixed: the close (✕) button in the map menu sat in its own big box under the title. It is now a small round button in the top right corner of the menu.

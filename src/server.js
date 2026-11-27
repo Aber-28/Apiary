@@ -402,6 +402,12 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
           return json(res, 200, out);
         } catch (e) { return json(res, e.status || 500, { error: e.message }); }
       }
+      if (req.method === 'POST' && url.pathname === '/api/repomap/github/action') {
+        const b = await readBody(req), conn = engine.connections.get('github');
+        const out = await github.act(conn, String(b.repo || ''), String(b.action || ''), b.args || {}, b.confirmed === true);
+        engine.audit.add('commit', { actor: 'You', action: `changed ${b.repo} on GitHub: ${b.action}`, detail: out.message });
+        return json(res, 200, out);
+      }
       if (req.method === 'GET' && url.pathname === '/api/repomap/github') {
         return json(res, 200, await github.overview(engine.connections.get('github'), url.searchParams.get('repo') || ''));
       }

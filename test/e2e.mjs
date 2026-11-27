@@ -2956,6 +2956,35 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
       assert.deepEqual(ov.map.merged, ['old'], 'a branch with nothing new is listed as merged');
     } finally { delete process.env.APIARY_GITHUB_API; srv.close(); }
   }
+  {
+    // changes made on GitHub itself from the map (a fake GitHub that records what it was asked)
+    const http = await import('node:http'); const seen = []; const F = 'f'.repeat(40);
+    const srv = http.createServer((q, r) => { let body = ''; q.on('data', (c) => { body += c; }); q.on('end', () => {
+      const u = decodeURIComponent(q.url.split('?')[0]); seen.push(`${q.method} ${u} ${body}`); r.setHeader('content-type', 'application/json');
+      if (u === '/repos/o/r') return r.end('{"full_name":"o/r","default_branch":"main"}');
+      if (u === '/repos/o/r/branches/main') return r.end(JSON.stringify({ commit: { sha: F } }));
+      if (u === '/repos/o/r/compare/main...old') return r.end('{"ahead_by":0}'); if (u === '/repos/o/r/compare/main...feat/x') return r.end('{"ahead_by":2}');
+      if (q.method === 'POST' && u === '/repos/o/r/git/refs') { if (/dup/.test(body)) { r.statusCode = 422; return r.end('{"message":"Reference already exists"}'); } r.statusCode = 201; return r.end('{}'); }
+      if (q.method === 'POST' && u === '/repos/o/r/merges') { if (/conflict/.test(body)) { r.statusCode = 409; return r.end('{"message":"Merge conflict"}'); } r.statusCode = 201; return r.end('{"sha":"abc"}'); }
+      if (q.method === 'POST' && u === '/repos/o/r/pulls') { r.statusCode = 201; return r.end('{"number":7,"html_url":"https://github.com/o/r/pull/7"}'); }
+      if (q.method === 'DELETE') { r.statusCode = 204; return r.end(); }
+      r.statusCode = 404; r.end('{"message":"nope"}'); }); });
+    await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+    const { github: gh } = await import('../src/github.js'); process.env.APIARY_GITHUB_API = `http://127.0.0.1:${srv.address().port}`; const conn = { method: 'token', token: 'example' };
+    try {
+      assert.match((await gh.act(conn, 'o/r', 'branch', { name: 'feat/new', from: F })).message, /Created branch feat\/new/); assert.ok(seen.some((x) => x.startsWith('POST /repos/o/r/git/refs') && x.includes(`"sha":"${F}"`) && x.includes('refs/heads/feat/new')), 'a branch is made from the chosen version');
+      assert.ok((await gh.act(conn, 'o/r', 'tag', { name: 'v2', sha: F })).ok && seen.some((x) => x.includes('refs/tags/v2')), 'a version can be tagged on GitHub');
+      await assert.rejects(gh.act(conn, 'o/r', 'merge', { head: 'feat/x' }, false), /confirmation/, 'merging needs confirmation');
+      assert.match((await gh.act(conn, 'o/r', 'merge', { head: 'feat/x' }, true)).message, /Merged feat\/x into main/);
+      await assert.rejects(gh.act(conn, 'o/r', 'merge', { head: 'conflict' }, true), /changed the same lines/, 'a clash is explained and nothing changes');
+      await assert.rejects(gh.act(conn, 'o/r', 'branch', { name: 'dup', from: F }), /already exists/);
+      assert.equal((await gh.act(conn, 'o/r', 'pr', { head: 'feat/x', title: 'Add x' })).url, 'https://github.com/o/r/pull/7');
+      assert.ok((await gh.act(conn, 'o/r', 'deletebranch', { name: 'old' }, true)).ok && seen.some((x) => x.startsWith('DELETE /repos/o/r/git/refs/heads/old')), 'a merged branch can be deleted');
+      await assert.rejects(gh.act(conn, 'o/r', 'deletebranch', { name: 'feat/x' }, true), /not in main yet/, 'unmerged work is never deleted'); await assert.rejects(gh.act(conn, 'o/r', 'deletebranch', { name: 'main' }, true), /never deleted/);
+      await assert.rejects(gh.act(conn, 'o/r', 'branch', { name: '--x' }), /letters, numbers/); await assert.rejects(gh.act(conn, 'o/r', 'force-push', {}), /not available/); await assert.rejects(gh.act(conn, 'bad name', 'tag', {}), /Choose a repository/);
+      const ui = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(ui.includes('/api/repomap/github/action') && ui.includes("ghAct('merge'"), 'GitHub-only circles have their own actions');
+    } finally { delete process.env.APIARY_GITHUB_API; srv.close(); }
+  }
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function simpleMap') && appjs.includes('Not merged into main yet'), 'the simple map is drawn'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
 }
 

@@ -1846,7 +1846,7 @@ function simpleMap(m, remote, when, onPick, picked) {
   m.line.forEach((c, i) => {
     const last = i === n - 1, hereMain = !!m.here?.onMain && last;
     const mn = el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: (hereMain ? 'rm2-node rm2-on' : 'rm2-node') + (picked?.kind === 'version' && picked.hash === c.hash ? ' rm2-sel' : '') });
-    const pickV = () => onPick({ kind: 'version', hash: c.hash, name: c.hash, label: verLabel(c), subject: c.subject, tip: last, here: hereMain, when: c.date, at: { x: X(i), y: MAINY + 84, w: W } });
+    const pickV = () => onPick({ kind: 'version', hash: c.hash, name: c.hash, label: verLabel(c), subject: c.subject, full: c.full, tip: last, here: hereMain, when: c.date, at: { x: X(i), y: MAINY + 84, w: W } });
     if (onPick) clickable(mn, `${verLabel(c)}: show what you can do`, pickV, tipOf(c));
     if (!onPick) rmHover(mn, tipOf(c));
     svg.append(mn);
@@ -1912,6 +1912,12 @@ function pageRepoMap() {
     if (ask && !confirm(ask)) return;
     op = 'o' + Math.random().toString(36).slice(2, 10); outLines.replaceChildren(); outBox.hidden = false; outTitle.textContent = 'Working…'; outState.className = 'pill work'; outState.textContent = 'Running';
     try { await api('/api/repomap/local/action', 'POST', { id: choice, opId: op, action, args, confirmed: true }); }
+    catch (e) { outTitle.textContent = 'Not done'; outState.className = 'pill err'; outState.textContent = 'Stopped'; addLine(e.message, 'err'); toast(e.message, true); }
+  };
+  const ghAct = async (action, args = {}, ask) => {   // changes made on GitHub itself, for repositories that are not on this computer
+    if (ask && !confirm(ask)) return;
+    outLines.replaceChildren(); outBox.hidden = false; outTitle.textContent = 'Working on GitHub…'; outState.className = 'pill work'; outState.textContent = 'Running';
+    try { const r = await api('/api/repomap/github/action', 'POST', { repo: choice.slice(2), action, args, confirmed: true }); outTitle.textContent = r.message; outState.className = 'pill ok'; outState.textContent = 'Done'; addLine(r.message + (r.url ? '\n' + r.url : '')); await show(); }
     catch (e) { outTitle.textContent = 'Not done'; outState.className = 'pill err'; outState.textContent = 'Stopped'; addLine(e.message, 'err'); toast(e.message, true); }
   };
   const when = (d) => (d ? ago(new Date(d).getTime()) : '');
@@ -2010,10 +2016,24 @@ function pageRepoMap() {
     const rshow = () => {
       if (!rp) { rpop.replaceChildren(); return; }
       { const at = rp.at || { x: 160, y: 56, w: 700 }; rpop.style.left = Math.max(4, Math.min(at.x - 170, at.w - 350)) + 'px'; rpop.style.top = at.y + 'px'; }
-      const t = rp.kind === 'version' ? rp.label : rp.name, sub = rp.kind === 'version' ? `${rp.subject} (${rp.name}) · ${when(rp.when)}` : '';
-      rpop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' }, h('div', {}, h('b', {}, t), sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
-        h('button', { class: 'btn rm-x', title: 'Close', 'aria-label': 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
-        h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Pull, push, merge, branch and tag work on a copy on this computer. Use Copy to this computer at the top, and every circle gets its own buttons.'));
+      const base = d.defaultBranch, link = (label, href) => h('a', { class: 'btn', href, target: '_blank', rel: 'noopener' }, label);
+      const name = (q) => (prompt(q) || '').trim(), acts = [];
+      let title, sub = '';
+      if (rp.kind === 'version') {
+        title = rp.label; sub = `${rp.subject} (${rp.name}) · ${when(rp.when)}${rp.tip ? ` · the latest save on ${base}` : ''}`;
+        acts.push(h('button', { class: 'btn', onclick: () => { const n = name('Name for the new branch on GitHub, starting from this version'); if (n) ghAct('branch', { name: n, from: rp.full }); } }, 'New branch from here'),
+          h('button', { class: 'btn', onclick: () => { const n = name('Name for the tag, for example v1.0'); if (n) ghAct('tag', { name: n, sha: rp.full }); } }, 'Tag this version'), d.url ? link('See what changed', `${d.url}/commit/${rp.full}`) : null);
+      } else {
+        title = rp.name; sub = rp.kind === 'merged' ? `Already merged into ${base}` : '';
+        if (rp.kind !== 'merged') acts.push(h('button', { class: 'btn', onclick: () => ghAct('merge', { head: rp.name, base }, `Merge "${rp.name}" into "${base}" on GitHub?\n\nThis changes "${base}" on GitHub right away. If they clash, GitHub refuses and nothing is changed.`) }, `Merge into ${base}`),
+          h('button', { class: 'btn', onclick: () => { const t = name('Title for the pull request'); if (t) ghAct('pr', { head: rp.name, title: t }); } }, 'Open pull request'));
+        acts.push(h('button', { class: 'btn', onclick: () => { const n = name('Name for the new branch on GitHub, starting from here'); if (n) ghAct('branch', { name: n, from: rp.name }); } }, 'New branch from here'));
+        if (rp.kind === 'merged') acts.push(h('button', { class: 'btn', onclick: () => ghAct('deletebranch', { name: rp.name }, `Delete the merged branch "${rp.name}" on GitHub? Its work is already in ${base}.`) }, 'Delete (already merged)'));
+        else if (d.url) acts.push(link('Compare on GitHub', `${d.url}/compare/${encodeURIComponent(base)}...${rp.name.split('/').map(encodeURIComponent).join('/')}`));
+      }
+      rpop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;align-items:flex-start;flex-wrap:nowrap' }, h('div', {}, h('b', {}, title), sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
+        h('button', { class: 'btn', 'aria-label': 'Close', title: 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
+        h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts), h('small', { class: 'hint', style: 'display:block;margin-top:8px' }, 'These change GitHub directly. Pull, push and saving your own changes need a copy on this computer (Copy to this computer, at the top).'));
     };
     queueMicrotask(() => { rshow(); if (d.map) rdraw(); });
     return h('div', {},
@@ -2022,7 +2042,7 @@ function pageRepoMap() {
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('p', { class: 'hint', style: 'margin:4px 0 8px' }, 'Fetch, pull, push, save changes, merge and branch work on a copy on this computer. Copy it once and the buttons appear here.'),
       h('button', { class: 'btn primary', onclick: () => copyRepo(d.name) }, 'Copy to this computer')),
     d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), rbox,
-      d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
+      d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: `, d.map.merged.map((n) => h('button', { class: 'chip', onclick: () => { rp = { kind: 'merged', name: n, at: { x: 160, y: 40, w: 700 } }; rdraw(); rshow(); }, title: 'Click for actions' }, n)), d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : '', '.') : null,
       d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Open pull requests (${d.pulls.length})`),
       d.pulls.length ? d.pulls.map((p) => h('div', { class: 'rm-commit' }, h('b', {}, `#${p.number}`), h('span', {}, p.title), p.draft ? h('span', { class: 'pill' }, 'draft') : null, h('small', { class: 'hint' }, `${p.from} → ${p.into} · ${p.author} · ${when(p.updatedAt)}`), h('a', { href: p.url, target: '_blank', rel: 'noopener' }, 'Open'))) : h('p', { class: 'hint' }, 'None open.')),

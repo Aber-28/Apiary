@@ -39,6 +39,10 @@ The older description follows. Click a branch to **go to it**, **merge it into**
 
 ## For a repository on GitHub
 
+**You can work on GitHub directly from the circles, without copying anything.** Click a version and you can start a **new branch** from it, **tag** it, or **see what changed** (opens GitHub). Click a branch that is not merged yet and you can **merge it into main**, **open a pull request**, start a new branch from it, or compare it on GitHub. Click a branch name under "Already merged" to **delete** it. These changes happen on GitHub itself and show up on the map straight away.
+
+Safety: merging and deleting ask you first. If a merge would clash, GitHub refuses and nothing changes. Only branches that are already merged can be deleted, and the main branch never. Pull, push and saving your own changes only make sense for a copy on this computer, so those need **Copy to this computer**.
+
 The same **Map** as above (without a "You are here" marker, because the repository is not on this computer), then when it was last pushed and **open pull requests** (from and into which branch, who, and a link). Press **Copy to this computer** to get the Git buttons: Apiary copies the repository (it also appears under Repositories) and the page switches to it.
 
 ## Good to know

@@ -6,10 +6,11 @@ import { run } from './exec.js';
 
 const NAME = /^(?!-)(?!.*\.\.)(?!.*\/\/)[A-Za-z0-9._\/-]{1,100}$/;
 export const RISKY = new Set(['push', 'merge', 'deletebranch', 'commit', 'stashpop']);
-export const ACTION_IDS = ['status', 'fetch', 'pull', 'push', 'commit', 'switch', 'newbranch', 'merge', 'deletebranch', 'stash', 'stashpop', 'tag'];
+export const ACTION_IDS = ['status', 'fetch', 'pull', 'push', 'commit', 'switch', 'newbranch', 'merge', 'deletebranch', 'stash', 'stashpop', 'tag', 'checkout', 'show'];
 const scrub = (s) => String(s).replace(/(gh[pousr]_|github_pat_)[A-Za-z0-9_]+/g, '$1…').replace(/\/\/[^/@\s]+@/g, '//');
 const G = (dir, args) => run('git', args, { cwd: dir, env: { GIT_TERMINAL_PROMPT: '0' }, timeout: 20000 });
 const busy = new Set();
+const HASH = /^[0-9a-f]{7,40}$/;
 
 const need = (v, what) => { if (typeof v !== 'string' || !NAME.test(v)) throw Object.assign(new Error(`${what} must be letters, numbers, dots, dashes or slashes`), { status: 400 }); return v; };
 
@@ -47,7 +48,9 @@ export async function plan(dir, action, a = {}) {
     }
     case 'stash': return { title: 'Set unsaved changes aside', steps: [['stash', 'push', '-u']], identity: true };
     case 'stashpop': return { title: 'Bring set-aside changes back', steps: [['stash', 'pop']], identity: true };
-    case 'tag': return { title: `Tag ${need(a.name, 'The tag name')}`, steps: [['tag', a.name]] };
+    case 'tag': { const n = need(a.name, 'The tag name'), at = a.at ? need(a.at, 'The version') : ''; return { title: `Tag ${n}`, steps: [['tag', n, ...(at ? [at] : [])]] }; }
+    case 'checkout': { const x = String(a.hash || ''); if (!HASH.test(x)) throw Object.assign(new Error('That version is not valid'), { status: 400 }); return { title: `Look at version ${x.slice(0, 7)}`, steps: [['switch', '--detach', x]], hint: 'Save or set aside your changes first, then try again.' }; }
+    case 'show': { const x = String(a.hash || ''); if (!HASH.test(x)) throw Object.assign(new Error('That version is not valid'), { status: 400 }); return { title: `What changed in ${x.slice(0, 7)}`, steps: [['show', '--stat', '--no-color', '--format=%h %s%n%an, %cr%n', x]] }; }
     default: throw Object.assign(new Error('That Git action is not available'), { status: 400 });
   }
 }

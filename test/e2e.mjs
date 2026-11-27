@@ -2888,6 +2888,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
     assert.equal((await act('switch', { branch: 'main' })).body.ok, true);
     assert.equal((await act('merge', { branch: 'feat/a' })).body.ok, true); assert.ok(gg('log', '--oneline').includes('add c'), 'the merge brought the work in');
     assert.equal((await act('deletebranch', { branch: 'feat/a' })).body.ok, true, 'a merged branch can be deleted');
+    const sha = gg('rev-parse', '--short', 'HEAD').trim();
+    assert.equal((await act('show', { hash: 'HEAD' })).status, 400, 'a version must be a real save id'); assert.equal((await act('show', { hash: sha })).body.ok, true);
+    assert.equal((await act('tag', { name: 'v9.9', at: sha })).body.ok, true); assert.equal(gg('tag').trim(), 'v9.9', 'a version can be tagged');
+    assert.equal((await act('checkout', { hash: sha })).body.ok, true); assert.equal(gg('rev-parse', '--abbrev-ref', 'HEAD').trim(), 'HEAD', 'looking at a version leaves branches alone'); assert.equal((await act('switch', { branch: 'main' })).body.ok, true);
     // conflict: the merge is undone and nothing is left half-done
     assert.equal((await act('newbranch', { name: 'x1' })).body.ok, true); writeFileSync(path.join(dir, 'c.txt'), 'x1\n'); await act('commit', { message: 'x1' });
     await act('switch', { branch: 'main' }); await act('newbranch', { name: 'x2' }); writeFileSync(path.join(dir, 'c.txt'), 'x2\n'); await act('commit', { message: 'x2' });
@@ -2896,7 +2900,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
     assert.equal((await act('deletebranch', { branch: 'x1' })).body.ok, false, 'an unmerged branch is never deleted');
     assert.equal((await act('deletebranch', { branch: 'x2' })).status, 400, 'the branch you are on cannot be deleted');
     engine.off('event', onEv);
-    const src2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(src2.includes('/api/repomap/local/action') && src2.includes('rm2-click') && src2.includes("type !== 'gitop'"), 'the map has clickable nodes and live output');
+    const src2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(src2.includes('/api/repomap/local/action') && src2.includes('rm2-click') && src2.includes("kind: 'version'") && src2.includes("type !== 'gitop'"), 'the map has clickable nodes and live output');
   }
   const { layoutGraph } = await import('../src/repomap.js');
   const cm = (h, ...p) => ({ hash: h, parents: p, refs: [] });

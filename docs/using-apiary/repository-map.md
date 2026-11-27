@@ -22,7 +22,11 @@ For a repository on this computer you can run Git from the page, and watch every
 
 **Buttons:** Status, Fetch, Pull, Push, Save changes (asks for a short message), New branch, Set changes aside, Bring them back, and Tag.
 
-**Click the map:** each circle on the map is a button. Click a branch to **go to it**, **merge it into** the branch you are on, or **start a new branch from it**. Click the main line for the same options, plus Pull and Push when you are on it. Branches already merged show as small chips under the map; click one to **delete** it.
+**Click the map:** each circle on the map is a button, and the options that appear match what makes sense for that circle right now. For a **version** on the main line: look at it, start a branch from it, tag it, see what changed in it, or merge it into the branch you are on (the latest one offers **Pull** only if GitHub has news and **Push** only if you have saves to send). For a **branch**: go to it, merge it, branch from it, push or pull it when you are on it, or delete it when it is already merged. While you have unsaved changes, switching and merging are not offered, and the page says why.
+
+Under each circle only the version number is shown. **Hover** over a circle (without clicking) to see the full note, when it was saved and its save id.
+
+The older description follows. Click a branch to **go to it**, **merge it into** the branch you are on, or **start a new branch from it**. Click the main line for the same options, plus Pull and Push when you are on it. Branches already merged show as small chips under the map; click one to **delete** it.
 
 **Safety:**
 * Push, Merge, Save changes, Bring back and Delete ask you to confirm first.

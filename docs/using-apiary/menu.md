@@ -4,8 +4,8 @@ The menu on the left is a tree. Each heading opens to show its pages and, where 
 
 - **Workspace:** Chat, Projects, Tasks, Approvals, Support tickets, Terminal sessions. Folder *Plan and reuse*: Project templates, Runbooks, Weekly report.
 - **Agents:** All agents, Organisation, Team meetings. Folder *Library*: Teams, Saved agents, Delegation rules. Folder *Knowledge*: Memory, Repositories.
-- **Infrastructure:** Devices, Map, Health.
-- **Connections:** Overview, Usage, GitHub. Folder *AI tools*: Claude Code, Codex.
+- **Infrastructure:** Devices, Library, Map, Health.
+- **Connections:** Overview, Usage. Folder *AI tools*: Claude Code, Codex. Folder *GitHub*: Connection, GitHub repository map.
 - **Security:** Sign-in, Secrets vault, Approval rules, Access and safety, Audit log.
 - **Settings:** Appearance, Telegram alerts, Setup guide. Folder *Data*: Backups, Export and import, Factory reset. Folder *System*: Updates, Startup, Folders.
 

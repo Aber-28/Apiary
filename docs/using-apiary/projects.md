@@ -1,14 +1,14 @@
 # Projects and chat
 
-A **project** is one conversation with a **lead agent**. Everything else (sub-agents, branches, logs) hangs off it.
+A **project** is one conversation led by your **CEO**. The CEO does the work himself or brings in specialists from your team as the work needs them. Everything else (sub-agents, branches, logs) hangs off the project.
 
 ## Create a project
 
-Press **New project** (top of the sidebar).
+Press **New project** (top of the sidebar). There is no lead or team to choose: the CEO leads every project. (Before you have set up your organisation, you can still start from a saved team.)
 
 1. **What should the team do?** Describe the goal in plain words.
 2. **Project name** (optional). Defaults to your goal.
-3. **Lead agent uses**: Claude or Codex, shown with how it is connected (Terminal or Web).
+3. **Your CEO uses**: Claude or Codex, shown with how it is connected (Terminal or Web).
 4. **Where does the work happen?**
    * **Empty workspace**: a fresh folder under `~/.apiary/workspaces/`.
    * **Local folder**: a folder or git repository on your machine.

@@ -23,6 +23,7 @@
 * [Retries and recovery](using-apiary/recovery.md)
 * [Keep going when an AI runs out](using-apiary/continuity.md)
 * [Themes](using-apiary/themes.md)
+* [Writing style and handover notes](using-apiary/writing-style.md)
 * [Project stages](using-apiary/project-stages.md)
 * [Call an agent with @](using-apiary/mentions.md)
 * [Export and import](using-apiary/export-import.md)

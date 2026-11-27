@@ -26,7 +26,7 @@ Files up to 2 MB can be saved from the browser. The `.git` folder is managed by 
 
 Every project shows a **Responsible** agent, in the project's header and on its card in the Projects list. It starts as your CEO, and the CEO leads every project: he does the work himself or hands it to the specialists he created. Existing projects keep whoever was responsible. Change it from the drop-down to any teammate or another project's lead.
 
-The project's own lead agent still does the work. The responsible agent is the one who answers for it: it can give the lead work or ask how it is going, and the lead can report back to it. Tasks work the same way, with **Responsible** on every card (see [Tasks](tasks.md)).
+The responsible agent is the one who answers for it: it can give the lead work or ask how it is going, and the lead can report back to it. Tasks work the same way, with **Responsible** on every card (see [Tasks](tasks.md)).
 
 ## Attaching pictures and screenshots
 

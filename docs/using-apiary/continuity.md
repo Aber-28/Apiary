@@ -30,7 +30,7 @@ Claude and Codex each keep their own private memory of a conversation, and neith
 * It is the agent that writes the note, so it is only as good as what the agent wrote. Apiary does not read the other AI's private memory.
 * It needs **both** Claude and Codex connected. With only one, there is nothing to hand over to, and you are asked what to do instead (see [Retries and recovery](recovery.md)).
 * Agents using a web API connection cannot write files, so they have no note.
-* Writing the note costs a few lines of output per turn. You can switch it off under **Settings, Writing style, Handover notes**.
+* Writing the note costs a few lines of output per turn. You can switch it off under **Settings, Appearance, Handover notes**.
 
 ## Settings
 

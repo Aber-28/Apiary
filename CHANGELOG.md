@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.69.1
+## 0.69.2
 
 - Changed: the row of Git buttons at the top of the repository map is gone. Every action now lives on the circles. The circle you are on carries Status, Fetch, Pull, Push, Save changes, Set changes aside, Bring back and Tag.
+- Fixed: the map menu could still show in an older place on the page for some people, because the same version number was used twice and the browser kept the old files.
+
+## 0.69.1
+
 - Changed: the buttons now appear on the circle itself. Click a circle and a small menu opens right below it, pointing at it. On a repository that is only on GitHub the menu no longer repeats the Copy to this computer button.
 
 ## 0.69.0

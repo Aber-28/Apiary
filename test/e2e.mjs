@@ -2901,5 +2901,21 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('function simpleMap') && appjs.includes('Not merged into main yet'), 'the simple map is drawn'); assert.ok(appjs.includes('function pageRepoMap') && appjs.includes("'#/repomap'"));
 }
 
+// ---- menu icons, one-second machine stats with network speed, a single Documentation link, clickable breadcrumbs ----
+{
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8');
+  const navHrefs = [...appjs.matchAll(/\['(#\/[\w/-]+)', '[^']+'\]/g)].map((m) => m[1]);
+  const iconBlock = appjs.slice(appjs.indexOf('const NAV_ICON'), appjs.indexOf('const FOLDER_ICON'));
+  const missing = [...new Set(navHrefs)].filter((h) => ['#/home', '#/chat'].every((x) => x !== h) && !iconBlock.includes(`'${h}'`));
+  assert.deepEqual(missing.filter((h) => !/project\/|task\//.test(h)), [], 'every menu page has an icon');
+  assert.ok(!appjs.includes("class: 'nav-item doclink'"), 'the menu has no Documentation link (the top bar keeps one)');
+  assert.ok((await fsRead(new URL('../public/index.html', import.meta.url), 'utf8')).includes('doc-top'));
+  assert.ok(appjs.includes('function crumbHref') && appjs.includes("class: 'crumb', href"), 'breadcrumb parents are links');
+  assert.ok(appjs.includes('setInterval(pollSystem, 1000)'), 'machine stats refresh every second');
+  const sys = (await import('../src/system.js')); sys.snapshot(); await new Promise((r) => setTimeout(r, 1000)); const snap = sys.snapshot();
+  assert.ok(snap.net && snap.net.rx >= 0 && snap.net.tx >= 0, 'network speed is reported');
+  const live = (await call('/api/system')).body; assert.ok('net' in live && 'cpu' in live);
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

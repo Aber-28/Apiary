@@ -132,6 +132,31 @@ document.addEventListener('click', (e) => { const sd = $('#side'), path = e.comp
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#side').classList.remove('open'); });
 applyTheme(window.apiaryTheme.get());
 
+// Small icons for the menu's pages and folders (the headings have their own).
+const P = {
+  folder: 'M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z', task: 'M9 11l3 3L22 4 M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11',
+  ok: 'M22 11.08V12a10 10 0 1 1-5.93-9.14 M22 4L12 14.01l-3-3', buoy: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4.93 4.93l4.24 4.24 M14.83 14.83l4.24 4.24 M14.83 9.17l4.24-4.24 M4.93 19.07l4.24-4.24',
+  term: 'M4 17l6-6-6-6 M12 19h8', doc: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8', book: 'M4 19.5A2.5 2.5 0 0 1 6.5 17H20 M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z',
+  bars: 'M18 20V10 M12 20V4 M6 20v-6', org: 'M3 3h6v6H3z M15 3h6v6h-6z M9 15h6v6H9z M6 9v3h12V9 M12 12v3', cal: 'M3 4h18v18H3z M16 2v4 M8 2v4 M3 10h18', layers: 'M12 2L2 7l10 5 10-5z M2 17l10 5 10-5 M2 12l10 5 10-5',
+  userplus: 'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2 M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M20 8v6 M23 11h-6', shuffle: 'M16 3h5v5 M4 20L21 3 M21 16v5h-5 M15 15l6 6 M4 4l5 5',
+  db: 'M12 8c4.97 0 9-1.34 9-3s-4.03-3-9-3-9 1.34-9 3 4.03 3 9 3z M21 12c0 1.66-4 3-9 3s-9-1.34-9-3 M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5', branch: 'M6 3v12 M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 9a9 9 0 0 1-9 9',
+  box: 'M16.5 9.4L7.5 4.21 M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z M3.27 6.96L12 12.01l8.73-5.05 M12 22.08V12', map: 'M1 6v16l7-4 8 4 7-4V2l-7 4-8-4z M8 2v16 M16 6v16',
+  pulse: 'M22 12h-4l-3 9L9 3l-3 9H2', key: 'M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78 7.78 5.5 5.5 0 0 1 7.78-7.78zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4', lock: 'M5 11h14v10H5z M7 11V7a5 5 0 0 1 10 0v4',
+  shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', clip: 'M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2 M9 2h6v4H9z M9 12h6 M9 16h6',
+  palette: 'M12 2a10 10 0 1 0 0 20 2 2 0 0 0 2-2c0-.5-.2-1-.5-1.4-.3-.4-.5-.8-.5-1.3a2 2 0 0 1 2-2h2.4A4.6 4.6 0 0 0 22 10.6C22 5.8 17.5 2 12 2z', send: 'M22 2L11 13 M22 2l-7 20-4-9-9-4z',
+  help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3 M12 17h.01', save: 'M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z M17 21v-8H7v8 M7 3v5h8',
+  down: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4 M7 10l5 5 5-5 M12 15V3', trash: 'M3 6h18 M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6 M10 11v6 M14 11v6 M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2',
+  refresh: 'M23 4v6h-6 M1 20v-6h6 M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15', power: 'M18.36 6.64a9 9 0 1 1-12.73 0 M12 2v10',
+  cpu: 'M4 4h16v16H4z M9 9h6v6H9z M9 1v3 M15 1v3 M9 20v3 M15 20v3 M20 9h3 M20 14h3 M1 9h3 M1 14h3', grid: 'M3 3h7v7H3z M14 3h7v7h-7z M14 14h7v7h-7z M3 14h7v7H3z', disk: 'M22 12H2 M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z M6 16h.01 M10 16h.01',
+  dot: 'M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2z',
+};
+const NAV_ICON = { '#/chat': ICON.chat, '#/projects': P.folder, '#/tasks': P.task, '#/approvals': P.ok, '#/tickets': P.buoy, '#/terminal': P.term, '#/project-templates': P.doc, '#/runbooks': P.book, '#/reports': P.bars,
+  '#/agents': ICON.agents, '#/organisation': P.org, '#/meetings': P.cal, '#/teams': P.layers, '#/templates': P.userplus, '#/rules': P.shuffle, '#/memory': P.db, '#/repositories': P.branch,
+  '#/infrastructure': ICON.infra, '#/library': P.box, '#/infrastructure/map': P.map, '#/health': P.pulse, '#/connections': P.grid, '#/usage': P.bars, '#/connections/claude': P.cpu, '#/connections/codex': P.cpu, '#/connections/github': ICON.link, '#/repomap': P.branch,
+  '#/signin': P.key, '#/secrets': P.lock, '#/policy': ICON.shield, '#/access': P.shield, '#/audit': P.clip, '#/appearance': P.palette, '#/telegram': P.send, '#/backups': P.save, '#/transfer': P.down, '#/reset': P.trash, '#/updates': P.refresh, '#/startup': P.power, '#/folders': P.folder, '#/setup': P.help };
+const FOLDER_ICON = { reuse: P.layers, library: P.layers, knowledge: P.db, ai: P.cpu, github: P.branch, data: P.disk, system: ICON.sliders };
+const navIco = (d) => { const e = svg(d || P.dot, 16, 1.8); e.setAttribute('class', 'nav-ico'); return e; };
+
 // ---------- sidebar ----------
 const DOCS_URL = 'https://aber-28.gitbook.io/aber-28-docs/';
 // A menu entry is [href, label] or { id, label, items: [...] } (a folder; folders can hold folders).
@@ -164,10 +189,10 @@ function renderSide() {
   const badgeEl = (b) => (b ? h('span', { class: 'badge', style: b.err ? 'background:var(--err)' : '', 'aria-label': `${b.n} ${b.label}` }, b.n) : null);
   S.navOpen ||= {};
   const draw = (items, depth) => items.map((it) => {
-    if (Array.isArray(it)) { const [href, label] = it; return h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, h('span', { style: 'flex:1' }, label), badgeEl(badgeFor(href))); }
+    if (Array.isArray(it)) { const [href, label] = it; return h('a', { class: 'nav-item', href, 'aria-current': isActive(href) ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, navIco(NAV_ICON[href]), h('span', { style: 'flex:1' }, label), badgeEl(badgeFor(href))); }
     const has = navLeaves(it.items).some(([href]) => isActive(href)), open = S.navOpen[it.id] === undefined ? has : S.navOpen[it.id];
     return h('div', { class: `nav-group nested${has ? ' has-active' : ''}${open ? '' : ' closed'}` },
-      h('button', { 'aria-expanded': String(open), onclick: () => { S.navOpen[it.id] = !open; renderSide(); } }, h('span', { style: 'flex:1' }, it.label), open ? null : badgeEl(sumBadge(it.items)), h('span', { class: 'chev' }, svg(ICON.chev, 14, 2))),
+      h('button', { 'aria-expanded': String(open), onclick: () => { S.navOpen[it.id] = !open; renderSide(); } }, navIco(FOLDER_ICON[it.id] || P.folder), h('span', { style: 'flex:1' }, it.label), open ? null : badgeEl(sumBadge(it.items)), h('span', { class: 'chev' }, svg(ICON.chev, 14, 2))),
       h('div', { class: 'sub' }, draw(it.items, depth + 1)));
   });
   const groups = NAV.map((g) => {
@@ -185,7 +210,6 @@ function renderSide() {
   side.replaceChildren(
     h('div', { class: 'brand' }, (() => { const s = svg('M12 2.5l8 4.6v9.8l-8 4.6-8-4.6V7.1z', 28); s.style.color = 'var(--accent)'; return s; })(), 'Apiary'),
     newBtn, S.onboardingDone && S.account && !S.account.exists ? h('a', { href: '#/signin', class: 'signin-nag', role: 'alert' }, 'No sign-in yet. Anyone who can reach this page can use it. Create one now') : null, h('nav', { 'aria-label': 'Main', style: 'display:flex;flex-direction:column;gap:6px' }, h('a', { class: 'nav-item nav-top', href: '#/home', 'aria-current': isActive('#/home') ? 'page' : null, onclick: () => $('#side').classList.remove('open') }, svg(ICON.home), h('span', { style: 'flex:1' }, 'Dashboard')), groups),
-    h('a', { class: 'nav-item doclink', href: DOCS_URL, target: '_blank', rel: 'noopener noreferrer', 'aria-label': 'Documentation (opens in a new tab)' }, h('span', { style: 'flex:1' }, 'Documentation'), h('span', { 'aria-hidden': 'true' }, '↗')),
     workingBox(), h('div', { class: 'conn-box' }, h('h4', {}, 'Connections'), conn.length ? conn : h('small', { class: 'hint' }, 'Checking…')),
     h('div', { class: 'side-foot' }, h('a', { class: 'coffee', href: 'https://www.buymeacoffee.com/aber28', target: '_blank', rel: 'noopener noreferrer', title: 'Apiary is free. If it saves you time, a coffee helps keep it going.' }, h('span', { 'aria-hidden': 'true' }, '☕'), ' Buy me a coffee')));
 }
@@ -196,10 +220,24 @@ function navPath(items, label, trail = []) {
   }
   return null;
 }
+// Where a heading or folder in the trail leads: its first page.
+function crumbHref(label) {
+  const find = (items) => {
+    for (const it of items) {
+      if (Array.isArray(it)) { if (it[1] === label) return it[0]; }
+      else { if (it.label === label) return navLeaves(it.items)[0]?.[0]; const r = find(it.items); if (r) return r; }
+    }
+    return null;
+  };
+  return find(NAV);
+}
 function crumbs(...parts) {
   const last = parts[parts.length - 1];
   if (parts.length === 2) for (const g of NAV) { const r = navPath(g.items, last, [g.label]); if (r) { parts = r; break; } }   // the trail follows the menu
-  $('#crumbs').replaceChildren(...parts.flatMap((p, i) => [i ? h('span', {}, '/') : null, i === parts.length - 1 ? h('b', {}, p) : h('span', {}, p)]).filter(Boolean));
+  $('#crumbs').replaceChildren(...parts.flatMap((p, i) => {
+    const href = i === parts.length - 1 ? null : crumbHref(p);
+    return [i ? h('span', { class: 'sep', 'aria-hidden': 'true' }, '/') : null, i === parts.length - 1 ? h('b', { 'aria-current': 'page' }, p) : href ? h('a', { class: 'crumb', href }, p) : h('span', {}, p)];
+  }).filter(Boolean));
 }
 
 // ---------- routing ----------
@@ -2023,18 +2061,21 @@ function pageActivity() {
 
 // ---------- machine usage in the top bar ----------
 const GB = (b) => (b >= 1073741824 ? (b >= 10737418240 ? Math.round(b / 1073741824) : Math.round(b / 107374182.4) / 10) + ' GB' : b >= 1048576 ? Math.round(b / 104857.6) / 10 + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB');
+let sysBusy = false;
+const RATE = (b) => (b >= 1048576 ? (b >= 10485760 ? Math.round(b / 1048576) : Math.round(b / 104857.6) / 10) + ' MB/s' : b >= 1024 ? Math.round(b / 1024) + ' KB/s' : b + ' B/s');
 async function pollSystem() {
   const el = document.getElementById('sys');
-  if (!el || document.hidden) return;
+  if (!el || document.hidden || sysBusy) return;
+  sysBusy = true;
   try {
     const s = await api('/api/system');
     const part = (label, pct, tip) => h('span', { class: pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : '', title: tip }, label + ' ', h('b', {}, pct == null ? '–' : pct + '%'));
     const mp = s.mem ? Math.round(100 * s.mem.used / s.mem.total) : null, dp = s.disk ? Math.round(100 * s.disk.used / s.disk.total) : null;
-    el.replaceChildren(part('CPU', s.cpu, `${s.cores} cores. Load ${s.load.join(' / ')} (1, 5, 15 minutes)`), part('RAM', mp, s.mem ? `${GB(s.mem.used)} used of ${GB(s.mem.total)}` : ''), part('Disk', dp, s.disk ? `${GB(s.disk.total - s.disk.used)} free of ${GB(s.disk.total)}` : ''));
+    el.replaceChildren(part('CPU', s.cpu, `${s.cores} cores. Load ${s.load.join(' / ')} (1, 5, 15 minutes)`), part('RAM', mp, s.mem ? `${GB(s.mem.used)} used of ${GB(s.mem.total)}` : ''), part('Disk', dp, s.disk ? `${GB(s.disk.total - s.disk.used)} free of ${GB(s.disk.total)}` : ''), s.net ? h('span', { title: 'Network speed right now: received (down) and sent (up), across the real network cards' }, '↓ ', h('b', {}, RATE(s.net.rx)), ' ↑ ', h('b', {}, RATE(s.net.tx))) : null);
     el.hidden = false;
-  } catch { /* the page is about to redirect or the server is restarting */ }
+  } catch { /* the page is about to redirect or the server is restarting */ } finally { sysBusy = false; }
 }
-setInterval(pollSystem, 5000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
+setInterval(pollSystem, 1000); document.addEventListener('visibilitychange', pollSystem); pollSystem();
 
 // ---------- backups ----------
 async function pageTelegram() {

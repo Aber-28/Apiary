@@ -9,7 +9,7 @@ The menu on the left is a tree. Each heading opens to show its pages and, where 
 - **Security:** Sign-in, Secrets vault, Approval rules, Access and safety, Audit log.
 - **Settings:** Appearance, Telegram alerts, Setup guide. Folder *Data*: Backups, Export and import, Factory reset. Folder *System*: Updates, Startup, Folders.
 
-The page you are on is always opened for you, and the path above the page (for example Settings / Data / Backups) follows the menu. The search box at the top (Ctrl+K) finds things without using the menu.
+Every page and folder has a small icon. The page you are on is always opened for you, and the path above the page (for example Settings / Data / Backups) follows the menu. **Each part of the path is a link**: click Settings or Data to go to the first page in it. The **Documentation** link is at the top of the window. The search box at the top (Ctrl+K) finds things without using the menu.
 
 ## On a phone
 

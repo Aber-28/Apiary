@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.65.0
+
+- New: icons on every page and folder in the menu.
+- New: the CPU, RAM and disk readout at the top refreshes every second, and now shows network speed (download and upload) too.
+- Changed: the duplicate Documentation link is gone from the menu; the one at the top stays.
+- Changed: the path above each page is clickable. Click a heading or folder (for example Settings or System) to go to its first page.
+
 ## 0.64.3
 
 - Changed: the licence now says plainly that Apiary is used at your own risk and that the author is not liable for damage, data loss or costs. It also spells out that running Apiary for yourself or inside your own company is fine, and only offering it to outside people as a service needs permission.

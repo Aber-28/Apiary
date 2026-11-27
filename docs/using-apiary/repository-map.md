@@ -20,7 +20,7 @@ The drop-down at the top has two groups:
 
 For a repository on this computer you can run Git from the page, and watch every line of output as it happens in a panel under the title.
 
-**Buttons:** Status, Fetch, Pull, Push, Save changes (asks for a short message), New branch, Set changes aside, Bring them back, and Tag.
+**Where the buttons are:** only on the circles. The circle marked **You are here** carries the actions for your working copy: Status, Fetch, Pull, Push, Save changes (asks for a short message), Set changes aside, Bring them back, and Tag. If the branch you are on is not drawn on the map, an **Actions for where you are** button appears above it.
 
 **Click the map:** each circle on the map is a button, and a small menu opens right under the circle you click, with options that match what makes sense for that circle right now. For a **version** on the main line: look at it, start a branch from it, tag it, see what changed in it, or merge it into the branch you are on (the latest one offers **Pull** only if GitHub has news and **Push** only if you have saves to send). For a **branch**: go to it, merge it, branch from it, push or pull it when you are on it, or delete it when it is already merged. While you have unsaved changes, switching and merging are not offered, and the page says why.
 

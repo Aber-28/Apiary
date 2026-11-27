@@ -1951,10 +1951,17 @@ function pageRepoMap() {
           if (d.ahead > 0) acts.push(go(`Push ${d.ahead} save${d.ahead > 1 ? 's' : ''}`, 'push', {}, `Send ${d.ahead} save${d.ahead > 1 ? 's' : ''} on "${cur}" to GitHub?`)); else why.push('Nothing to push: GitHub already has everything.');
         }
       };
+      const localActs = () => {   // everything about the copy you are standing in lives on the "you are here" circle
+        acts.push(go('Status', 'status', {}), go('Fetch', 'fetch', {}));
+        if (dirty) { acts.push(h('button', { class: 'btn', onclick: () => { const m = (prompt('Describe what changed, in one short line') || '').trim(); if (m) runGit('commit', { message: m }); } }, 'Save changes'), go('Set changes aside', 'stash', {}));
+        } else acts.push(go('Bring set-aside changes back', 'stashpop', {}, 'Bring back the changes you set aside? If they clash with new changes, Git will tell you.'));
+        if (!dirty) acts.push(h('button', { class: 'btn', onclick: () => { const n = (prompt('Name for the tag, for example v1.0') || '').trim(); if (n) runGit('tag', { name: n }); } }, 'Tag this save'));
+      };
       let title, sub, isHere = false;
       if (p.kind === 'version') {
         title = p.label; sub = `${p.subject} (${p.name}) · ${when(p.when)}${p.tip ? ` · the latest save on ${base}` : ''}`; isHere = p.here;
         if (p.tip && d.current === base) sync();
+        if (p.here) localActs();
         if (dirty) why.push('Going to a version or merging is not offered while you have unsaved changes. Save them or set them aside first.');
         else {
           if (!p.here) acts.push(go('Look at this version', 'checkout', { hash: p.name }, null, 'Moves your files back to this point without changing any branch'));
@@ -1966,7 +1973,7 @@ function pageRepoMap() {
       } else {
         const b = bs.find((x) => x.name === p.name), isCur = p.name === cur;
         title = p.name; isHere = isCur; sub = b && !b.isDefault ? `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'} compared with ${base}` : (p.kind === 'merged' ? `Already merged into ${base}` : '');
-        if (isCur) sync();
+        if (isCur) { sync(); localActs(); }
         if (!isCur) {
           if (dirty) why.push('Switching or merging is not offered while you have unsaved changes. Save them or set them aside first.');
           else {
@@ -1983,23 +1990,13 @@ function pageRepoMap() {
         h('button', { class: 'btn', 'aria-label': 'Close', onclick: () => { picked = null; drawMap(); drawPop(); } }, '✕')),
         h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts), why.length ? h('small', { class: 'hint', style: 'display:block;margin-top:8px' }, why.join(' ')) : null);
     };
-    const ask = (label, action, a, tip) => h('button', { class: 'btn', title: tip, onclick: a }, label);
-    const bar2 = h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('small', { class: 'hint' }, 'Everything runs on this computer and you can watch it below. Apiary never force-pushes, rewrites history or deletes anything on GitHub.'),
-      h('div', { class: 'kv rm-actions', style: 'flex-wrap:wrap;margin-top:8px' },
-        ask('Status', 'status', () => runGit('status'), 'See what has changed'), ask('Fetch', 'fetch', () => runGit('fetch'), 'Look for new work on GitHub without changing anything'),
-        ask('Pull', 'pull', () => runGit('pull'), 'Bring in new work from GitHub (only when it is a simple catch-up)'), ask('Push', 'push', () => runGit('push', {}, `Send "${cur}" to GitHub?`), 'Send your saved work to GitHub'),
-        ask('Save changes', 'commit', () => { const m = (prompt('Describe what changed, in one short line') || '').trim(); if (m) runGit('commit', { message: m }); }, 'Save everything that changed as one new save'),
-        ask('New branch', 'newbranch', () => { const n = (prompt('Name for the new branch') || '').trim(); if (n) runGit('newbranch', { name: n }); }, 'Start a separate line of work from here'),
-        ask('Set changes aside', 'stash', () => runGit('stash'), 'Hide unsaved changes for now'), ask('Bring them back', 'stashpop', () => runGit('stashpop', {}, 'Bring back the changes you set aside? If they clash with new changes, Git will tell you.'), 'Restore the changes you set aside'),
-        ask('Tag', 'tag', () => { const n = (prompt('Name for the tag, for example v1.0') || '').trim(); if (n) runGit('tag', { name: n }); }, 'Put a label on this save')),
-      );
     queueMicrotask(() => { drawPop(); if (d.map) drawMap(); });
     return h('div', {},
-      here(d), bar2,
+      here(d),
       d.projects?.length || d.uses?.length ? h('p', { class: 'hint' }, [...(d.projects?.length ? ['Used by: ' + d.projects.join(', ')] : []), ...(d.uses || [])].join('. ')) : null,
       (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
         (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
-      d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet. Click a circle and its buttons appear right on it.'), mapBox,
+      d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet. Click a circle and its buttons appear right on it.'), (d.map && !(d.map.here?.onMain || (d.map.branches || []).some((b) => b.current || b.name === d.map.here?.branch)) && cur) ? h('button', { class: 'btn', style: 'margin-top:8px', onclick: () => { picked = { kind: 'branch', name: cur, at: { x: 200, y: 120, w: 700 } }; drawMap(); drawPop(); } }, 'Actions for where you are') : null, mapBox,
         d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: `, d.map.merged.map((n) => h('button', { class: 'chip', onclick: () => { picked = { kind: 'merged', name: n, at: { x: 160, y: 40, w: 700 } }; drawMap(); drawPop(); }, title: 'Click for actions' }, n)), d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : '', '.') : null,
         d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,
       h('details', { class: 'card', style: 'margin-top:12px' }, h('summary', {}, h('b', {}, 'Detailed history')), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),

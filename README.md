@@ -4,6 +4,8 @@ Claude Code and Codex, a lead agent that hires specialists, and you approving th
 
 <p align="center"><img src="docs/images/demo.gif" alt="A short tour of Apiary" width="800"></p>
 
+> **Use at your own risk.** Agents can run commands and change files. You are responsible for how you use Apiary; the author is not liable for any damage, data loss or costs. See [Licence](#licence).
+
 ## Keeps going when an AI runs out
 
 Claude and Codex each have a usage limit, and neither can read the other's conversation. Apiary bridges that gap: agents keep one short **handover note** per task, and if one AI hits its limit the other reads the note and **continues the same job** instead of starting over. It works both ways, costs a few lines per turn, and can be switched off. [How it works and its limits](docs/using-apiary/continuity.md)
@@ -71,7 +73,9 @@ Full guides (install, using Apiary, reference, security) are in [`docs/`](docs/R
 
 ## Licence
 
-**Free to use, source visible, not open source.** You can use Apiary for yourself or your team and read the code. You may not copy it, sell it or build a competing product from it. See [LICENSE](LICENSE) for the exact terms.
+**Free to use, source visible, not open source.** You can use Apiary for yourself or your team and read the code. Running it inside your own company or team is fine; offering it to outside people as a service is not. You may not copy it, sell it or build a competing product from it.
+
+> **Use at your own risk.** Apiary lets AI agents run commands and change files. You are responsible for how you use it and for what the agents do. The author is not liable for any damage, data loss or costs. Back up what matters and review what agents ask to do. See [LICENSE](LICENSE) for the exact terms.
 
 ## Development
 

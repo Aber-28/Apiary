@@ -8,6 +8,8 @@ Apiary is a local web app for Linux. You tell one **lead agent** what you want d
 
 It was built to be easy: no accounts, no API keys required, no config files. If you can already run `claude` or `codex` in a terminal, Apiary can use them.
 
+> **Use at your own risk.** Agents can run commands and change files. You are responsible for how you use Apiary and for what the agents do. The author is not liable for any damage, data loss or costs. See [Licence and limits](reference/limits.md).
+
 ## What you get
 
 * **Chat first.** One conversation per project. Sub-agents appear as a team tree beside it.

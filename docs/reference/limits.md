@@ -49,6 +49,8 @@ Entries are kept for **30 days**, then removed.
 
 ## Safety
 
+* **You use Apiary at your own risk.** Agents can run commands and change files, and you are responsible for what they do. The author is not liable for damage, data loss, downtime or costs. The full wording is in the [LICENSE](https://github.com/Aber-28/Apiary/blob/main/LICENSE).
+* **Hosting:** running Apiary for yourself, your household or your own team, even on your own servers, is fine. Offering it to people outside your organisation as a service needs the author's written permission.
 * Safe mode lets an agent edit files only in its own folder. **Full access lets it do anything your Linux user can do.** Use a dedicated low-privilege user.
 * Apiary listens on your own computer only, unless you change that. Keep it off the open internet.
 * The security audit was a self-check by the AI that helped write the code. It is **not** an independent penetration test.

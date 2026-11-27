@@ -2,6 +2,17 @@ Apiary Use License
 
 Copyright (c) 2026 Malcolm. All rights reserved.
 
+USE AT YOUR OWN RISK
+Apiary lets AI agents run commands, read and change files, and use your
+accounts and tools on your behalf. You alone are responsible for how you
+install, configure and use it, and for everything the agents do. The
+copyright holder is not and will never be responsible or liable for any
+damage, data loss, downtime, security incident, cost, charge or other harm
+of any kind, direct or indirect, arising from the software or its use. Back
+up what matters, review what the agents ask to do, and use it only if you
+accept this. Where the law does not allow a liability to be excluded, it is
+limited to the smallest extent the law permits.
+
 You may download, install and run Apiary, free of charge, on any number of
 your own computers, for personal or business use.
 
@@ -9,9 +20,13 @@ Without written permission from the copyright holder you may NOT:
 
 1. modify, adapt, translate or create derivative works of the software or
    its documentation;
-2. publish, redistribute, sublicense, sell, rent or host the software or any
-   copy of it, modified or not. Receiving the software and its updates from
-   the official repository is allowed;
+2. publish, redistribute, sublicense, sell or rent the software or any copy
+   of it, modified or not, or host it, meaning run it to offer access to
+   people outside your own organisation (for example as a service, a paid
+   or free product, or a shared public instance). Receiving the software
+   and its updates from the official repository is allowed. Running it for
+   yourself, your household, or your own company or team, including on
+   servers you control, is allowed and is not hosting;
 3. remove or change copyright, license or attribution notices;
 4. use the source code to build a product or service that competes with it.
 

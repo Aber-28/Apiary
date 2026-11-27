@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.64.3
+
+- Changed: the licence now says plainly that Apiary is used at your own risk and that the author is not liable for damage, data loss or costs. It also spells out that running Apiary for yourself or inside your own company is fine, and only offering it to outside people as a service needs permission.
+- Changed: the same warning is at the top of the README and documentation home, and on the Limits page.
+
 ## 0.64.2
 
 - Changed: the Repository map is now called **GitHub repository map** and lives under Connections, GitHub (next to the GitHub connection) instead of Agents, Knowledge.

@@ -1815,10 +1815,12 @@ function pageRepos() {
 }
 
 // The simple map: the main branch as a row of recent saves, "you are here", and unmerged branches hanging off it.
-function simpleMap(m, remote, when) {
+function simpleMap(m, remote, when, onPick, picked) {
   const GAP = 124, LEFT = 56, MAINY = 128, ns = 'http://www.w3.org/2000/svg', n = m.line.length;
   const el = (tag, attrs = {}, text) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text !== undefined) e.textContent = text; return e; };
   const cut = (t, k) => { t = String(t || ''); return t.length > k ? t.slice(0, k - 1) + '…' : t; };
+  const clickable = (node, label, fn) => { node.setAttribute('class', node.getAttribute('class') + ' rm2-click'); node.setAttribute('tabindex', '0'); node.setAttribute('role', 'button'); node.setAttribute('aria-label', label);
+    node.addEventListener('click', fn); node.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } }); node.append(Object.assign(document.createElementNS(ns, 'title'), { textContent: label })); };
   const X = (i) => LEFT + i * GAP, mainEnd = X(n - 1) + 70;
   const rows = m.branches, rowY = (i) => MAINY + 150 + i * 104;
   const statusX = (b) => Math.max(X(b.index) + GAP + 300, mainEnd - 250);
@@ -1832,7 +1834,9 @@ function simpleMap(m, remote, when) {
   };
   m.line.forEach((c, i) => {
     const last = i === n - 1, hereMain = !!m.here?.onMain && last;
-    svg.append(el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: hereMain ? 'rm2-node rm2-on' : 'rm2-node' }));
+    const mn = el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: (hereMain ? 'rm2-node rm2-on' : 'rm2-node') + (picked?.kind === 'main' && last ? ' rm2-sel' : '') });
+    if (onPick) clickable(mn, `${m.base}: show Git actions`, () => onPick({ kind: 'main', name: m.base }));
+    svg.append(mn);
     svg.append(el('text', { x: X(i), y: MAINY + 46, 'text-anchor': 'middle', class: last ? 'rm2-lab rm2-labb' : 'rm2-lab' }, cut(c.tag || c.subject, 16)),
       el('text', { x: X(i), y: MAINY + 64, 'text-anchor': 'middle', class: 'rm2-sub' }, when(c.date)));
     svg.append(Object.assign(el('title'), { textContent: `${c.subject} (${c.hash})` }));
@@ -1841,7 +1845,9 @@ function simpleMap(m, remote, when) {
   rows.forEach((b, i) => {
     const xf = X(b.index), xb = xf + GAP - 8, y = rowY(i), sx = statusX(b);
     svg.append(el('path', { d: `M${xf} ${MAINY + 74} C${xf} ${y} ${xf + 24} ${y} ${xb - 17} ${y}`, class: 'rm2-br' }));
-    svg.append(el('circle', { cx: xb, cy: y, r: 15, class: 'rm2-bnode' }));
+    const bn = el('circle', { cx: xb, cy: y, r: 15, class: 'rm2-bnode' + (picked?.name === b.name ? ' rm2-sel' : '') });
+    if (onPick) clickable(bn, `${b.name}: show Git actions`, () => onPick({ kind: 'branch', name: b.name, local: b.local !== false }));
+    svg.append(bn);
     svg.append(el('text', { x: xb + 26, y: y - 12, class: 'rm2-bname' }, cut(b.name, 36)), el('text', { x: xb + 26, y: y + 30, class: 'rm2-sub' }, cut(`${b.subject} · ${when(b.date)}`, 48)));
     svg.append(el('line', { x1: xb + 17, y1: y, x2: sx - 8, y2: y, class: 'rm2-br' }));
     svg.append(el('rect', { x: sx, y: y - 24, width: 236, height: 48, rx: 9, class: 'rm2-warn' }), el('text', { x: sx + 118, y: y - 3, 'text-anchor': 'middle', class: 'rm2-warnt' }, 'Not merged into main yet'),
@@ -1885,6 +1891,16 @@ function pageRepoMap() {
   crumbs('Connections', 'GitHub repository map');
   let choice = sessionStorageGet('repomap') || '', list = { local: [], remote: [], remoteError: '' };
   const body = h('div', {});
+  let picked = null, op = '';
+  const outLines = h('pre', { class: 'gitout mono', tabindex: '0', 'aria-live': 'polite' }), outTitle = h('b', {}, ''), outState = h('span', { class: 'pill work' }, '');
+  const outBox = h('div', { class: 'card', hidden: true, style: 'margin-top:12px' }, h('div', { class: 'kv', style: 'justify-content:space-between' }, outTitle, outState), outLines);
+  const addLine = (t, cls) => { outLines.append(h('span', { class: cls || '' }, t + '\n')); outLines.scrollTop = outLines.scrollHeight; };
+  const runGit = async (action, args = {}, ask) => {
+    if (ask && !confirm(ask)) return;
+    op = 'o' + Math.random().toString(36).slice(2, 10); outLines.replaceChildren(); outBox.hidden = false; outTitle.textContent = 'Working…'; outState.className = 'pill work'; outState.textContent = 'Running';
+    try { await api('/api/repomap/local/action', 'POST', { id: choice, opId: op, action, args, confirmed: true }); }
+    catch (e) { outTitle.textContent = 'Not done'; outState.className = 'pill err'; outState.textContent = 'Stopped'; addLine(e.message, 'err'); toast(e.message, true); }
+  };
   const when = (d) => (d ? ago(new Date(d).getTime()) : '');
   const sel = h('select', { 'aria-label': 'Choose a repository', onchange: (e) => { choice = e.target.value; sessionStorageSet('repomap', choice); show(); } });
   const bar = (b) => {
@@ -1903,8 +1919,37 @@ function pageRepoMap() {
   const local = (d) => {
     if (d.error) return h('div', { class: 'card empty' }, d.error);
     const bs = d.branches || [];
+    const pop = h('div', { class: 'rm-pop', 'aria-live': 'polite' });
+    const mapBox = h('div', { class: 'rm-scroll' });
+    const cur = d.current || '';
+    const drawMap = () => { mapBox.replaceChildren(simpleMap(d.map, d.remote, when, (p) => { picked = (picked && picked.name === p.name && picked.kind === p.kind) ? null : p; drawMap(); drawPop(); }, picked)); };
+    const drawPop = () => {
+      if (!picked) { pop.replaceChildren(h('small', { class: 'hint' }, 'Click a circle on the map to see what you can do with it.')); return; }
+      const p = picked, b = bs.find((x) => x.name === p.name);
+      const go = (label, action, args, ask) => h('button', { class: 'btn', onclick: () => runGit(action, args, ask) }, label);
+      const acts = [];
+      if (p.name !== cur) acts.push(go('Go to this branch', 'switch', { branch: p.name }));
+      if (p.name !== cur && p.kind !== 'merged') acts.push(go(`Merge into ${cur || 'current'}`, 'merge', { branch: p.name }, `Merge "${p.name}" into "${cur}"?\n\nApiary will change "${cur}" on this computer. If the two clash, Apiary undoes the merge and nothing is changed.`));
+      acts.push(h('button', { class: 'btn', onclick: () => { const n = (prompt(`Name for the new branch, starting from "${p.name}"`) || '').trim(); if (n) runGit('newbranch', { name: n, from: p.name }); } }, 'New branch from here'));
+      if (p.name === cur) acts.push(go('Pull', 'pull', {}), go('Push', 'push', {}, `Send "${cur}" to GitHub?`));
+      if (p.kind === 'merged' && p.name !== cur) acts.push(go('Delete (already merged)', 'deletebranch', { branch: p.name }, `Delete the merged branch "${p.name}" from this computer? Its work is already in ${d.map?.base || 'main'}.`));
+      pop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' },
+        h('div', {}, h('b', {}, p.name), ' ', p.name === cur ? h('span', { class: 'pill ok', style: 'height:18px;font-size:10px' }, 'you are here') : null, b && !b.isDefault ? h('small', { class: 'hint', style: 'display:block' }, `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'} compared with main`) : null),
+        h('button', { class: 'btn', 'aria-label': 'Close', onclick: () => { picked = null; drawMap(); drawPop(); } }, '✕')), h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts));
+    };
+    const ask = (label, action, a, tip) => h('button', { class: 'btn', title: tip, onclick: a }, label);
+    const bar2 = h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('small', { class: 'hint' }, 'Everything runs on this computer and you can watch it below. Apiary never force-pushes, rewrites history or deletes anything on GitHub.'),
+      h('div', { class: 'kv rm-actions', style: 'flex-wrap:wrap;margin-top:8px' },
+        ask('Status', 'status', () => runGit('status'), 'See what has changed'), ask('Fetch', 'fetch', () => runGit('fetch'), 'Look for new work on GitHub without changing anything'),
+        ask('Pull', 'pull', () => runGit('pull'), 'Bring in new work from GitHub (only when it is a simple catch-up)'), ask('Push', 'push', () => runGit('push', {}, `Send "${cur}" to GitHub?`), 'Send your saved work to GitHub'),
+        ask('Save changes', 'commit', () => { const m = (prompt('Describe what changed, in one short line') || '').trim(); if (m) runGit('commit', { message: m }); }, 'Save everything that changed as one new save'),
+        ask('New branch', 'newbranch', () => { const n = (prompt('Name for the new branch') || '').trim(); if (n) runGit('newbranch', { name: n }); }, 'Start a separate line of work from here'),
+        ask('Set changes aside', 'stash', () => runGit('stash'), 'Hide unsaved changes for now'), ask('Bring them back', 'stashpop', () => runGit('stashpop', {}, 'Bring back the changes you set aside? If they clash with new changes, Git will tell you.'), 'Restore the changes you set aside'),
+        ask('Tag', 'tag', () => { const n = (prompt('Name for the tag, for example v1.0') || '').trim(); if (n) runGit('tag', { name: n }); }, 'Put a label on this save')),
+      h('div', { style: 'margin-top:10px' }, pop));
+    queueMicrotask(() => { drawPop(); if (d.map) drawMap(); });
     return h('div', {},
-      here(d),
+      here(d), bar2,
       d.projects?.length || d.uses?.length ? h('p', { class: 'hint' }, [...(d.projects?.length ? ['Used by: ' + d.projects.join(', ')] : []), ...(d.uses || [])].join('. ')) : null,
       h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Branches (${bs.length})`), h('small', { class: 'hint' }, 'The bar shows how far each branch has moved from the main branch: grey = behind, coloured = ahead.'),
         h('div', { class: 'rm-branches' }, bs.map((b) => h('div', { class: 'rm-row' + (b.current ? ' cur' : '') },
@@ -1915,15 +1960,15 @@ function pageRepoMap() {
           h('small', { class: 'hint mono' }, b.isDefault ? '' : `+${b.aheadDefault ?? '?'} / −${b.behindDefault ?? '?'}`))))),
       (d.worktrees || []).length > 1 ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Checkouts on this computer'), h('small', { class: 'hint' }, 'Each agent works in its own copy, so your own files are never touched.'),
         (d.worktrees || []).map((w) => h('div', { class: 'rm-commit' }, h('b', {}, w.branch || '?'), w.agentProject ? h('span', { class: 'pill work', style: 'height:18px;font-size:10px' }, w.agentProject) : null, h('small', { class: 'hint mono', style: 'word-break:break-all' }, w.path)))) : null,
-      d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, d.remote, when)),
-        d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
+      d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet. Click a circle to merge, switch, branch or tidy up.'), mapBox,
+        d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: `, d.map.merged.map((n) => h('button', { class: 'chip', onclick: () => { picked = { kind: 'merged', name: n }; drawMap(); drawPop(); window.scrollTo?.({ top: 0 }); }, title: 'Click for actions' }, n)), d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : '', '.') : null,
         d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
       h('details', { class: 'card', style: 'margin-top:12px' }, h('summary', {}, h('b', {}, 'Detailed history')), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
         (d.graph?.rows || []).length ? h('div', { class: 'rm-scroll' }, branchGraph(d.graph, when)) : h('p', { class: 'hint' }, 'No saves yet.')));
   };
   const remote = (d) => h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
-      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
+      h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet. Git buttons work on repositories on this computer: add it under Repositories first.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
     d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, true, when)),
       d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
       d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are in the list below.`) : null) : null,
@@ -1951,10 +1996,16 @@ function pageRepoMap() {
     view.replaceChildren(h('div', { class: 'head-row' }, h('div', {}, h('h1', {}, 'GitHub repository map'), h('p', { class: 'sub-title' }, 'Pick a repository to see where you are: the branch, what is waiting to be saved, who is working on which branch, and what is open on GitHub. Nothing here changes anything.')),
       h('div', { class: 'kv' }, sel, h('button', { class: 'btn', onclick: guard(async () => { await draw(); }) }, 'Refresh'))),
       list.remoteError ? h('p', { class: 'hint' }, 'GitHub repositories are not shown: ' + list.remoteError) : null,
-      !list.local.length && !list.remote.length ? h('div', { class: 'card empty' }, 'No repositories yet. Add one under Repositories, or connect GitHub under Connections.') : null, body);
+      !list.local.length && !list.remote.length ? h('div', { class: 'card empty' }, 'No repositories yet. Add one under Repositories, or connect GitHub under Connections.') : null, outBox, body);
     await show();
   };
-  draw().catch((e) => toast(e.message, true)); page = { shows: () => true };
+  draw().catch((e) => toast(e.message, true));
+  page = { shows: () => true, update: (ev) => {
+    if (ev.type !== 'gitop' || ev.opId !== op) return;
+    if (ev.start) outTitle.textContent = ev.title;
+    else if (ev.line !== undefined) addLine(ev.line, ev.cmd ? 'cmd' : ev.note ? 'note' : '');
+    else if (ev.done) { outTitle.textContent = ev.summary; outState.className = 'pill ' + (ev.ok ? 'ok' : 'err'); outState.textContent = ev.ok ? 'Done' : 'Did not work'; picked = null; show(); }
+  } };
 }
 function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch { return null; } }
 function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch { /* private mode */ } }

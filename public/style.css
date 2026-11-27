@@ -484,3 +484,12 @@ dialog.news button.primary,dialog.news .btn.primary{margin-top:6px}
 /* Small number boxes that sit inside a sentence */
 input.num-inline{width:84px;min-height:38px;padding:6px 8px;text-align:center;display:inline-block;margin:0 6px;vertical-align:middle;font-variant-numeric:tabular-nums}
 .warnbox{margin:10px 0 0;padding:10px 12px;border-radius:10px;background:rgba(217,164,65,.16);border:1px solid #d9a441;font-size:13px;line-height:1.5}
+
+/* Git actions on the repository map */
+.rm2-click{cursor:pointer}.rm2-click:hover,.rm2-click:focus-visible{stroke-width:4;outline:none}
+.rm2-sel{stroke:var(--accent,#3b82f6);stroke-width:5}
+.rm-pop{min-height:34px;padding:10px 12px;border:1px dashed var(--border,#ccc);border-radius:10px}
+.gitout{max-height:260px;overflow:auto;margin:8px 0 0;padding:10px 12px;border-radius:8px;background:#0f172a;color:#e2e8f0;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.gitout .cmd{color:#7dd3fc}.gitout .note{color:#fcd34d}.gitout .err{color:#fca5a5}
+.chip{border:1px solid var(--border,#ccc);background:transparent;color:inherit;border-radius:999px;padding:1px 9px;margin:0 3px 3px 0;font:inherit;font-size:12px;cursor:pointer}
+.chip:hover{background:var(--hover,rgba(127,127,127,.15))}

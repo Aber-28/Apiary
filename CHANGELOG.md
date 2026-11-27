@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.68.0
+
+- Changed: Telegram alerts are sent once. An approval is announced a single time, and an identical alert is not repeated for 24 hours (it was 10 minutes).
+- New: Git buttons on the GitHub repository map. Fetch, pull, push, save changes, new branch, set changes aside, tag, and merge, switch or delete a branch, either from the buttons or by clicking a circle on the map. Every line of output shows live as it runs. Risky actions ask first, a clashing merge is undone automatically, and force-push, hard reset and rebase are deliberately left out.
+
 ## 0.67.0
 
 - New: model suggestions in both directions. Apiary suggests a stronger model (or the other AI) when an agent keeps struggling, and a cheaper model when a strong one has been doing easy work. Each suggestion is a one-click request under Approvals.

@@ -8,6 +8,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { CONNECTION_IDS } from './connections.js';
 import { github } from './github.js';
 import { localRepos, inspect as inspectRepo } from './repomap.js';
+import { perform as gitPerform } from './gitops.js';
 import { providers } from './providers.js';
 import * as service from './service.js';
 import { fileURLToPath } from 'node:url';
@@ -388,6 +389,18 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
         const found = localRepos(engine).find((x) => x.id === url.searchParams.get('id'));
         if (!found) return json(res, 404, { error: 'That repository is not known to Apiary' });
         return json(res, 200, { name: found.name, uses: found.uses, projects: found.projects, ...(await inspectRepo(engine, found.path)) });
+      }
+      if (req.method === 'POST' && url.pathname === '/api/repomap/local/action') {
+        const b = await readBody(req);
+        const found = localRepos(engine).find((x) => x.id === b.id);
+        if (!found) return json(res, 404, { error: 'That repository is not known to Apiary' });
+        const opId = /^[\w-]{6,40}$/.test(String(b.opId || '')) ? b.opId : 'op' + Date.now();
+        try {
+          const out = await gitPerform({ dir: found.path, repoId: found.id, opId, action: String(b.action || ''), args: b.args || {}, confirmed: b.confirmed === true,
+            authArgs: authArgs(engine.connections.get('github') || {}), emit: (ev) => engine.emit('event', ev) });
+          engine.audit.add('commit', { actor: 'You', action: `ran a Git action: ${out.title}`, detail: `${found.name}: ${out.ok ? 'done' : 'did not work'}` });
+          return json(res, 200, out);
+        } catch (e) { return json(res, e.status || 500, { error: e.message }); }
       }
       if (req.method === 'GET' && url.pathname === '/api/repomap/github') {
         return json(res, 200, await github.overview(engine.connections.get('github'), url.searchParams.get('repo') || ''));

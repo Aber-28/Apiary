@@ -17,13 +17,30 @@ The drop-down at the top has two groups:
 * **Map:** the first picture. The main branch is a line of its latest saves, labelled with version tags where there are some. A green **You are here** marker shows where your checkout is. Branches that have **not been merged into main yet** hang off the line on dashed curves, from the save they started at, with a note saying how many saves ahead they are and whether they exist only on this computer. Branches already merged are listed in one line underneath.
 * **Detailed history** (collapsed): the full drawing for people who want every save.  a drawing of the latest saves, newest at the top, in coloured lanes. A line leaving a save sideways is a **branch splitting off** (an arrow shows where it goes). A line joining a **ringed** save is a **merge**, marked with a "merge" tag. Branch and tag names sit beside the save they point to. Up to 60 saves and 10 lanes are drawn.
 
+## Git actions
+
+For a repository on this computer you can run Git from the page, and watch every line of output as it happens in a panel under the title.
+
+**Buttons:** Status, Fetch, Pull, Push, Save changes (asks for a short message), New branch, Set changes aside, Bring them back, and Tag.
+
+**Click the map:** each circle on the map is a button. Click a branch to **go to it**, **merge it into** the branch you are on, or **start a new branch from it**. Click the main line for the same options, plus Pull and Push when you are on it. Branches already merged show as small chips under the map; click one to **delete** it.
+
+**Safety:**
+* Push, Merge, Save changes, Bring back and Delete ask you to confirm first.
+* **Pull** only does a simple catch-up. If the branches have drifted apart, nothing is changed and Apiary tells you.
+* If a merge hits a clash, Apiary **undoes the merge** straight away and tells you, so nothing is left half-done.
+* Delete only removes branches that are already merged, so unmerged work is never lost.
+* Only one action runs on a repository at a time.
+* Not included on purpose: force-push, hard reset, rebase, and deleting branches on GitHub. Use a terminal for those.
+* Every action is recorded in the activity log. Pushes use your GitHub connection when you have one.
+
 ## For a repository on GitHub
 
-The same **Map** as above (without a "You are here" marker, because the repository is not on this computer), then the main branch, when it was last pushed, **open pull requests** (from and into which branch, who, and a link), all branches (protected ones are marked) and the latest saves.
+The same **Map** as above (without a "You are here" marker, because the repository is not on this computer; the Git buttons need a copy on this computer, so add it under Repositories first), then the main branch, when it was last pushed, **open pull requests** (from and into which branch, who, and a link), all branches (protected ones are marked) and the latest saves.
 
 ## Good to know
 
-* It is **read-only**. Nothing on this page changes a repository, a branch or GitHub.
+* For repositories on this computer, nothing changes until **you** press a Git button (see below). The page never changes anything by itself. For repositories only on GitHub the page is read-only.
 * Passwords or tokens inside a repository's web address are hidden.
 * The list of GitHub repositories shows up to 100, the most recently pushed first.
 * Branch bars and "ahead/behind" are measured against the main branch. If a repository has no main branch yet, they are left out.

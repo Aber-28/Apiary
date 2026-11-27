@@ -2574,7 +2574,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   T.st.longTaskMinutes = 1; engine.emit('task-done', { agent: ag, ms: 30000, failed: false }); engine.emit('task-done', { agent: ag, ms: 5 * 60000, failed: false });
   await until2(() => fake.sent.some((m) => /Finished.*after 5 min/.test(m.text))); assert.equal(fake.sent.filter((m) => /Finished/.test(m.text)).length, 1, 'short tasks are not announced');
   // dedupe and settings
-  const n = fake.sent.length; await T.alert('same text'); await T.alert('same text'); assert.equal(fake.sent.length, n + 1, 'repeats within 10 minutes are dropped');
+  const n = fake.sent.length; await T.alert('same text'); await T.alert('same text'); assert.equal(fake.sent.length, n + 1, 'a repeat is never sent again');
   await call('/api/telegram', 'PUT', { events: { approvals: false } });
   const n2 = fake.sent.length; engine._ask(ag, { kind: 'plan', title: 'Another one' }).catch(() => {}); await new Promise((r) => setTimeout(r, 300)); assert.equal(fake.sent.length, n2, 'switched off');
   assert.equal((await call('/api/telegram', 'PUT', { longTaskMinutes: 0 })).status, 400);
@@ -2869,6 +2869,34 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const one = (await call('/api/repomap/local?id=' + list.local.find((r) => r.name === 'Map example').id)).body; assert.equal(one.current, 'release/1.2'); assert.equal(one.name, 'Map example');
   assert.equal((await call('/api/repomap/local?id=../../etc')).status, 404, 'only repositories Apiary knows can be looked at');
   assert.notEqual((await call('/api/repomap/github?repo=bad name')).status, 200, 'a bad GitHub name is refused');
+  {
+    // Git actions from the map: a fixed list, confirmation for the risky ones, live output, conflicts undone.
+    const rid = list.local.find((r) => r.name === 'Map example').id, dir = list.local.find((r) => r.name === 'Map example').path;
+    const gg = (...a) => execFileSync('git', ['-c', 'user.email=a@example.com', '-c', 'user.name=T', ...a], { cwd: dir, stdio: 'pipe' }).toString();
+    const lines = []; const onEv = (ev) => { if (ev.type === 'gitop') lines.push(ev); }; engine.on('event', onEv);
+    const act = (action, args = {}, confirmed = true, opId = 'op' + Math.random().toString(36).slice(2, 9)) => call('/api/repomap/local/action', 'POST', { id: rid, action, args, confirmed, opId });
+    assert.equal((await call('/api/repomap/local/action', 'POST', { id: 'l99', action: 'status' })).status, 404, 'only known repositories');
+    assert.equal((await act('rebase')).status, 400, 'actions outside the list are refused');
+    assert.equal((await act('merge', { branch: 'main' }, false)).status, 400, 'risky actions need confirmation');
+    assert.equal((await act('switch', { branch: '--help' })).status, 400, 'a branch name cannot look like an option');
+    assert.equal((await act('switch', { branch: 'a..b' })).status, 400);
+    const st = await act('status'); assert.equal(st.status, 200); assert.ok(lines.some((l) => l.start) && lines.some((l) => l.line && l.cmd) && lines.some((l) => l.done && l.ok), 'output is sent live');
+    assert.equal((await act('switch', { branch: 'main' })).body.ok, true);
+    assert.equal((await act('newbranch', { name: 'feat/a' })).body.ok, true); assert.equal(gg('rev-parse', '--abbrev-ref', 'HEAD').trim(), 'feat/a');
+    writeFileSync(path.join(dir, 'c.txt'), 'one\n'); assert.equal((await act('commit', { message: 'add c' })).body.ok, true);
+    assert.equal((await act('switch', { branch: 'main' })).body.ok, true);
+    assert.equal((await act('merge', { branch: 'feat/a' })).body.ok, true); assert.ok(gg('log', '--oneline').includes('add c'), 'the merge brought the work in');
+    assert.equal((await act('deletebranch', { branch: 'feat/a' })).body.ok, true, 'a merged branch can be deleted');
+    // conflict: the merge is undone and nothing is left half-done
+    assert.equal((await act('newbranch', { name: 'x1' })).body.ok, true); writeFileSync(path.join(dir, 'c.txt'), 'x1\n'); await act('commit', { message: 'x1' });
+    await act('switch', { branch: 'main' }); await act('newbranch', { name: 'x2' }); writeFileSync(path.join(dir, 'c.txt'), 'x2\n'); await act('commit', { message: 'x2' });
+    const bad = await act('merge', { branch: 'x1' }); assert.equal(bad.body.ok, false, 'a clash is reported'); assert.equal(gg('status', '--porcelain').trim(), '', 'the merge was undone');
+    assert.ok(lines.some((l) => l.note), 'a plain-words note explains the stop');
+    assert.equal((await act('deletebranch', { branch: 'x1' })).body.ok, false, 'an unmerged branch is never deleted');
+    assert.equal((await act('deletebranch', { branch: 'x2' })).status, 400, 'the branch you are on cannot be deleted');
+    engine.off('event', onEv);
+    const src2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(src2.includes('/api/repomap/local/action') && src2.includes('rm2-click') && src2.includes("type !== 'gitop'"), 'the map has clickable nodes and live output');
+  }
   const { layoutGraph } = await import('../src/repomap.js');
   const cm = (h, ...p) => ({ hash: h, parents: p, refs: [] });
   const lg = layoutGraph([cm('m', 'a', 'f'), cm('f', 'b'), cm('a', 'b'), cm('b')]);

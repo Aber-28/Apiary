@@ -2904,7 +2904,7 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
     assert.equal((await act('deletebranch', { branch: 'x1' })).body.ok, false, 'an unmerged branch is never deleted');
     assert.equal((await act('deletebranch', { branch: 'x2' })).status, 400, 'the branch you are on cannot be deleted');
     engine.off('event', onEv);
-    const src2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(src2.includes('/api/repomap/local/action') && src2.includes('rm2-click') && src2.includes("kind: 'version'") && src2.includes("type !== 'gitop'"), 'the map has clickable nodes and live output');
+    const src2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(src2.includes('/api/repomap/local/action') && src2.includes('rm2-click') && src2.includes("kind: 'version'") && src2.includes('function rmHover') && src2.includes('const rdraw') && !/createElementNS\(ns, 'title'\)/.test(src2.slice(src2.indexOf('function simpleMap'), src2.indexOf('function branchGraph'))) && src2.includes("type !== 'gitop'"), 'the map has clickable nodes and live output');
   }
   const { layoutGraph } = await import('../src/repomap.js');
   const cm = (h, ...p) => ({ hash: h, parents: p, refs: [] });

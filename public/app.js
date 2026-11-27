@@ -1815,12 +1815,21 @@ function pageRepos() {
 }
 
 // The simple map: the main branch as a row of recent saves, "you are here", and unmerged branches hanging off it.
+// A tooltip that shows at once (the browser's own one waits a second or two).
+let rmTipEl = null;
+function rmTipHide() { if (rmTipEl) rmTipEl.style.display = 'none'; }
+function rmHover(node, text) {
+  const place = (e) => { rmTipEl.style.left = Math.max(8, Math.min(e.clientX + 14, innerWidth - 340)) + 'px'; rmTipEl.style.top = (e.clientY + 18) + 'px'; };
+  node.addEventListener('pointerenter', (e) => { rmTipEl ||= document.body.appendChild(h('div', { class: 'rm-tip', role: 'tooltip' })); rmTipEl.textContent = text; rmTipEl.style.display = 'block'; place(e); });
+  node.addEventListener('pointermove', (e) => { if (rmTipEl) place(e); });
+  node.addEventListener('pointerleave', rmTipHide);
+}
 function simpleMap(m, remote, when, onPick, picked) {
   const GAP = 124, LEFT = 56, MAINY = 128, ns = 'http://www.w3.org/2000/svg', n = m.line.length;
   const el = (tag, attrs = {}, text) => { const e = document.createElementNS(ns, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text !== undefined) e.textContent = text; return e; };
   const cut = (t, k) => { t = String(t || ''); return t.length > k ? t.slice(0, k - 1) + '…' : t; };
   const clickable = (node, label, fn, tip) => { node.setAttribute('class', node.getAttribute('class') + ' rm2-click'); node.setAttribute('tabindex', '0'); node.setAttribute('role', 'button'); node.setAttribute('aria-label', label);
-    node.addEventListener('click', fn); node.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } }); node.append(Object.assign(document.createElementNS(ns, 'title'), { textContent: tip || label })); };
+    node.addEventListener('click', () => { rmTipHide(); fn(); }); node.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn(); } }); rmHover(node, tip || label); };
   const X = (i) => LEFT + i * GAP, mainEnd = X(n - 1) + 70;
   const rows = m.branches, rowY = (i) => MAINY + 150 + i * 104;
   const statusX = (b) => Math.max(X(b.index) + GAP + 300, mainEnd - 250);
@@ -1837,17 +1846,20 @@ function simpleMap(m, remote, when, onPick, picked) {
   m.line.forEach((c, i) => {
     const last = i === n - 1, hereMain = !!m.here?.onMain && last;
     const mn = el('circle', { cx: X(i), cy: MAINY, r: hereMain ? 17 : 15, class: (hereMain ? 'rm2-node rm2-on' : 'rm2-node') + (picked?.kind === 'version' && picked.hash === c.hash ? ' rm2-sel' : '') });
-    if (onPick) clickable(mn, `${verLabel(c)}: show what you can do`, () => onPick({ kind: 'version', hash: c.hash, name: c.hash, label: verLabel(c), subject: c.subject, tip: last, here: hereMain, when: c.date }), tipOf(c));
-    if (!onPick) mn.append(Object.assign(document.createElementNS(ns, 'title'), { textContent: tipOf(c) }));
+    const pickV = () => onPick({ kind: 'version', hash: c.hash, name: c.hash, label: verLabel(c), subject: c.subject, tip: last, here: hereMain, when: c.date });
+    if (onPick) clickable(mn, `${verLabel(c)}: show what you can do`, pickV, tipOf(c));
+    if (!onPick) rmHover(mn, tipOf(c));
     svg.append(mn);
-    svg.append(el('text', { x: X(i), y: MAINY + 46, 'text-anchor': 'middle', class: last ? 'rm2-lab rm2-labb' : 'rm2-lab' }, verLabel(c)));
+    const lab = el('text', { x: X(i), y: MAINY + 46, 'text-anchor': 'middle', class: last ? 'rm2-lab rm2-labb' : 'rm2-lab' }, verLabel(c));
+    if (onPick) clickable(lab, `${verLabel(c)}: show what you can do`, pickV, tipOf(c)); else rmHover(lab, tipOf(c));
+    svg.append(lab);
   });
   if (m.here?.onMain) callout(X(n - 1), 36, 'You are here', MAINY - 22);
   rows.forEach((b, i) => {
     const xf = X(b.index), xb = xf + GAP - 8, y = rowY(i), sx = statusX(b);
     svg.append(el('path', { d: `M${xf} ${MAINY + 74} C${xf} ${y} ${xf + 24} ${y} ${xb - 17} ${y}`, class: 'rm2-br' }));
     const bn = el('circle', { cx: xb, cy: y, r: 15, class: 'rm2-bnode' + (picked?.name === b.name ? ' rm2-sel' : '') });
-    if (onPick) clickable(bn, `${b.name}: show Git actions`, () => onPick({ kind: 'branch', name: b.name, local: b.local !== false }));
+    if (onPick) clickable(bn, `${b.name}: show Git actions`, () => onPick({ kind: 'branch', name: b.name, local: b.local !== false }), `${b.name}\n${b.subject || ''}\n${when(b.date)} · ${b.ahead} save${b.ahead === 1 ? '' : 's'} ahead of ${m.base}`);
     svg.append(bn);
     svg.append(el('text', { x: xb + 26, y: y - 12, class: 'rm2-bname' }, cut(b.name, 36)), el('text', { x: xb + 26, y: y + 30, class: 'rm2-sub' }, cut(`${b.subject} · ${when(b.date)}`, 48)));
     svg.append(el('line', { x1: xb + 17, y1: y, x2: sx - 8, y2: y, class: 'rm2-br' }));
@@ -1992,17 +2004,32 @@ function pageRepoMap() {
       h('details', { class: 'card', style: 'margin-top:12px' }, h('summary', {}, h('b', {}, 'Detailed history')), h('small', { class: 'hint', style: 'display:block;margin-top:6px' }, 'Newest at the top. A line leaving a save sideways is a branch splitting off (arrow shows where it goes). A line joining a ringed save is a merge. Each colour is one lane of work.'),
         (d.graph?.rows || []).length ? h('div', { class: 'rm-scroll' }, branchGraph(d.graph, when)) : h('p', { class: 'hint' }, 'No saves yet.')));
   };
-  const remote = (d) => h('div', {},
+  const copyRepo = guard(async (name) => { toast('Copying…'); await api('/api/repos', 'POST', { source: name }); await draw(); const hit = list.local.find((r) => r.name === name || r.name.endsWith('/' + name.split('/').pop())); if (hit) { choice = hit.id; sessionStorageSet('repomap', choice); sel.value = choice; await show(); } toast('Copied. The Git buttons are ready.'); });
+  const remote = (d) => {
+    let rp = null;
+    const rpop = h('div', { class: 'rm-pop', 'aria-live': 'polite' }), rbox = h('div', { class: 'rm-scroll' });
+    const rdraw = () => rbox.replaceChildren(simpleMap(d.map, true, when, (p) => { rp = (rp && rp.kind === p.kind && rp.name === p.name) ? null : p; rdraw(); rshow(); }, rp));
+    const rshow = () => {
+      if (!rp) { rpop.replaceChildren(h('small', { class: 'hint' }, 'Click a circle for details and what you can do with it.')); return; }
+      const t = rp.kind === 'version' ? rp.label : rp.name, sub = rp.kind === 'version' ? `${rp.subject} (${rp.name}) · ${when(rp.when)}` : '';
+      rpop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' }, h('div', {}, h('b', {}, t), sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
+        h('button', { class: 'btn', 'aria-label': 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
+        h('p', { class: 'hint', style: 'margin:8px 0' }, 'Pull, push, merge, branch, tag and the rest work on a copy on this computer. Copy it once and this circle gets its own buttons.'),
+        h('button', { class: 'btn primary', onclick: () => copyRepo(d.name) }, 'Copy to this computer'));
+    };
+    queueMicrotask(() => { rshow(); if (d.map) rdraw(); });
+    return h('div', {},
     h('div', { class: 'card rm-here' }, h('small', { class: 'hint' }, d.private ? 'On GitHub (private)' : 'On GitHub'), h('h2', { style: 'margin:2px 0' }, d.name), d.description ? h('p', { class: 'hint', style: 'margin:0' }, d.description) : null,
       h('p', { class: 'hint', style: 'margin:6px 0 0' }, `Main branch: ${d.defaultBranch}. Last push ${when(d.pushedAt)}. Not copied to this computer yet.`), d.url ? h('a', { href: d.url, target: '_blank', rel: 'noopener' }, 'Open on GitHub') : null),
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Git actions'), h('p', { class: 'hint', style: 'margin:4px 0 8px' }, 'Fetch, pull, push, save changes, merge and branch work on a copy on this computer. Copy it once and the buttons appear here.'),
-      h('button', { class: 'btn primary', onclick: guard(async () => { toast('Copying…'); await api('/api/repos', 'POST', { source: d.name }); const keep = d.name; await draw(); const hit = list.local.find((r) => r.name === keep || r.name.endsWith('/' + keep.split('/').pop())); if (hit) { choice = hit.id; sessionStorageSet('repomap', choice); sel.value = choice; await show(); } toast('Copied. The Git buttons are ready.'); }) }, 'Copy to this computer')),
-    d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { class: 'rm-scroll' }, simpleMap(d.map, true, when)),
+      h('button', { class: 'btn primary', onclick: () => copyRepo(d.name) }, 'Copy to this computer')),
+    d.map ? h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, 'Map'), h('small', { class: 'hint' }, 'The main branch is the line. Dashed lines are other branches that have not been merged into it yet.'), h('div', { style: 'margin:10px 0' }, rpop), rbox,
       d.map.mergedCount ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, `Already merged into ${d.map.base}: ${d.map.merged.join(', ')}${d.map.mergedCount > d.map.merged.length ? ` and ${d.map.mergedCount - d.map.merged.length} more` : ''}.`) : null,
       d.map.hiddenBranches ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, `${d.map.hiddenBranches} more unmerged branch${d.map.hiddenBranches > 1 ? 'es' : ''} are not drawn. Use Fetch and the buttons to work with them.`) : null) : null,
     h('div', { class: 'card', style: 'margin-top:12px' }, h('h2', {}, `Open pull requests (${d.pulls.length})`),
       d.pulls.length ? d.pulls.map((p) => h('div', { class: 'rm-commit' }, h('b', {}, `#${p.number}`), h('span', {}, p.title), p.draft ? h('span', { class: 'pill' }, 'draft') : null, h('small', { class: 'hint' }, `${p.from} → ${p.into} · ${p.author} · ${when(p.updatedAt)}`), h('a', { href: p.url, target: '_blank', rel: 'noopener' }, 'Open'))) : h('p', { class: 'hint' }, 'None open.')),
     h('p', { class: 'hint' }, 'Copying it also lets agents work on it (it appears under Repositories).'));
+  };
   const show = async () => {
     if (!choice) { body.replaceChildren(h('div', { class: 'card empty' }, 'Choose a repository above.')); return; }
     body.replaceChildren(h('div', { class: 'card empty' }, 'Looking…'));

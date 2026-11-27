@@ -1,6 +1,6 @@
 {
   "name": "apiary",
-  "version": "0.68.4",
+  "version": "0.68.5",
   "description": "Simple, chat-first orchestrator for Claude Code and Codex agents and sub-agents",
   "type": "module",
   "bin": {

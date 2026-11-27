@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.68.5
+
+- Fixed: circles on the map of a repository that is only on GitHub did nothing when clicked. They now open details and a Copy to this computer button. The version numbers under the circles are clickable too.
+- Fixed: the hover details on the map took a second or two to appear. They now show immediately.
+
 ## 0.68.4
 
 - Fixed: Telegram alerts were sent again after Apiary restarted. Alerts are now remembered on disk. The same alert can come again after 24 hours, once more after a further 48 hours, and then never. An approval is announced only once, even across restarts.

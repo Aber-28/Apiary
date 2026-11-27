@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.69.1
+
+- Changed: the buttons now appear on the circle itself. Click a circle and a small menu opens right below it, pointing at it. On a repository that is only on GitHub the menu no longer repeats the Copy to this computer button.
+
 ## 0.69.0
 
 - New: Troubleshoot now does the checking itself. For a virtual machine or container found on a Proxmox or Docker host, it asks the host what state it is in with the saved login, and starts it again if it had simply stopped (no approval needed for a start). Restarts and reboots still ask once.

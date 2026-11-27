@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.68.4
+
+- Fixed: Telegram alerts were sent again after Apiary restarted. Alerts are now remembered on disk. The same alert can come again after 24 hours, once more after a further 48 hours, and then never. An approval is announced only once, even across restarts.
+
 ## 0.68.3
 
 - Changed: every circle on the repository map is now its own button, and the options that appear match its situation. A version can be looked at, branched from, tagged, inspected or merged into your branch; the latest save offers Pull or Push only when there is something to pull or push; branches offer go to, merge, branch or delete (only if merged). Options that make no sense are left out, with a short reason, and appear right above the map.

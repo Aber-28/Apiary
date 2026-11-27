@@ -2575,6 +2575,10 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   await until2(() => fake.sent.some((m) => /Finished.*after 5 min/.test(m.text))); assert.equal(fake.sent.filter((m) => /Finished/.test(m.text)).length, 1, 'short tasks are not announced');
   // dedupe and settings
   const n = fake.sent.length; await T.alert('same text'); await T.alert('same text'); assert.equal(fake.sent.length, n + 1, 'a repeat is never sent again');
+  { const seen = engine.store.data.telegramSent, k = (await import('node:crypto')).createHash('sha1').update('same text').digest('hex').slice(0, 20); assert.equal(seen[k]?.n, 1, 'the alert is remembered in the saved data, so a restart cannot repeat it');
+    seen[k].t -= 25 * 3600000; await T.alert('same text'); assert.equal(fake.sent.length, n + 2, 'after 24 hours it may come once more'); assert.equal(seen[k].n, 2);
+    seen[k].t -= 47 * 3600000; await T.alert('same text'); assert.equal(fake.sent.length, n + 2, 'the second wait is 48 hours'); seen[k].t -= 2 * 3600000; await T.alert('same text'); assert.equal(fake.sent.length, n + 3); assert.equal(seen[k].n, 3);
+    seen[k].t -= 400 * 86400000; await T.alert('same text'); assert.equal(fake.sent.length, n + 3, 'after that, never again'); }
   await call('/api/telegram', 'PUT', { events: { approvals: false } });
   const n2 = fake.sent.length; engine._ask(ag, { kind: 'plan', title: 'Another one' }).catch(() => {}); await new Promise((r) => setTimeout(r, 300)); assert.equal(fake.sent.length, n2, 'switched off');
   assert.equal((await call('/api/telegram', 'PUT', { longTaskMinutes: 0 })).status, 400);

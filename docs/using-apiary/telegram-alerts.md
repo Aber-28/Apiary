@@ -17,7 +17,7 @@ This first version is **alerts only**. You cannot approve or command anything fr
 - A health warning appears (see [Health](health.md)). Only the title is sent.
 - A long task finishes (you choose how many minutes counts as long, default 10).
 
-Messages are short titles such as "Approval waiting (Website): Review the deployment plan". **Command output, file contents and secrets are never sent**, and anything matching a known secret value is masked. Each alert is sent once: an approval is announced one time however often it changes, and the same message is not repeated for 24 hours, and at most 30 are sent an hour.
+Messages are short titles such as "Approval waiting (Website): Review the deployment plan". **Command output, file contents and secrets are never sent**, and anything matching a known secret value is masked. Alerts are never repeated just because Apiary restarted. An approval is announced once. Any other alert may come again after 24 hours, once more after a further 48 hours, and then never again for that event, and at most 30 are sent an hour.
 
 ## Who the bot answers
 

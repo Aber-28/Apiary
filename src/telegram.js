@@ -54,19 +54,25 @@ export class Telegram {
     if (!r.ok || j.ok === false) throw err(502, `Telegram said: ${j.description || 'HTTP ' + r.status}`);
     return j.result;
   }
-  // Sends one alert to the linked chat. Each alert is sent once: the same message is not repeated for 24 hours. Capped (30 an hour).
+  // Sends one alert to the linked chat. Remembered across restarts: sent, again after 24 h, again after 48 h more, then never. Capped (30 an hour).
   async alert(text, { force = false, markup = null } = {}) {
     const c = this.config;
     if (!force && (!c.enabled || !c.chatId)) return false;
     if (!c.chatId) throw err(409, 'No chat is linked yet.');
     text = clip(this.engine._redact(text), 400);
     const now = Date.now();
+    // Remembered on disk, so a restart never repeats an alert: the same alert may come again after 24 hours,
+    // once more after a further 48 hours, and then never. Test alerts are not counted.
+    const key = crypto.createHash('sha1').update(text).digest('hex').slice(0, 20), seen = (this.engine.store.data.telegramSent ||= {});
     if (!force) {
-      if ((this.recent.get(text) || 0) > now - DAY) return false;
+      const r = seen[key];
+      if (r && now - r.t < (r.n === 1 ? DAY : r.n === 2 ? 2 * DAY : Infinity)) return false;
       this.sent = this.sent.filter((t) => t > now - 3600000); if (this.sent.length >= 30) return false;
+      seen[key] = { n: (r?.n || 0) + 1, t: now };
+      for (const [k, v] of Object.entries(seen)) if (now - v.t > 90 * DAY) delete seen[k];
+      this.engine.store.save();
     }
-    this.recent.set(text, now); this.sent.push(now);
-    for (const [k, t] of this.recent) if (t < now - DAY) this.recent.delete(k);
+    this.sent.push(now);
     try { await this._call('sendMessage', { chat_id: c.chatId, text, disable_web_page_preview: true, ...(markup ? { reply_markup: markup } : {}) }); this.lastOk = now; this.lastError = ''; this.engine.audit?.add('system', { actor: 'Apiary', action: 'sent a Telegram alert', detail: clip(text, 120) }); return true; }
     catch (e) { this.lastError = e.message; return false; }
   }
@@ -74,8 +80,8 @@ export class Telegram {
   _onEvent(ev) {
     if (ev.type !== 'approval' || ev.approval?.status !== 'pending' || !this.config.events.approvals) return;
     const a = ev.approval, p = this.engine.agents[a.agentId];
-    if (this.told.has(a.id)) return;   // one message per approval, however often it is updated
-    this.told.add(a.id); if (this.told.size > 500) this.told.delete(this.told.values().next().value);
+    const seen = (this.engine.store.data.telegramSent ||= {}), tk = 'ap:' + a.id;   // one message per approval, even across restarts
+    if (seen[tk]) return; seen[tk] = { n: 3, t: Date.now() };
     // A new secret's value is typed in Apiary, never in a chat, so that request can only be denied here.
     const secret = a.kind === 'newsecret';
     const row = secret ? [{ text: '⛔ Deny', callback_data: `ap:${a.id}:d` }] : [{ text: '✅ Approve', callback_data: `ap:${a.id}:a` }, { text: '⛔ Deny', callback_data: `ap:${a.id}:d` }];

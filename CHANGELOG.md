@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.69.3
+
+- Fixed: the close (✕) button in the map menu sat in its own big box under the title. It is now a small round button in the top right corner of the menu.
+
 ## 0.69.2
 
 - Changed: the row of Git buttons at the top of the repository map is gone. Every action now lives on the circles. The circle you are on carries Status, Fetch, Pull, Push, Save changes, Set changes aside, Bring back and Tag.

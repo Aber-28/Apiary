@@ -1987,7 +1987,7 @@ function pageRepoMap() {
       }
       pop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' },
         h('div', {}, h('b', {}, title), ' ', isHere ? h('span', { class: 'pill ok', style: 'height:18px;font-size:10px' }, 'you are here') : null, sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
-        h('button', { class: 'btn', 'aria-label': 'Close', onclick: () => { picked = null; drawMap(); drawPop(); } }, '✕')),
+        h('button', { class: 'btn rm-x', title: 'Close', 'aria-label': 'Close', onclick: () => { picked = null; drawMap(); drawPop(); } }, '✕')),
         h('div', { class: 'kv', style: 'margin-top:8px;flex-wrap:wrap' }, acts), why.length ? h('small', { class: 'hint', style: 'display:block;margin-top:8px' }, why.join(' ')) : null);
     };
     queueMicrotask(() => { drawPop(); if (d.map) drawMap(); });
@@ -2012,7 +2012,7 @@ function pageRepoMap() {
       { const at = rp.at || { x: 160, y: 56, w: 700 }; rpop.style.left = Math.max(4, Math.min(at.x - 170, at.w - 350)) + 'px'; rpop.style.top = at.y + 'px'; }
       const t = rp.kind === 'version' ? rp.label : rp.name, sub = rp.kind === 'version' ? `${rp.subject} (${rp.name}) · ${when(rp.when)}` : '';
       rpop.replaceChildren(h('div', { class: 'kv', style: 'justify-content:space-between;flex-wrap:wrap' }, h('div', {}, h('b', {}, t), sub ? h('small', { class: 'hint', style: 'display:block' }, sub) : null),
-        h('button', { class: 'btn', 'aria-label': 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
+        h('button', { class: 'btn rm-x', title: 'Close', 'aria-label': 'Close', onclick: () => { rp = null; rdraw(); rshow(); } }, '✕')),
         h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Pull, push, merge, branch and tag work on a copy on this computer. Use Copy to this computer at the top, and every circle gets its own buttons.'));
     };
     queueMicrotask(() => { rshow(); if (d.map) rdraw(); });

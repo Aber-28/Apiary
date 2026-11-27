@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.67.0
+
+- New: model suggestions in both directions. Apiary suggests a stronger model (or the other AI) when an agent keeps struggling, and a cheaper model when a strong one has been doing easy work. Each suggestion is a one-click request under Approvals.
+- New: optional automatic mode (Settings, Appearance, Model suggestions). It asks you to confirm first, with a clear warning that Apiary may use a more capable model without asking, which uses more tokens, and may also move an agent to a cheaper one. Every change is shown in the chat and the audit log.
+
 ## 0.66.0
 
 - Removed: the path (breadcrumbs) above each page. The menu already shows where you are, and each page has its own title.

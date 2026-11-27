@@ -2918,5 +2918,35 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const live = (await call('/api/system')).body; assert.ok('net' in live && 'cpu' in live);
 }
 
+// ---- model nudges: stronger when it struggles, cheaper when it is easy; automatic mode needs a clear yes ----
+{
+  const mw = await import('../src/modelwatch.js');
+  assert.equal(mw.tierOfModel('claude-opus-5-5'), 'heavy'); assert.equal(mw.tierOfModel('claude-sonnet-5-5'), 'normal'); assert.equal(mw.tierOfModel('claude-haiku-5-5'), 'light'); assert.equal(mw.tierOfModel(''), null);
+  assert.equal(mw.judge({ runs: 'oobobb', model: 'claude-sonnet-5-5' }).direction, 'up'); assert.equal(mw.judge({ runs: 'oooooo', model: 'claude-sonnet-5-5' }), null, 'good work on a balanced model changes nothing');
+  assert.equal(mw.judge({ runs: 'oooooooooo', model: 'claude-opus-5-5', roleTier: 'normal' }).direction, 'down'); assert.equal(mw.judge({ runs: 'oooooooooo', model: 'claude-opus-5-5', roleTier: 'heavy' }), null, 'heavy work stays on the strong model');
+  assert.equal(mw.judge({ runs: 'bbbbbb', model: 'claude-opus-5-5' }).direction, 'other-ai'); assert.equal(mw.judge({ runs: 'bbbbbb', model: 'claude-sonnet-5-5', coolUntil: Date.now() + 1000 }), null, 'one nudge a day at most');
+  const a = Object.values(engine.agents).find((x) => x.kind === 'general') || Object.values(engine.agents)[0];
+  const keep = { provider: a.provider, model: a.model, role: a.role, department: a.department, method: a.method };
+  const pend = () => Object.values(engine.store.data.approvals).filter((r) => r.status === 'pending' && r.kind === 'model' && r.agentId === a.id);
+  const reset = () => { engine.store.data.modelWatch[a.id] = { runs: '', coolUntil: 0 }; for (const r of pend()) engine.decide(r.id, { decision: 'deny' }); };
+  try {
+    a.provider = 'claude'; a.model = 'claude-sonnet-5-5'; a.role = 'Everyday engineer'; a.department = 'engineering'; engine.noteRun(a, true);
+    reset(); for (let i = 0; i < 3; i++) engine.noteRun(a, false);
+    assert.equal(pend().length, 1, 'repeated trouble leads to a suggestion, not a silent change'); assert.equal(a.model, 'claude-sonnet-5-5'); assert.match(pend()[0].title, /stronger model/);
+    engine.decide(pend()[0].id, { decision: 'approve' }); await new Promise((r) => setTimeout(r, 20));
+    assert.equal(tierOf(a.model), 'heavy', 'approving applies the stronger model');
+    reset(); a.model = 'claude-opus-5-5'; for (let i = 0; i < 10; i++) engine.noteRun(a, true);
+    assert.equal(pend().length, 1); assert.match(pend()[0].title, /cheaper model/, 'a long easy run on a strong model suggests saving usage');
+    reset(); a.model = 'claude-sonnet-5-5';
+    assert.throws(() => engine.setSettings({ modelAuto: true }), /confirm/, 'automatic mode needs a clear yes');
+    engine.setSettings({ modelAuto: true, modelAutoAck: true }); assert.equal(engine.modelAutoOn, true);
+    for (let i = 0; i < 3; i++) engine.noteRun(a, false);
+    assert.equal(pend().length, 0, 'automatic mode does not ask'); assert.equal(tierOf(a.model), 'heavy', 'it switched by itself');
+    assert.ok(engine.messages(a.id).some((m) => /switched .* automatically/.test(m.text) && /more or fewer tokens/.test(m.text)), 'the chat says so, including the token warning');
+  } finally { engine.setSettings({ modelAuto: false }); Object.assign(a, keep); engine.store.data.modelWatch[a.id] = { runs: '', coolUntil: 0 }; }
+  function tierOf(m) { return mw.tierOfModel(m); }
+  const appjs = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(appjs.includes('WITHOUT asking you') && appjs.includes('more of your Claude or Codex allowance'), 'the warning is shown before turning it on');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

@@ -35,6 +35,7 @@ Then open <http://127.0.0.1:7777>. A short setup wizard finds your AI logins and
 | **Agents that cooperate** | They message each other, hand work over, and check with the right specialist first. |
 | **Reviewer agents** | A second agent reviews finished work and sends it back until it passes. |
 | **Parallel work** | Several agents work at once; merges are queued and conflicts fix themselves. |
+| **Model suggestions** | Suggests a stronger model (or the other AI) when an agent struggles, and a cheaper one when the work is easy. Optional automatic mode with a clear warning. |
 | **Recovery** | Failed jobs retry, switch between Claude and Codex with a handover note so work continues, and explain themselves in plain words. |
 | **GitHub repository map** | See which repository and branch you are on, who is working where, and what is open on GitHub. |
 | **Infrastructure map** | Connect your servers, test the links and see how everything fits together. |

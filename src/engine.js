@@ -17,6 +17,7 @@ import { providers, which } from './providers.js';
 import { HOME } from './store.js';
 import { Images, KEEP_CHOICES, DEFAULT_DAYS } from './images.js';
 import { Handover } from './handover.js';
+import { judge, modelForTier, tierOfModel, WINDOW, COOL_MS, DECLINED_MS } from './modelwatch.js';
 import { Connections } from './connections.js';
 import { git } from './git.js';
 import { github, validateSource } from './github.js';
@@ -86,6 +87,7 @@ const slug = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 export const STAGES = { building: { label: 'Building', hint: 'Being made for the first time' }, maintenance: { label: 'Maintenance', hint: 'Finished. Fixes, security updates and small changes' }, closed: { label: 'Closed', hint: 'Finished for good. Kept, but not worked on' } };
+const plabel = (id) => PROVIDER_LABEL[id] || id;
 export class Engine extends EventEmitter {
   constructor(store) {
     super();
@@ -241,6 +243,7 @@ export class Engine extends EventEmitter {
     this.audit.add('approval', { actor: 'You', project: this.agents[rec.agentId] ? this._pname(this.agents[rec.agentId]) : '', action: `${rec.status}: ${rec.title}`, detail: `${rec.agentName || ''}${rec.mode === 'always' ? ' (always)' : ''}`.trim() });
     this.emit('event', { type: 'approval', approval: rec });
     this.store.save();
+    if (decision === 'deny' && ['plan', 'merge', 'spawn', 'hire'].includes(rec.kind) && this.agents[rec.agentId]) this.noteRun(this.agents[rec.agentId], false);
     p.resolve({ decision, note: rec.note, only: rec.only, names: rec.names, mode: rec.mode, models: rec.models, phases: rec.kind === 'plan' ? rec.phases : undefined, edited: rec.edited });
     return rec;
   }
@@ -266,9 +269,14 @@ export class Engine extends EventEmitter {
     this.store.data.settings.meeting = m; this.store.save();
     return this.meeting;
   }
+  get modelAutoOn() { return this.store.data.settings.modelAuto === true; }
   get handoverOn() { return this.store.data.settings.handover !== false; }
   get plainEnglish() { return this.store.data.settings.plainEnglish !== false; }
-  setSettings({ defaultProvider, onboardingDone, autoUpdate, updateCheck, meeting, plainEnglish, usageLimits, handover }) {
+  setSettings({ defaultProvider, onboardingDone, autoUpdate, updateCheck, meeting, plainEnglish, usageLimits, handover, modelAuto, modelAutoAck }) {
+    if (modelAuto !== undefined) {
+      if (modelAuto && modelAutoAck !== true) throw httpErr(400, 'Please confirm that you understand Apiary may change models without asking, which can use more or fewer tokens');
+      this.store.data.settings.modelAuto = !!modelAuto; this.audit.add('settings', { actor: 'You', action: `automatic model changes ${modelAuto ? 'turned on' : 'turned off'}`, detail: '' }); this.store.save();
+    }
     if (handover !== undefined) { this.store.data.settings.handover = !!handover; this.store.save(); }
     if (autoUpdate !== undefined) { this.store.data.settings.autoUpdate = !!autoUpdate; if (updateCheck === undefined) this.store.data.settings.updateCheck = autoUpdate ? 'daily' : 'manual'; }
     if (updateCheck !== undefined) { if (!['daily', 'weekly', 'monthly', 'manual'].includes(updateCheck)) throw httpErr(400, 'updateCheck must be daily, weekly, monthly or manual'); this.store.data.settings.updateCheck = updateCheck; this.store.data.settings.autoUpdate = updateCheck !== 'manual'; }
@@ -1440,6 +1448,7 @@ export class Engine extends EventEmitter {
         if (!stuck) { this.health.noteLoginFailure(cur.provider, e.message); if (looksLikeLimit(e.message)) { this.usage.markLimit(cur.provider); this._log(agent, `! ${cur.provider} looks like it has reached its usage limit. See Usage.`); } }
         this._log(agent, `! ${why}`); tried.push(`${label(cur.provider)}: ${this._failWords(kind, label(cur.provider))}`);
         attempt++;
+        if (kind === 'other') this.noteRun(agent, false);
         // 1. a short hiccup (network, overloaded, stuck): try the same AI again
         if ((kind === 'transient' || kind === 'stuck') && retries < maxRetries) {
           retries++;
@@ -1473,6 +1482,7 @@ export class Engine extends EventEmitter {
 
   _usage(agent, res, system, prompt) {
     this.health.noteSuccess(agent.provider);
+    this.noteRun(agent, true);
     const u = res.usage;
     if (u && (u.input || u.output)) this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: u.input, output: u.output });
     else this.usage.record({ agentId: agent.id, name: agent.name, provider: agent.provider, model: agent.model, input: estimateTokens(system, prompt), output: estimateTokens(res.text), estimated: true });
@@ -1644,6 +1654,56 @@ export class Engine extends EventEmitter {
 
   // ----- task board, tickets, model advice -----
   _modelList(provider) { return this.connections.known(provider); }
+  // ----- model nudges: too weak, or stronger than needed -----
+  _watch(agent) { return ((this.store.data.modelWatch ||= {})[agent.id] ||= { runs: '', coolUntil: 0 }); }
+  noteRun(agent, ok) {
+    if (!agent || agent.provider === 'mock') return;
+    const w = this._watch(agent); w.runs = (w.runs + (ok ? 'o' : 'b')).slice(-WINDOW);
+    this.store.save();
+    try { this._modelCheck(agent); } catch { /* a nudge must never break real work */ }
+  }
+  _roleTier(agent) { return suggestModel({ provider: agent.provider, department: agent.department || '', role: agent.role, models: this._modelList(agent.provider) }).tier; }
+  _modelCheck(agent) {
+    const w = this._watch(agent), models = this._modelList(agent.provider);
+    const j = judge({ runs: w.runs, model: agent.model || '', roleTier: this._roleTier(agent), coolUntil: w.coolUntil || 0 });
+    if (!j) return;
+    const alreadyAsking = Object.values(this.store.data.approvals).some((r) => r.status === 'pending' && r.kind === 'model' && r.agentId === agent.id);
+    if (alreadyAsking) return;
+    const name = agent.name, now = agent.model ? agent.model : 'its default model';
+    let change, title, detail;
+    if (j.direction === 'other-ai') {
+      const alt = this._alternate(agent); if (!alt) { w.coolUntil = Date.now() + COOL_MS; this.store.save(); return; }
+      change = { provider: alt }; title = `${name} keeps struggling. Try ${plabel(alt)} instead of ${plabel(agent.provider)}?`;
+      detail = `${name} has had trouble with several recent jobs, even on the most capable ${plabel(agent.provider)} model. A different AI sometimes does better. It would carry on from the handover note, in a fresh conversation.`;
+    } else {
+      const to = modelForTier(j.to, agent.provider, models); if (!to || to === agent.model) { w.coolUntil = Date.now() + COOL_MS; this.store.save(); return; }
+      change = { model: to };
+      if (j.direction === 'up') { title = `${name} may need a stronger model`; detail = `${name} has had trouble with several recent jobs on ${now}. Switching to ${to} usually helps, but it uses more of your ${plabel(agent.provider)} allowance.`; }
+      else { title = `${name} can use a cheaper model`; detail = `${name} has done its last 10 jobs smoothly on ${now}, which is more powerful than this kind of work needs. Switching to ${to} would save usage. If the work gets harder, Apiary will suggest going back up.`; }
+    }
+    w.coolUntil = Date.now() + COOL_MS;
+    if (this.modelAutoOn) { this._applyModelChange(agent, change, title, true); return; }
+    this._ask(agent, { kind: 'model', title, detail: `${detail}\n\nNothing changes unless you approve. You can let Apiary do this automatically under Settings, Appearance.` })
+      .then((r) => { if (r.decision === 'approve') this._applyModelChange(agent, change, title, false); else { this._watch(agent).coolUntil = Date.now() + DECLINED_MS; this.store.save(); } })
+      .catch(() => {});
+  }
+  _applyModelChange(agent, change, title, auto) {
+    const w = this._watch(agent);
+    if (change.provider) this.setProvider(agent.id, change.provider); else this.setModel(agent.id, change.model);
+    w.runs = ''; w.coolUntil = Date.now() + COOL_MS;
+    const what = change.provider ? `${plabel(change.provider)}` : change.model;
+    this._msg(agent, { role: 'system', text: auto ? `Apiary switched ${agent.name} to ${what} automatically (${title.replace(/\?$/, '')}). Automatic model changes are on, so this can use more or fewer tokens. You can turn it off under Settings, Appearance.` : `${agent.name} now uses ${what}.` });
+    this.audit.add('agent', { actor: auto ? 'Apiary (automatic)' : 'You', project: this._pname(agent), action: `${agent.name} now uses ${what}`, detail: title });
+    this.store.save();
+  }
+  setProvider(agentId, provider) {
+    const a = this.agents[agentId];
+    if (!a) throw httpErr(404, 'No such agent');
+    if (!this.available.some((p) => p.id === provider)) throw httpErr(400, 'That AI is not connected');
+    a.provider = provider; a.model = ''; a.sessionId = null; a.method = this.resolveMethod(provider);
+    this.emit('event', { type: 'agent', agent: a }); this.store.save();
+    return a;
+  }
   adviseModel(agentId) {
     const a = this.agents[agentId];
     if (!a) throw httpErr(404, 'No such agent');
@@ -1654,6 +1714,7 @@ export class Engine extends EventEmitter {
     const a = this.agents[agentId];
     if (!a) throw httpErr(404, 'No such agent');
     a.model = String(model || '').trim().slice(0, 80); a.sessionId = null; // a different model starts a fresh conversation
+    this._watch(a).runs = '';
     this.emit('event', { type: 'agent', agent: a }); this.store.save();
     return a;
   }
@@ -2155,6 +2216,7 @@ export class Engine extends EventEmitter {
       const r = parseReview(out);
       this._taskNote(task, `Review round ${round} by ${reviewer.name}: ${r.verdict === 'PASS' ? 'passed' : r.verdict === 'CHANGES' ? 'changes needed' : 'no clear verdict'}${r.notes ? ' - ' + clipText(r.notes, 200) : ''}`);
       lines.push(`Round ${round}, ${reviewer.name}: ${r.verdict === 'PASS' ? 'passed' : r.verdict === 'CHANGES' ? 'changes needed: ' + r.notes : 'no clear verdict, so it was accepted'}`);
+      if (r.verdict === 'CHANGES') this.noteRun(worker, false);
       if (r.verdict !== 'CHANGES') return { text, summary: lines.join('\n'), failed: false, reviewer };
       if (round === 2) return { text, summary: lines.join('\n'), failed: true, notes: r.notes, reviewer };
       this._msg(lead, { role: 'system', text: `${reviewer.name} asked ${worker.name} for changes on ${task.code}: ${clipText(r.notes, 200)}`, agentId: worker.id });

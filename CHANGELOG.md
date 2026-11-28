@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.72.1
+
+- Fixed: Codex agents stopped with "unexpected argument '--sandbox'" when continuing an earlier conversation. The safety setting is now passed in a way Codex accepts for resumed runs.
+
 ## 0.72.0
 
 - New: choose the AI by hand. Every agent now has an "AI" dropdown (Claude or Codex) next to the model dropdown, and it works in both directions. Use it whenever the automatic switch does not happen.

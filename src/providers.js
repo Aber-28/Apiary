@@ -162,10 +162,12 @@ const codexCli = {
     const full = agent.access === 'full';
     // Codex has no system-prompt flag, so the instructions ride along on the first turn.
     const input = agent.sessionId ? prompt : `${system}\n\n---\n\n${prompt}`;
-    const flags = ['--json', '--skip-git-repo-check', '--sandbox', full ? 'danger-full-access' : 'workspace-write'];
+    // `codex exec resume` does not accept --sandbox, so a resumed run sets it as a config override before "exec" instead.
+    const mode = full ? 'danger-full-access' : 'workspace-write';
+    const flags = ['--json', '--skip-git-repo-check', ...(agent.sessionId ? [] : ['--sandbox', mode])];
     if (agent.model) flags.push('-m', agent.model);
     for (const f of images) flags.push('-i', f.path);
-    const args = [...codexSecretFlags(env), ...(agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'])];
+    const args = [...(agent.sessionId ? ['-c', `sandbox_mode="${mode}"`] : []), ...codexSecretFlags(env), ...(agent.sessionId ? ['exec', 'resume', agent.sessionId, ...flags, '-'] : ['exec', ...flags, '-'])];
     let sessionId = agent.sessionId, last = '', err = null, usage = null;
     const { code, stderr } = await runProc('codex', args, {
       cwd: agent.cwd, input, signal, env,

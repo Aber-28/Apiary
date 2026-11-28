@@ -3071,5 +3071,11 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const eng = fsRead(new URL('../src/engine.js', import.meta.url), 'utf8'); assert.ok(!eng.includes("agent.method === 'api' || agent.provider === 'mock') return null"), 'API-key agents can also hand over to the other AI');
 }
 
+// ---- codex resume must not get --sandbox ----
+{
+  const src = fsRead(new URL('../src/providers.js', import.meta.url), 'utf8');
+  assert.ok(src.includes("agent.sessionId ? [] : ['--sandbox', mode]") && src.includes('sandbox_mode='), 'a resumed Codex run sets the sandbox by config, not by --sandbox');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

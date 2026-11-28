@@ -3058,5 +3058,18 @@ node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const ui = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(ui.includes('Morning brief') && ui.includes('/api/brief/run'), 'the dashboard shows the brief');
 }
 
+// ---- manual provider switch + out-of-credits wording ----
+{
+  const { looksLikeLimit } = await import('../src/usage.js');
+  for (const m of ['Credit balance is too low to access the Anthropic API', 'You exceeded your current quota', 'insufficient_quota', 'You have run out of credits', 'You\'ve hit your usage limit', '402 Payment Required']) assert.ok(looksLikeLimit(m), m);
+  assert.ok(!looksLikeLimit('syntax error in file'));
+  const ag = Object.values(engine.agents).find((a) => a.provider === 'mock');
+  assert.equal((await call(`/api/agents/${ag.id}/provider`, 'PUT', { provider: 'nonexistent' })).status, 400, 'an AI that is not connected is refused');
+  assert.equal((await call('/api/agents/nope/provider', 'PUT', { provider: 'mock' })).status, 404);
+  const same = await call(`/api/agents/${ag.id}/provider`, 'PUT', { provider: 'mock' }); assert.equal(same.status, 200);
+  const ui2 = fsRead(new URL('../public/app.js', import.meta.url), 'utf8'); assert.ok(ui2.includes('providerPicker(a)') && ui2.includes('/provider'), 'every agent has an AI dropdown');
+  const eng = fsRead(new URL('../src/engine.js', import.meta.url), 'utf8'); assert.ok(!eng.includes("agent.method === 'api' || agent.provider === 'mock') return null"), 'API-key agents can also hand over to the other AI');
+}
+
 console.log('all e2e checks passed');
 server.close(); process.exit(0);

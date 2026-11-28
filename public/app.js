@@ -479,6 +479,17 @@ function modelPicker(a) {
   return h('label', { class: 'model-box' }, h('small', {}, 'Model'), sel);
 }
 
+function providerPicker(a) {
+  const real = (S.providers || []).filter((p) => p.id !== 'mock');
+  if (!a || a.provider === 'mock' || real.length < 1) return null;
+  const sel = h('select', { class: 'model-pick', 'aria-label': `AI provider for ${a.name}`, title: 'Which AI runs this agent: change it by hand if the automatic switch does not happen', onchange: guard(async (e) => {
+    const v = e.target.value; if (!v || v === a.provider) return;
+    try { await api(`/api/agents/${a.id}/provider`, 'PUT', { provider: v }); toast(`${a.name} now runs on ${PNAME[v] || v}`); } catch (err) { e.target.value = a.provider; throw err; }
+  }) }, real.map((p) => h('option', { value: p.id, selected: p.id === a.provider }, PNAME[p.id] || p.id)));
+  sel.value = a.provider;
+  return h('label', { class: 'model-box' }, h('small', {}, 'AI'), sel);
+}
+
 async function ensureMsgs(id) {
   if (!S.msgs[id]) S.msgs[id] = await api(`/api/agents/${id}/messages`);
   if (!S.logs[id]) S.logs[id] = await api(`/api/agents/${id}/logs`);
@@ -506,6 +517,7 @@ function pageProject(leadId, general = false) {
       pill(a.status),
       h('button', { class: 'btn only-small ch-toggle', 'aria-expanded': String(el.head.classList.contains('more')), onclick: () => { el.head.classList.toggle('more'); drawHead(); } }, el.head.classList.contains('more') ? 'Hide details' : 'Details'),
       h('div', { class: 'ch-more' }, ...[
+      providerPicker(a),
       modelPicker(a),
       !a.parentId && !a.kind ? stagePicker(a) : null,
       !a.parentId && !a.kind ? ownerPicker(a) : null,

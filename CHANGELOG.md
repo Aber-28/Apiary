@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.72.0
+
+- New: choose the AI by hand. Every agent now has an "AI" dropdown (Claude or Codex) next to the model dropdown, and it works in both directions. Use it whenever the automatic switch does not happen.
+- Fixed: agents that use an API key can now hand a step over to the other AI too. Before, they were skipped, which is why running out of Claude credits did not switch to Codex.
+- Fixed: more "out of credits" messages are recognised as a usage limit (low credit balance, insufficient quota, payment required, billing).
+
 ## 0.71.0
 
 - New: the morning brief. A short plain-words summary at the top of the Dashboard of what needs you, what was done in the last day, what Apiary did and how much AI was used. Make one on demand, or turn on a daily one at a time you choose, with an optional short version on Telegram. It is made once a day, even across restarts.

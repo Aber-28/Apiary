@@ -11,6 +11,10 @@ Claude and Codex each have a usage limit. When one runs out in the middle of a j
 
 You see one plain message in the chat ("Claude has reached its usage limit, so Codex takes over this step"). You do not have to copy anything across or explain the task again.
 
+## Switching by hand
+
+Every agent has an **AI** dropdown (Claude or Codex) next to the model dropdown in the chat header. Pick the other AI at any time, for example when you ran out of credits and the automatic switch did not happen. The agent starts a fresh conversation on the new AI with its default model, and a note appears in the chat.
+
 ## The handover note
 
 * **One file per task**, overwritten each time. It never grows, however many requests you make.

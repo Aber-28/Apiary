@@ -335,6 +335,7 @@ export function createServer(engine, { updater = null, restart = () => {}, auth 
       // ----- model advice -----
       if ((r = m(/^\/api\/agents\/([\w-]+)\/model-advice$/)) && req.method === 'GET') return json(res, 200, engine.adviseModel(r[1]));
       if ((r = m(/^\/api\/agents\/([\w-]+)\/model$/)) && req.method === 'PUT') return json(res, 200, engine.setModel(r[1], (await readBody(req)).model));
+      if ((r = m(/^\/api\/agents\/([\w-]+)\/provider$/)) && req.method === 'PUT') return json(res, 200, engine.setProvider(r[1], String((await readBody(req)).provider || '')));
       if (req.method === 'GET' && url.pathname === '/api/approvals') return json(res, 200, engine.approvals());
       if ((r = m(/^\/api\/approvals\/([\w-]+)\/decide$/)) && req.method === 'POST') return json(res, 200, engine.decide(r[1], await readBody(req)));
       if (req.method === 'GET' && url.pathname === '/api/connections') {

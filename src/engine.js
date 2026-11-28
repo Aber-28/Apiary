@@ -1442,8 +1442,8 @@ export class Engine extends EventEmitter {
 
   // ----- retries and recovery: a failed or stuck run is retried, handed to the other AI if that helps, and only then put to you -----
   _alternate(agent) {
-    if (agent.method === 'api' || agent.provider === 'mock') return null;
-    return this.available.find((p) => p.id !== agent.provider && p.id !== 'mock')?.id || null;
+    if (agent.provider === 'mock') return null;
+    return this.available.find((p) => p.id !== agent.provider && p.id !== 'mock' && this.resolveMethod(p.id))?.id || null;
   }
   _failKind(e, stuck) {
     const m = String(e?.message || e);
@@ -1472,7 +1472,7 @@ export class Engine extends EventEmitter {
         const run = cur.provider === agent.provider ? runner : providers.pick(cur);
         const res = await run.run({
           agent: cur, prompt, system: cur.switchedFrom && this.handoverOn ? system + this.handover.switchNote(agent.id, label(cur.switchedFrom)) : system, images, dirs: [...this.repos.dirsFor(agent), ...this._projectDirs(agent), ...(this.handoverOn ? [this.handover.dir] : []), ...(images.length ? [this.images.dir] : [])], signal: rctl.signal, approval: bridge, connectors: this._connectorsFor(agent),
-          history: agent.history || [], conn: agent.method === 'api' ? this.connections.get(agent.provider) : null,
+          history: agent.history || [], conn: cur.method === 'api' ? this.connections.get(cur.provider) : null,
           onText: (text) => { ping(); this.emit('event', { type: 'delta', agentId: agent.id, text: this._redact(text) }); },
           onActivity: (text) => { ping(); this.emit('event', { type: 'activity', agentId: agent.id, text }); },
           onLog: (line) => { ping(); this._log(agent, line); }, env: this._leaseEnv(agent),
@@ -1497,7 +1497,7 @@ export class Engine extends EventEmitter {
         // 2. a limit, a lost login or a repeated failure: hand this step to the other AI
         const alt = !switched ? this._alternate(agent) : null;
         if (alt && (kind !== 'other')) {
-          switched = true; cur = { ...agent, provider: alt, sessionId: null, model: '', switchedFrom: agent.provider, attempt };
+          switched = true; cur = { ...agent, provider: alt, method: this.resolveMethod(alt), sessionId: null, model: '', switchedFrom: agent.provider, attempt };
           this._msg(agent, { role: 'system', text: `${this._failWords(kind, label(agent.provider))}, so ${label(alt)} takes over this step.` });
           this._log(agent, `↪ switching to ${alt} for this step`);
           continue;
@@ -1738,7 +1738,9 @@ export class Engine extends EventEmitter {
     const a = this.agents[agentId];
     if (!a) throw httpErr(404, 'No such agent');
     if (!this.available.some((p) => p.id === provider)) throw httpErr(400, 'That AI is not connected');
-    a.provider = provider; a.model = ''; a.sessionId = null; a.method = this.resolveMethod(provider);
+    const from = a.provider;
+    a.provider = provider; a.model = this.defaultModel(provider) || ''; a.sessionId = null; a.method = this.resolveMethod(provider);
+    if (from !== provider) { this._msg(a, { role: 'system', text: `${a.name} now runs on ${PROVIDER_LABEL[provider] || provider} instead of ${PROVIDER_LABEL[from] || from}. You changed this by hand.` }); this._log(a, `↪ provider changed by hand: ${from} → ${provider}`); }
     this.emit('event', { type: 'agent', agent: a }); this.store.save();
     return a;
   }

@@ -3,7 +3,7 @@
 const pad = (n) => String(n).padStart(2, '0');
 export const dayKey = (t = Date.now()) => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 export const estimateTokens = (...texts) => Math.max(1, Math.round(texts.map((t) => String(t || '')).join('').length / 4));
-const LIMIT_RE = /usage limit|rate.?limit|quota|too many requests|limit (?:reached|exceeded)|\b429\b|credit balance|overloaded/i;
+const LIMIT_RE = /usage limit|rate.?limit|quota|too many requests|limit (?:reached|exceeded)|\b429\b|credit balance|credits?\b.{0,30}(?:low|exhaust|run out|ran out|depleted|insufficient)|out of credits?|insufficient[_ ](?:quota|credits?|funds)|billing|payment required|\b402\b|exceeded your (?:current )?(?:quota|plan)|usage cap|hit your (?:limit|usage)|purchase more|upgrade your plan|overloaded/i;
 export const looksLikeLimit = (text) => LIMIT_RE.test(String(text || ''));
 
 export class Usage {
